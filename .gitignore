@@ -1,0 +1,8 @@
+node/.stack-work
+p2p/.stack-work
+core/.stack-work
+.stack-work/
+stack.yaml.lock
+*.log
+*.pem
+*.csr
