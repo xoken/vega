@@ -1,0 +1,12 @@
+Copyright (c) 2020 Xoken Inc
+
+This work is dual-licensed under the terms of Open BSV License and GNU Affero General Public License v3.0.
+You need to comply to both licenses if you use this work.
+
+`SPDX-License-Identifier: Open BSV License AND AGPL-3.0-or-later`
+
+The terms of each license can be found in the main directory of the Vega source repository:
+
+- Open BSV License: https://github.com/xoken/vega/blob/master/LICENSE-OpenBSV
+- GNU Affero General Public License v3.0: https://github.com/xoken/vega/blob/master/LICENSE-AGPL
+
