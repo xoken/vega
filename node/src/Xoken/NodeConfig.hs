@@ -87,6 +87,8 @@ instance FromJSON NodeType
 data NodeRole
     = TxValidation
     | OutputStore
+    | GetOutpoint
+    | TraceOutputs
     deriving (Eq, Show, Read, Hashable, Generic, Serialise)
 
 instance FromJSON NodeRole

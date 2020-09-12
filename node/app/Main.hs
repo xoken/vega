@@ -227,11 +227,8 @@ runThreads config nodeConf bp2p lg certPaths = do
         --
         -- current node
         let node = vegaNode nodeConf
-        --cnID needed for cluster-balancing later
-        let red =
-                [(_nodeID node, _nodeType node, _nodeRoles node)] ++
-                P.map (\x -> (_nodeID x, _nodeType x, _nodeRoles x)) (vegaCluster nodeConf)
-        let cnId = B64.encode $ C.pack $ show $ sortBy (\(a, _, _) (b, _, _) -> compare a b) red
+            normalizedClstr =
+                sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) ([node] ++ vegaCluster nodeConf)
         --
         -- run vegaCluster
         putStrLn $ (show $ _nodeType node) ++ " | tcp://" ++ (_nodeIPAddr node) ++ ":" ++ (show (_nodePort node))
@@ -244,7 +241,7 @@ runThreads config nodeConf bp2p lg certPaths = do
                     withAsync (startZMQRouter zctxt router) $ \y -> do
                         if (_nodeType node == NC.Master)
                             then do
-                                withAsync (remoteConnSetup zctxt node (vegaCluster nodeConf)) $ \_ -> do
+                                withAsync (initializeWorkers zctxt node normalizedClstr) $ \_ -> do
                                     withAsync setupSeedPeerConnection $ \_ -> do
                                         withAsync runEgressChainSync $ \_ -> do
                                             withAsync runBlockCacheQueue $ \_ -> do

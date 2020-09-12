@@ -66,28 +66,48 @@ import qualified System.ZMQ4 as Z
 import Text.Printf
 import Xoken.NodeConfig as NC
 
-zRPCDispatchTxValidate :: (HasXokenNodeEnv env m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ()
-zRPCDispatchTxValidate tx bhash txindex bheight = do
+zRPCDispatchTxValidate ::
+       (HasXokenNodeEnv env m, MonadIO m)
+    => (Tx -> BlockHash -> Word32 -> Word32 -> m ())
+    -> Tx
+    -> BlockHash
+    -> Word32
+    -> Word32
+    -> m ()
+zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     debug lg $ LG.msg $ "encoded Tx : " ++ (show $ txHash tx)
-    let mid = getTxShortHash' (txHash tx) 32
-        msg = ZRPCRequest mid $ ZValidateTx bhash bheight txindex tx
-    resp <- zRPCRequestDispatcher msg
-    case zrsPayload resp of
-        Right spl -> do
-            case spl of
-                Just pl ->
-                    case pl of
-                        ZValidateTxResp val ->
-                            if val
-                                then return ()
-                                else throw InvalidMessageTypeException
-                Nothing -> throw InvalidMessageTypeException
-        Left er -> do
-            err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
-            let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
-            throw mex
+    let lexKey = getTxShortCode (txHash tx)
+    (wrk, self) <- getWorker lexKey TxValidation
+    if self
+        then do
+            liftIO $ print "zRPCDispatchTxValidate - SELF"
+            res <- LE.try $ selfFunc tx bhash bheight txindex
+            case res of
+                Right () -> return ()
+                Left (e :: SomeException) -> do
+                    err lg $ LG.msg ("[ERROR] processConfTransaction " ++ show e)
+                    throw e
+        else do
+            liftIO $ print $ "zRPCDispatchTxValidate - " ++ show wrk
+            let mid = getTxMidCode (txHash tx)
+                msg = ZRPCRequest mid $ ZValidateTx bhash bheight txindex tx
+            resp <- zRPCRequestDispatcher msg $ fromJust wrk
+            case zrsPayload resp of
+                Right spl -> do
+                    case spl of
+                        Just pl ->
+                            case pl of
+                                ZValidateTxResp val ->
+                                    if val
+                                        then return ()
+                                        else throw InvalidMessageTypeException
+                        Nothing -> throw InvalidMessageTypeException
+                Left er -> do
+                    err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
+                    let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
+                    throw mex
     return ()
 
 zRPCDispatchGetOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> m (Word64)
@@ -96,13 +116,13 @@ zRPCDispatchGetOutpoint outPoint bhash = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    -- let conn = keyValDB $ dbe'
-    let shortHash = (getTxShortHash' (outPointHash $ outPoint)) 20
+    let midCode = getTxMidCode $ outPointHash outPoint
         opIndex = outPointIndex $ outPoint
-        lexKey = (getTxShortHash' (outPointHash outPoint) 32)
-    (wrk, self) <- getWorker lexKey
+        lexKey = getTxShortCode $ outPointHash outPoint
+    (wrk, self) <- getWorker lexKey GetOutpoint
     if self
         then do
+            liftIO $ print "zRPCDispatchGetOutpoint - SELF"
             val <-
                 validateOutpoint
                     (outPoint)
@@ -111,11 +131,13 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     bhash
             return val
         else do
-            let mid = lexKey + (fromIntegral $ outPointIndex outPoint)
+            liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
+            let mid = midCode + 1 + (outPointIndex outPoint)
                 msg =
                     ZRPCRequest mid $
                     ZGetOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash (DS.singleton bhash)
-            resp <- zRPCRequestDispatcher msg
+            resp <- zRPCRequestDispatcher msg $ fromJust wrk
+            liftIO $ print $ "zRPCDispatchGetOutpoint - RESPONSE " ++ show resp
             case zrsPayload resp of
                 Right spl -> do
                     case spl of
@@ -136,17 +158,18 @@ zRPCDispatchTraceOutputs outPoint bhash = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         txZUT = txZtxiUtxoTable bp2pEnv
     -- let conn = keyValDB $ dbe'
-    let shortHash = (getTxShortHash (outPointHash $ outPoint)) 20
+    let shortHash = (getTxShortHash $ outPointHash outPoint) 20
+        midCode = getTxMidCode $ outPointHash outPoint
         opIndex = outPointIndex outPoint
-        lexKey = (getTxShortHash' (outPointHash outPoint) 32)
-    (wrk, self) <- getWorker lexKey
+        lexKey = getTxShortCode $ outPointHash outPoint
+    (wrk, self) <- getWorker lexKey TraceOutputs
     if self
         then do
             traceStaleSpentOutputs txZUT (shortHash, opIndex) bhash
         else do
-            let mid = lexKey + (fromIntegral $ outPointIndex outPoint)
+            let mid = midCode + 1 + (outPointIndex outPoint)
                 msg = ZRPCRequest mid $ ZTraceOutputs (outPointHash outPoint) (outPointIndex outPoint) bhash
-            resp <- zRPCRequestDispatcher msg
+            resp <- zRPCRequestDispatcher msg $ fromJust wrk
             case zrsPayload resp of
                 Right spl -> do
                     case spl of
@@ -159,11 +182,11 @@ zRPCDispatchTraceOutputs outPoint bhash = do
                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
                     throw mex
 
-zRPCRequestDispatcher :: (HasXokenNodeEnv env m, MonadIO m) => ZRPCRequest -> m (ZRPCResponse)
-zRPCRequestDispatcher msg = do
+zRPCRequestDispatcher :: (HasXokenNodeEnv env m, MonadIO m) => ZRPCRequest -> Worker -> m (ZRPCResponse)
+zRPCRequestDispatcher msg wrk = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
-    (wrk, _) <- getWorker $ zrqId msg
+    -- (wrk, _) <- getWorker (zrqId msg) role
     sem <- liftIO $ newEmptyMVar
     debug lg $ LG.msg $ "dispatching to worker : " ++ (show wrk)
     liftIO $ TSH.insert (woMsgMultiplexer wrk) (zrqId msg) sem
@@ -172,18 +195,31 @@ zRPCRequestDispatcher msg = do
     liftIO $ TSH.delete (woMsgMultiplexer wrk) (zrqId msg)
     return resp
 
-getWorker :: (HasXokenNodeEnv env m, MonadIO m) => Word32 -> m (Worker, Bool)
-getWorker shardingLex = do
+getWorker :: (HasXokenNodeEnv env m, MonadIO m) => Word8 -> NodeRole -> m (Maybe Worker, Bool)
+getWorker shardingLex role = do
     bp2pEnv <- getBitcoinP2P
-    workers <- liftIO $ readTVarIO $ workerConns bp2pEnv
+    wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
+    let workers =
+            P.filter
+                (\w -> do
+                     let rl =
+                             case w of
+                                 SelfWorker _ r -> r
+                                 RemoteWorker _ _ _ _ r _ -> r
+                     isJust $ L.findIndex (\x -> x == role) rl)
+                wrkrs
     lg <- getLogger
-    debug lg $ LG.msg $ "workerConns : " ++ (show workers)
-    let nx = fromIntegral $ (shardingLex + (shardingHashSecretSalt $ nodeConfig bp2pEnv))
+    debug lg $ LG.msg $ "Workers : " ++ (show workers) ++ " role: " ++ (show role)
+    let nx = fromIntegral $ ((fromIntegral shardingLex) + (shardingHashSecretSalt $ nodeConfig bp2pEnv))
     let wind = nx `mod` (L.length workers)
-    -- TODO: include self, (1 + x)
-    let wrk = workers !! wind
-    let self = (woID wrk) == (NC._nodeID $ NC.vegaNode $ nodeConfig bp2pEnv)
-    return (wrk, True)
+        wrk = workers !! wind
+    case wrk of
+        SelfWorker _ _ -> do
+            liftIO $ print "^^^"
+            return (Nothing, True)
+        RemoteWorker _ _ _ _ _ _ -> do
+            liftIO $ print ">>>"
+            return (Just wrk, False)
 
 -- pruneStaleSpentOutputs ::
 --        (HasXokenNodeEnv env m, MonadIO m)

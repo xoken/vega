@@ -255,10 +255,15 @@ fetchBestBlock rkdb net = do
             debug lg $ LG.msg $ val "Bestblock is genesis."
             return ((headerHash $ getGenesisHeader net), 0)
 
-getTxShortHash' :: TxHash -> Word8 -> Word32
-getTxShortHash' txh numbits = sum $ map (\(x, p) -> (fromIntegral x) * (16 ^ p)) list
+getTxShortCode :: TxHash -> Word8
+getTxShortCode txh = sum $ map (\(x, p) -> (fromIntegral x) * (16 ^ p)) list
   where
-    list = zip (BSS.unpack $ getTxShortHash txh numbits) [0 ..]
+    list = zip (BSS.unpack $ getTxShortHash txh 2) [0 ..] -- 0xff = 255
+
+getTxMidCode :: TxHash -> Word32
+getTxMidCode txh = sum $ map (\(x, p) -> (fromIntegral x) * (16 ^ p)) list
+  where
+    list = zip (BSS.unpack $ getTxShortHash txh 8) [0 ..] -- 0xffffffff = 4294967295
 
 putDB :: (Store a, Store b, MonadIO m) => R.DB -> a -> b -> m ()
 putDB rkdb k v = R.put rkdb (DS.encode k) (DS.encode v)

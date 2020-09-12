@@ -456,7 +456,6 @@ sortPeers peers = do
 fetchBestSyncedBlock :: (HasLogger m, MonadIO m) => R.DB -> Network -> m ((BlockHash, Int32))
 fetchBestSyncedBlock rkdb net = do
     lg <- getLogger
-    liftIO $ print "FETCHING BEST SYNCED FROM ROCKS DB"
     hash <- liftIO $ R.get rkdb "best_synced_hash"
     height <- liftIO $ R.get rkdb "best_synced_height"
     case (hash, height) of
@@ -472,27 +471,17 @@ fetchBestSyncedBlock rkdb net = do
             debug lg $ LG.msg $ val "Bestblock is genesis."
             return ((headerHash $ getGenesisHeader net), 0)
 
-insertTxIdOutputs ::
-       (HasLogger m, MonadIO m)
-    => R.DB
-    -> Bool
-    -> (Text, Int32)
-    -> Text
-    -> C.ByteString
-    -> Int64
-    -> TSH.TSHashTable String R.ColumnFamily
-    -> m ()
-insertTxIdOutputs conn epoch (txid, outputIndex) address script value cfs = do
+insertTxIdOutputs :: (HasLogger m, MonadIO m) => R.DB -> R.ColumnFamily -> (TxHash, Word32) -> TxOut -> m ()
+insertTxIdOutputs conn cf (txid, outputIndex) txOut = do
     lg <- getLogger
-    cf <- liftIO $ TSH.lookup cfs (getEpochTxCF epoch)
-    res <- liftIO $ try $ putDBCF conn (fromJust cf) (txid, outputIndex) (address, script, value)
+    res <- liftIO $ try $ putDBCF conn cf (txid, outputIndex) txOut
     case res of
         Right _ -> return ()
         Left (e :: SomeException) -> do
-            err lg $ LG.msg $ "Error: INSERTing into " ++ (getEpochTxCF epoch) ++ ": " ++ show e
+            err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
             throw KeyValueDBInsertException
 
-processConfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> BlockHash -> Int -> Int -> m ()
+processConfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ()
 processConfTransaction tx bhash blkht txind = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
@@ -575,13 +564,14 @@ processConfTransaction tx bhash blkht txind = do
     case (txSyncMap) of
         Just ev -> liftIO $ EV.signal $ ev
         Nothing -> return ()
-    trace lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
+    debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
     cf' <- liftIO $ TSH.lookup cf (getEpochTxOutCF epoch)
     case cf' of
         Just cf'' -> do
             mapM_
                 (\(txOut, oind) -> do
-                     putDBCF conn cf'' (txHash tx, oind) (txOut)
+                     debug lg $ LG.msg $ "inserting output " ++ show txOut
+                     insertTxIdOutputs conn cf'' (txHash tx, oind) (txOut)
                      x <- (getDBCF conn cf'' (txHash tx, oind))
                      liftIO $ print (x :: Maybe TxOut))
                 outputs

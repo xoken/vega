@@ -760,7 +760,7 @@ processTxStream (tx, binfo, txIndex) = do
     let bhash = biBlockHash binfo
         bheight = biBlockHeight binfo
     lg <- getLogger
-    res <- LE.try $ processConfTransaction (tx) bhash (fromIntegral bheight) txIndex
+    res <- LE.try $ zRPCDispatchTxValidate processConfTransaction tx bhash bheight (fromIntegral txIndex)
     case res of
         Right () -> return ()
         Left TxIDNotFoundException -> do

@@ -40,6 +40,7 @@ import StmContainers.Map as SM
 import System.Random
 import qualified System.ZMQ4 as Z
 import Text.Read
+import Xoken.NodeConfig
 
 -- | Type alias for a combination of hostname and port.
 type HostPort = (Host, Port)
@@ -163,14 +164,20 @@ data Spending =
         }
     deriving (Show, Eq, Ord, Generic, Serialise)
 
-data Worker =
-    Worker
-        { woID :: String
-        , woIP :: String
-        , woPort :: Word16
-        , woSocket :: Z.Socket Z.Dealer
-        , woMsgMultiplexer :: !(TSH.TSHashTable Word32 (MVar ZRPCResponse))
-        }
+data Worker
+    = SelfWorker
+          { selfID :: String
+          , selfRoles :: [NodeRole]
+          }
+    | RemoteWorker
+          { woID :: String
+          , woIP :: String
+          , woPort :: Word16
+          , woSocket :: Z.Socket Z.Dealer
+          , woRoles :: [NodeRole]
+          , woMsgMultiplexer :: !(TSH.TSHashTable Word32 (MVar ZRPCResponse))
+          }
 
 instance Show Worker where
-    show w = (woID w) ++ "," ++ (woIP w) ++ ":" ++ (show $ woPort w)
+    show (SelfWorker id _) = show ("Self", id)
+    show (RemoteWorker id ip pt _ _ _) = show ("Remote", id, ip, pt)

@@ -39,8 +39,8 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Serialize as S
-import Data.Store
 import qualified Data.Set as DS
+import Data.Store
 import Data.String.Conversions
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -112,17 +112,25 @@ data ZRPCRequestParam
           }
     | ZInvite -- M =>> C | C =>> M | C =>> C
           { cluster :: [Node]
+          , clusterID :: ByteString
           }
     | ZPing -- M =>> C | C =>> M | C =>> C
     deriving (Show, Generic, Eq, Serialise)
 
 deriving instance Store BlockHash
+
 deriving instance Store Tx
+
 deriving instance Store TxIn
+
 deriving instance Store OutPoint
+
 deriving instance Store TxOut
+
 deriving instance Store TxHash
+
 deriving instance Store Hash256
+
 deriving instance Store BlockHeader
 
 data ZRPCError =
