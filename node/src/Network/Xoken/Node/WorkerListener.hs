@@ -77,7 +77,10 @@ workerMessageMultiplexer worker = do
                     ZRPCResponse mid resp -> do
                         sem <- liftIO $ TSH.lookup (woMsgMultiplexer worker) (mid)
                         case sem of
-                            Just s -> liftIO $ putMVar s ms
+                            Just s -> do
+                                debug lg $ LG.msg $ "ZRPCResponse RECEIVED (1), mid: " ++ (show mid)
+                                liftIO $ putMVar s ms
+                                debug lg $ LG.msg $ "ZRPCResponse RECEIVED (2), mid: " ++ (show mid)
                             Nothing -> do
                                 err lg $ LG.msg $ val $ "Error: Mux, unable to match response"
                         return ()
@@ -113,28 +116,42 @@ requestDispatcher zctxt router ident msg = do
                                 return $ successResp mid ZPong
                             ZGetOutpoint txId index bhash pred -> do
                                 liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
-                                sv <-
+                                zz <-
+                                    LE.try $
                                     validateOutpoint
                                         (OutPoint txId index)
                                         (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                         (DS.singleton bhash) -- TODO: needs to contains more predecessors
                                         bhash
-                                return $ successResp mid $ ZGetOutpointResp sv B.empty
+                                case zz of
+                                    Right val -> do
+                                        liftIO $
+                                            print $
+                                            "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
+                                        return $ successResp mid $ ZGetOutpointResp val B.empty
+                                    Left (e :: SomeException) -> do
+                                        return $ errorResp mid (show e)
                             ZTraceOutputs toTxID toIndex toBlockHash -> do
                                 let shortHash = (getTxShortHash toTxID) 20
                                 ret <- traceStaleSpentOutputs (txZtxiUtxoTable bp2pEnv) (shortHash, toIndex) toBlockHash
                                 return $ successResp mid $ ZTraceOutputsResp ret
                             ZValidateTx bhash blkht txind tx -> do
+                                liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
                                 debug lg $ LG.msg $ "decoded ZValidateTx : " ++ (show $ txHash tx)
                                 res <-
                                     LE.try $ processConfTransaction tx bhash (fromIntegral txind) (fromIntegral blkht)
                                 case res of
-                                    Right () -> return $ successResp mid (ZValidateTxResp True)
+                                    Right () -> do
+                                        liftIO $
+                                            print $
+                                            "ZValidateTx - sending RESPONSE " ++ (show $ txHash tx) ++ (show mid)
+                                        return $ successResp mid (ZValidateTxResp True)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
             Left e -> do
                 err lg $ LG.msg $ "Error: deserialise Failed : " ++ (show e)
                 return $ errorResp (0) "Deserialise failed"
     liftIO $ Z.sendMulti router $ ident :| [resp]
+    debug lg $ LG.msg $ val $ "ZRPCResponse SENT "
   where
     successResp mid rsp = LBS.toStrict $ serialise $ ZRPCResponse mid (Right $ Just rsp)
     errorResp mid err = LBS.toStrict $ serialise $ ZRPCResponse mid (Left $ ZRPCError Z_INTERNAL_ERROR (Just err))
@@ -183,6 +200,7 @@ initializeWorkers zctxt myNode clstrNodes = do
                                                          LG.debug lg $
                                                              LG.msg $ ("node accepted Invite with OK: " ++ wrkSock)
                                                          mux <- liftIO $ TSH.new 1
+                                                         ctr <- liftIO $ newMVar 1
                                                          return $
                                                              RemoteWorker
                                                                  (_nodeID w)
@@ -190,7 +208,8 @@ initializeWorkers zctxt myNode clstrNodes = do
                                                                  (_nodePort w)
                                                                  dlr
                                                                  (_nodeRoles w)
-                                                                 (mux)
+                                                                 mux
+                                                                 ctr
                                              Left x -> do
                                                  LG.err lg $ LG.msg $ ("node rejected Invite : " ++ wrkSock)
                                                  throw WorkerConnectionRejectException

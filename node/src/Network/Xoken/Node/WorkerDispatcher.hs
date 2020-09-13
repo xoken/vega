@@ -79,9 +79,9 @@ zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
     lg <- getLogger
     debug lg $ LG.msg $ "encoded Tx : " ++ (show $ txHash tx)
     let lexKey = getTxShortCode (txHash tx)
-    (wrk, self) <- getWorker lexKey TxValidation
-    if self
-        then do
+    worker <- getRemoteWorker lexKey TxValidation
+    case worker of
+        Nothing -> do
             liftIO $ print "zRPCDispatchTxValidate - SELF"
             res <- LE.try $ selfFunc tx bhash bheight txindex
             case res of
@@ -89,11 +89,11 @@ zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
                 Left (e :: SomeException) -> do
                     err lg $ LG.msg ("[ERROR] processConfTransaction " ++ show e)
                     throw e
-        else do
+        Just wrk -> do
             liftIO $ print $ "zRPCDispatchTxValidate - " ++ show wrk
-            let mid = getTxMidCode (txHash tx)
-                msg = ZRPCRequest mid $ ZValidateTx bhash bheight txindex tx
-            resp <- zRPCRequestDispatcher msg $ fromJust wrk
+            let mparam = ZValidateTx bhash bheight txindex tx
+            resp <- zRPCRequestDispatcher mparam wrk
+            liftIO $ print $ "zRPCRequestDispatcher - RESPONSE " ++ show resp
             case zrsPayload resp of
                 Right spl -> do
                     case spl of
@@ -119,9 +119,9 @@ zRPCDispatchGetOutpoint outPoint bhash = do
     let midCode = getTxMidCode $ outPointHash outPoint
         opIndex = outPointIndex $ outPoint
         lexKey = getTxShortCode $ outPointHash outPoint
-    (wrk, self) <- getWorker lexKey GetOutpoint
-    if self
-        then do
+    worker <- getRemoteWorker lexKey GetOutpoint
+    case worker of
+        Nothing -> do
             liftIO $ print "zRPCDispatchGetOutpoint - SELF"
             val <-
                 validateOutpoint
@@ -130,13 +130,10 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     (DS.singleton bhash) -- TODO: needs to contains more predecessors
                     bhash
             return val
-        else do
+        Just wrk -> do
             liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
-            let mid = midCode + 1 + (outPointIndex outPoint)
-                msg =
-                    ZRPCRequest mid $
-                    ZGetOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash (DS.singleton bhash)
-            resp <- zRPCRequestDispatcher msg $ fromJust wrk
+            let mparam = ZGetOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash (DS.singleton bhash)
+            resp <- zRPCRequestDispatcher mparam wrk
             liftIO $ print $ "zRPCDispatchGetOutpoint - RESPONSE " ++ show resp
             case zrsPayload resp of
                 Right spl -> do
@@ -162,14 +159,13 @@ zRPCDispatchTraceOutputs outPoint bhash = do
         midCode = getTxMidCode $ outPointHash outPoint
         opIndex = outPointIndex outPoint
         lexKey = getTxShortCode $ outPointHash outPoint
-    (wrk, self) <- getWorker lexKey TraceOutputs
-    if self
-        then do
+    worker <- getRemoteWorker lexKey TraceOutputs
+    case worker of
+        Nothing -> do
             traceStaleSpentOutputs txZUT (shortHash, opIndex) bhash
-        else do
-            let mid = midCode + 1 + (outPointIndex outPoint)
-                msg = ZRPCRequest mid $ ZTraceOutputs (outPointHash outPoint) (outPointIndex outPoint) bhash
-            resp <- zRPCRequestDispatcher msg $ fromJust wrk
+        Just wrk -> do
+            let mparam = ZTraceOutputs (outPointHash outPoint) (outPointIndex outPoint) bhash
+            resp <- zRPCRequestDispatcher mparam wrk
             case zrsPayload resp of
                 Right spl -> do
                     case spl of
@@ -182,21 +178,33 @@ zRPCDispatchTraceOutputs outPoint bhash = do
                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
                     throw mex
 
-zRPCRequestDispatcher :: (HasXokenNodeEnv env m, MonadIO m) => ZRPCRequest -> Worker -> m (ZRPCResponse)
-zRPCRequestDispatcher msg wrk = do
+zRPCRequestDispatcher :: (HasXokenNodeEnv env m, MonadIO m) => ZRPCRequestParam -> Worker -> m (ZRPCResponse)
+zRPCRequestDispatcher param wrk = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
-    -- (wrk, _) <- getWorker (zrqId msg) role
     sem <- liftIO $ newEmptyMVar
-    debug lg $ LG.msg $ "dispatching to worker : " ++ (show wrk)
-    liftIO $ TSH.insert (woMsgMultiplexer wrk) (zrqId msg) sem
+    mid <-
+        liftIO $
+        modifyMVar
+            (woMsgCounter wrk)
+            (\a -> do
+                 if a == maxBound
+                     then return (1, 1)
+                     else return (a + 1, a + 1))
+    liftIO $ print $ "=====> " ++ (show mid)
+    let msg = ZRPCRequest mid param
+    debug lg $ LG.msg $ "dispatching to worker 1: " ++ (show wrk)
+    liftIO $ TSH.insert (woMsgMultiplexer wrk) mid sem
+    debug lg $ LG.msg $ "dispatching to worker 2: " ++ (show wrk)
     liftIO $ Z.send (woSocket wrk) [] (LC.toStrict $ CBOR.serialise msg)
+    debug lg $ LG.msg $ "dispatching to worker 3: " ++ (show wrk)
     resp <- liftIO $ takeMVar sem
-    liftIO $ TSH.delete (woMsgMultiplexer wrk) (zrqId msg)
+    debug lg $ LG.msg $ "dispatching to worker 4: " ++ (show wrk)
+    liftIO $ TSH.delete (woMsgMultiplexer wrk) mid
     return resp
 
-getWorker :: (HasXokenNodeEnv env m, MonadIO m) => Word8 -> NodeRole -> m (Maybe Worker, Bool)
-getWorker shardingLex role = do
+getRemoteWorker :: (HasXokenNodeEnv env m, MonadIO m) => Word8 -> NodeRole -> m (Maybe Worker)
+getRemoteWorker shardingLex role = do
     bp2pEnv <- getBitcoinP2P
     wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
     let workers =
@@ -204,8 +212,8 @@ getWorker shardingLex role = do
                 (\w -> do
                      let rl =
                              case w of
-                                 SelfWorker _ r -> r
-                                 RemoteWorker _ _ _ _ r _ -> r
+                                 SelfWorker {..} -> selfRoles
+                                 RemoteWorker {..} -> woRoles
                      isJust $ L.findIndex (\x -> x == role) rl)
                 wrkrs
     lg <- getLogger
@@ -214,12 +222,12 @@ getWorker shardingLex role = do
     let wind = nx `mod` (L.length workers)
         wrk = workers !! wind
     case wrk of
-        SelfWorker _ _ -> do
+        SelfWorker {..} -> do
             liftIO $ print "^^^"
-            return (Nothing, True)
-        RemoteWorker _ _ _ _ _ _ -> do
+            return Nothing
+        RemoteWorker {..} -> do
             liftIO $ print ">>>"
-            return (Just wrk, False)
+            return $ Just wrk
 
 -- pruneStaleSpentOutputs ::
 --        (HasXokenNodeEnv env m, MonadIO m)
@@ -292,7 +300,7 @@ validateOutpoint outPoint waitSecs predecessors curBlkHash = do
             mapM_
                 (\s ->
                      if (spBlockHash s) `DS.member` predecessors
-                         then throw OutputAlreadySpentException
+                         then return () -- TODO: throw OutputAlreadySpentException -- predecessors to be passed correctly
                          else return ())
                 (zuSpending zu)
             -- eagerly mark spent, in the unlikely scenario script stack eval fails, mark unspent

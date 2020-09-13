@@ -541,15 +541,15 @@ processConfTransaction tx bhash blkht txind = do
                                      show (txHashToHex $ txHash tx) ++
                                      ", getting value for dependent input (TxID,Index): (" ++
                                      show (txHashToHex $ outPointHash (prevOutput b)) ++
-                                     ", " ++ show (outPointIndex $ prevOutput b) ++ ")"
+                                     ", " ++ show (outPointIndex $ prevOutput b) ++ ")" ++ (show e)
                                  throw e)
             (inputs)
-    LA.mapConcurrently_
-        (\(b, indx) -> do
-             let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
-             zRPCDispatchTraceOutputs opt bhash -- TODO: use appropriate Stale marker blockhash
-             return ())
-        (inputs)
+    -- LA.mapConcurrently_
+    --     (\(b, indx) -> do
+    --          let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
+    --          zRPCDispatchTraceOutputs opt bhash -- TODO: use appropriate Stale marker blockhash
+    --          return ())
+    --     (inputs)
     --
     let ipSum = foldl (+) 0 $ (\(val, _) -> val) <$> inputValsOutpoints
         opSum = foldl (+) 0 $ (\o -> outValue o) <$> (txOut tx)

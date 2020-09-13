@@ -142,24 +142,6 @@ instance HasAllegoryEnv AppM where
 instance HasLogger AppM where
     getLogger = asks (loggerEnv . xokenNodeEnv)
 
--- instance HasNetworkEnv AppM where
---     getEnv = asks (ariviNetworkEnv . nodeEndpointEnv . p2pEnv)
--- instance HasSecretKey AppM
--- instance HasKbucket AppM where
---     getKb = asks (kbucket . kademliaEnv . p2pEnv)
--- instance HasStatsdClient AppM where
---     getStatsdClient = asks (statsdClient . p2pEnv)
--- instance HasNodeEndpoint AppM where
---     getEndpointEnv = asks (nodeEndpointEnv . p2pEnv)
---     getNetworkConfig = asks (PE._networkConfig . nodeEndpointEnv . p2pEnv)
---     getHandlers = asks (handlers . nodeEndpointEnv . p2pEnv)
---     getNodeIdPeerMapTVarP2PEnv = asks (tvarNodeIdPeerMap . nodeEndpointEnv . p2pEnv)
--- instance HasPRT AppM where
---     getPeerReputationHistoryTableTVar = asks (tvPeerReputationHashTable . prtEnv . p2pEnv)
---     getServicesReputationHashMapTVar = asks (tvServicesReputationHashMap . prtEnv . p2pEnv)
---     getP2PReputationHashMapTVar = asks (tvP2PReputationHashMap . prtEnv . p2pEnv)
---     getReputedVsOtherTVar = asks (tvReputedVsOther . prtEnv . p2pEnv)
---     getKClosestVsRandomTVar = asks (tvKClosestVsRandom . prtEnv . p2pEnv)
 runAppM :: ServiceEnv -> AppM a -> IO a
 runAppM env (AppM app) = runReaderT app env
 
@@ -210,7 +192,7 @@ runThreads ::
     -> IO ()
 runThreads config nodeConf bp2p lg certPaths = do
     withDBCF "xdb" $ \rkdb -> do
-        cfM <- TSH.newFromList $ zip cfStr (R.columnFamilies rkdb)
+        cfM <- TSH.fromList 1 $ zip cfStr (R.columnFamilies rkdb)
         let dbh = DatabaseHandles rkdb cfM
         let allegoryEnv = AllegoryEnv $ allegoryVendorSecretKey nodeConf
         let xknEnv = XokenNodeEnv bp2p dbh lg allegoryEnv

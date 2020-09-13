@@ -54,7 +54,7 @@ type Port = Int
 data DatabaseHandles =
     DatabaseHandles
         { rocksDB :: !R.DB
-        , rocksCF :: TSH.TSHashTable String R.ColumnFamily
+        , rocksCF :: !(TSH.TSHashTable String R.ColumnFamily)
         }
 
 -- | Data structure representing an bitcoin peer.
@@ -145,22 +145,22 @@ data ServerState =
 
 data ZtxiUtxo =
     ZtxiUtxo
-        { zuTxShortHash :: TxShortHash
-        , zuTxFullHash :: TxHash
-        , zuOpIndex :: Word32
-        , zuBlockHash :: [BlockHash]
-        , zuBlockHeight :: Word32
-        , zuInputs :: [(TxShortHash, Word32)]
-        , zuSpending :: [Spending]
-        , zuSatoshiValue :: Word64
+        { zuTxShortHash :: !TxShortHash
+        , zuTxFullHash :: !TxHash
+        , zuOpIndex :: !Word32
+        , zuBlockHash :: ![BlockHash]
+        , zuBlockHeight :: !Word32
+        , zuInputs :: ![(TxShortHash, Word32)]
+        , zuSpending :: ![Spending]
+        , zuSatoshiValue :: !Word64
         }
     deriving (Show, Eq, Ord, Generic, Serialise)
 
 data Spending =
     Spending
-        { spBlockHash :: BlockHash
-        , spTxShortHash :: TxShortHash
-        , spInputIndex :: Word32
+        { spBlockHash :: !BlockHash
+        , spTxShortHash :: !TxShortHash
+        , spInputIndex :: !Word32
         }
     deriving (Show, Eq, Ord, Generic, Serialise)
 
@@ -170,14 +170,15 @@ data Worker
           , selfRoles :: [NodeRole]
           }
     | RemoteWorker
-          { woID :: String
-          , woIP :: String
-          , woPort :: Word16
-          , woSocket :: Z.Socket Z.Dealer
-          , woRoles :: [NodeRole]
+          { woID :: !String
+          , woIP :: !String
+          , woPort :: !Word16
+          , woSocket :: !(Z.Socket Z.Dealer)
+          , woRoles :: ![NodeRole]
           , woMsgMultiplexer :: !(TSH.TSHashTable Word32 (MVar ZRPCResponse))
+          , woMsgCounter :: !(MVar Word32)
           }
 
 instance Show Worker where
     show (SelfWorker id _) = show ("Self", id)
-    show (RemoteWorker id ip pt _ _ _) = show ("Remote", id, ip, pt)
+    show (RemoteWorker id ip pt _ _ _ _) = show ("Remote", id, ip, pt)

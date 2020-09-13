@@ -12,7 +12,6 @@
 module Network.Xoken.Node.Data.ThreadSafeHashTable
     ( TSHashTable(..)
     , new
-    , newFromList
     , insert
     , delete
     , Network.Xoken.Node.Data.ThreadSafeHashTable.lookup
@@ -53,12 +52,6 @@ new size = do
                  newMVar hm)
             [1 .. size]
     return $ TSHashTable hlist size
-
-newFromList :: (Eq k, Hashable k) => [(k,v)] -> IO (TSHashTable k v)
-newFromList kv = do
-    tsh <- new (fromIntegral $ L.length kv)
-    Prelude.mapM_ (\(k,v) -> insert tsh k v) kv
-    return tsh
 
 insert :: (Eq k, Hashable k) => TSHashTable k v -> k -> v -> IO ()
 insert tsh k v = do
