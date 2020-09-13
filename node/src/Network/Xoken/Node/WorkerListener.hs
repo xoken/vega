@@ -27,6 +27,7 @@ import Data.Aeson as A
 import Data.Binary as DB
 import qualified Data.ByteString as B
 import Data.ByteString.Base64 as B64
+import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LC
@@ -42,11 +43,12 @@ import qualified Data.Set as DS
 import Data.Text as T
 import Data.Time.Clock
 import Data.Time.Clock.POSIX
+import Data.Word
 import Data.X509.CertificateStore
 import GHC.Base as GHCB
 import GHC.Generics
-import qualified Network.Simple.TCP.TLS as TLS
-import Network.Socket
+import Network.Socket as NS
+import Network.Socket.ByteString.Lazy as SB (recv, sendAll)
 import qualified Network.TLS as NTLS
 import Network.Xoken.Block.Common
 import Network.Xoken.Network.Message
@@ -61,7 +63,7 @@ import Network.Xoken.Transaction.Common
 import Prelude as P
 import StmContainers.Map as SM
 import System.Logger as LG
-import qualified System.ZMQ4 as Z
+
 import Text.Printf
 import Xoken.NodeConfig as NC
 
@@ -70,8 +72,8 @@ workerMessageMultiplexer worker = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     forever $ do
-        msg <- liftIO $ Z.receive (woSocket worker)
-        case (deserialiseOrFail $ LBS.fromStrict msg) of
+        msg <- liftIO $ receiveMessage (woSocket worker)
+        case (deserialiseOrFail msg) of
             Right ms ->
                 case ms of
                     ZRPCResponse mid resp -> do
@@ -85,21 +87,15 @@ workerMessageMultiplexer worker = do
                                 err lg $ LG.msg $ val $ "Error: Mux, unable to match response"
                         return ()
             Left e -> do
-                err lg $ LG.msg $ "Error: deserialise Failed : " ++ (show e)
+                err lg $ LG.msg $ "Error: deserialise Failed (workerMessageMultiplexer) : " ++ (show e)
                 return ()
 
-requestDispatcher ::
-       (HasXokenNodeEnv env m, MonadIO m, Z.Receiver z, Z.Sender z)
-    => Z.Context
-    -> Z.Socket z
-    -> C.ByteString
-    -> C.ByteString
-    -> m ()
-requestDispatcher zctxt router ident msg = do
+requestHandler :: (HasXokenNodeEnv env m, MonadIO m) => Socket -> LC.ByteString -> m ()
+requestHandler sock msg = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     resp <-
-        case (deserialiseOrFail $ LBS.fromStrict msg) of
+        case (deserialiseOrFail msg) of
             Right ms ->
                 case ms of
                     ZRPCRequest mid param -> do
@@ -110,7 +106,7 @@ requestDispatcher zctxt router ident msg = do
                                 if _nodeType myNode == NC.Master
                                     then return $ successResp mid ZOk
                                     else do
-                                        async $ initializeWorkers (zctxt) myNode cluster
+                                        async $ initializeWorkers myNode cluster
                                         return $ successResp mid ZOk
                             ZPing -> do
                                 return $ successResp mid ZPong
@@ -148,30 +144,44 @@ requestDispatcher zctxt router ident msg = do
                                         return $ successResp mid (ZValidateTxResp True)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
             Left e -> do
-                err lg $ LG.msg $ "Error: deserialise Failed : " ++ (show e)
+                err lg $ LG.msg $ "Error: deserialise Failed (requestHandler) : " ++ (show e)
                 return $ errorResp (0) "Deserialise failed"
-    liftIO $ Z.sendMulti router $ ident :| [resp]
+    liftIO $ sendMessage sock resp
     debug lg $ LG.msg $ val $ "ZRPCResponse SENT "
   where
-    successResp mid rsp = LBS.toStrict $ serialise $ ZRPCResponse mid (Right $ Just rsp)
-    errorResp mid err = LBS.toStrict $ serialise $ ZRPCResponse mid (Left $ ZRPCError Z_INTERNAL_ERROR (Just err))
+    successResp mid rsp = serialise $ ZRPCResponse mid (Right $ Just rsp)
+    errorResp mid err = serialise $ ZRPCResponse mid (Left $ ZRPCError Z_INTERNAL_ERROR (Just err))
 
 -- 
-startZMQRouter :: (HasXokenNodeEnv env m, MonadIO m, Z.Receiver z, Z.Sender z) => Z.Context -> Z.Socket z -> m ()
-startZMQRouter zctxt router = do
+startTCPServer :: (HasXokenNodeEnv env m, MonadIO m) => String -> Word16 -> m ()
+startTCPServer ip port = do
     lg <- getLogger
-    continue <- liftIO $ newIORef True
-    whileM_ (liftIO $ readIORef continue) $ do
-        rm <- liftIO $ Z.receiveMulti router
-        let ident = rm !! 0
-        let msg = rm !! 1
-        debug lg $ LG.msg $ "msg received from: " ++ (C.unpack $ ident)
-        LA.async $ requestDispatcher zctxt router ident msg
+    addrinfos <- liftIO $ getAddrInfo Nothing (Just ip) (Just $ show port)
+    let serveraddr = P.head addrinfos
+    sock <- liftIO $ socket (addrFamily serveraddr) Stream defaultProtocol
+    liftIO $ bind sock (addrAddress serveraddr)
+    liftIO $ listen sock 4
+    liftIO $ print "TCP server started."
+    (conn, _) <- liftIO $ accept sock
+    liftIO $ print "TCP server accepted connection."
+    readLoop conn lg
+    liftIO $ print "TCP server socket is closing now."
+    liftIO $ NS.close conn
+    liftIO $ NS.close sock
+  where
+    readLoop conn lg =
+        forever $ do
+            msg <- receiveMessage conn
+            unless (LBS.null msg) $ do
+                LA.async $ requestHandler conn msg
+                -- debug lg $ LG.msg $ "msg received : " ++ (LC.unpack msg)
+                -- liftIO $ print ("TCP server received: " ++ LC.unpack msg)
+                return ()
 
 --
 -- masterWorkerConnSetup zctxt (workers nodeConf)
-initializeWorkers :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Z.Context -> Node -> [Node] -> m ()
-initializeWorkers zctxt myNode clstrNodes = do
+initializeWorkers :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Node -> [Node] -> m ()
+initializeWorkers myNode clstrNodes = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     let clusterID = B64.encode $ C.pack $ show clstrNodes
@@ -181,41 +191,28 @@ initializeWorkers zctxt myNode clstrNodes = do
                  if (_nodeID myNode == _nodeID w)
                      then return $ SelfWorker (_nodeID myNode) (_nodeRoles myNode)
                      else do
-                         let wrkSock = "tcp://" ++ (_nodeIPAddr w) ++ ":" ++ (show $ _nodePort w)
+                         let wrkSock = (_nodeIPAddr w) ++ ":" ++ (show $ _nodePort w)
                          LG.debug lg $ LG.msg $ "Connecting to " ++ (show $ _nodeType w) ++ " Node : " ++ wrkSock
-                         dlr <- liftIO $ Z.socket zctxt Z.Dealer
-                         liftIO $ Z.setIdentity (Z.restrict $ C.pack $ _nodeID myNode) dlr
-                         liftIO $ Z.connect dlr wrkSock
-                         let inv = ZRPCRequest (0) $ ZInvite clstrNodes clusterID
-                         liftIO $ Z.send dlr [] (LC.toStrict $ CBOR.serialise inv)
-                         m <- liftIO $ Z.receive dlr
-                         case (CBOR.deserialiseOrFail $ LC.fromStrict m) of
-                             Right ms ->
-                                 case ms of
-                                     ZRPCResponse mid pl -> do
-                                         case pl of
-                                             Right rs ->
-                                                 case fromJust rs of
-                                                     ZOk -> do
-                                                         LG.debug lg $
-                                                             LG.msg $ ("node accepted Invite with OK: " ++ wrkSock)
-                                                         mux <- liftIO $ TSH.new 1
-                                                         ctr <- liftIO $ newMVar 1
-                                                         return $
-                                                             RemoteWorker
-                                                                 (_nodeID w)
-                                                                 (_nodeIPAddr w)
-                                                                 (_nodePort w)
-                                                                 dlr
-                                                                 (_nodeRoles w)
-                                                                 mux
-                                                                 ctr
-                                             Left x -> do
-                                                 LG.err lg $ LG.msg $ ("node rejected Invite : " ++ wrkSock)
-                                                 throw WorkerConnectionRejectException
-                             Left e -> do
-                                 LG.err lg $ LG.msg $ "Error: deserialise Failed : " ++ (show e)
+                         liftIO $ print $ "Connecting to " ++ (show $ _nodeType w) ++ " Node : " ++ wrkSock
+                         addrinfos <- liftIO $ getAddrInfo Nothing (Just $ _nodeIPAddr w) (Just $ show $ _nodePort w)
+                         let serveraddr = P.head addrinfos
+                         sock <- liftIO $ socket (addrFamily serveraddr) Stream defaultProtocol
+                         liftIO $ connect sock (addrAddress serveraddr)
+                         let inv = ZInvite clstrNodes clusterID
+                         mux <- liftIO $ TSH.new 1
+                         ctr <- liftIO $ newMVar 1
+                         let wrk = RemoteWorker (_nodeID w) (_nodeIPAddr w) (_nodePort w) sock (_nodeRoles w) mux ctr
+                         async $ workerMessageMultiplexer wrk
+                         resp <- zRPCRequestDispatcher inv wrk
+                         liftIO $ print $ "ZInvite - RESPONSE " ++ show resp
+                         case zrsPayload resp of
+                             Right spl -> do
+                                 case fromJust spl of
+                                     ZOk -> do
+                                         LG.debug lg $ LG.msg $ ("node accepted Invite with OK: " ++ wrkSock)
+                                         return (wrk)
+                             Left er -> do
+                                 LG.err lg $ LG.msg $ ("error: node rejected Invite : " ++ wrkSock)
                                  throw WorkerConnectionRejectException)
             (clstrNodes)
-    mapM_ (\w -> async $ workerMessageMultiplexer w) ws
     liftIO $ atomically $ writeTVar (workerConns bp2pEnv) ws

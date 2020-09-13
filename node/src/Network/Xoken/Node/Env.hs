@@ -39,7 +39,7 @@ import StmContainers.Map as SM
 import StmContainers.Set as SS
 import System.Logger
 import System.Random
-import qualified System.ZMQ4 as Z
+
 import Text.Read
 import Xoken.NodeConfig
 

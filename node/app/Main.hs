@@ -182,14 +182,7 @@ columnFamilies = fmap (\x -> (x, conf)) cfStr
 
 withDBCF path = R.withDBCF path conf columnFamilies
 
-runThreads ::
-       Config.Config
-    -> NC.NodeConfig
-    -> BitcoinP2P
-    -> LG.Logger
-    -- -> (P2PEnv AppM ServiceResource ServiceTopic RPCMessage PubNotifyMessage)
-    -> [FilePath]
-    -> IO ()
+runThreads :: Config.Config -> NC.NodeConfig -> BitcoinP2P -> LG.Logger -> [FilePath] -> IO ()
 runThreads config nodeConf bp2p lg certPaths = do
     withDBCF "xdb" $ \rkdb -> do
         cfM <- TSH.fromList 1 $ zip cfStr (R.columnFamilies rkdb)
@@ -213,25 +206,21 @@ runThreads config nodeConf bp2p lg certPaths = do
                 sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) ([node] ++ vegaCluster nodeConf)
         --
         -- run vegaCluster
-        putStrLn $ (show $ _nodeType node) ++ " | tcp://" ++ (_nodeIPAddr node) ++ ":" ++ (show (_nodePort node))
-        zctxt <- Z.context
-        withSocket zctxt Router $ \router -> do
-            Z.bind router ("tcp://" ++ (_nodeIPAddr node) ++ ":" ++ (show (_nodePort node)))
-            runAppM
-                serviceEnv
-                (do bp2pEnv <- getBitcoinP2P
-                    withAsync (startZMQRouter zctxt router) $ \y -> do
-                        if (_nodeType node == NC.Master)
-                            then do
-                                withAsync (initializeWorkers zctxt node normalizedClstr) $ \_ -> do
-                                    withAsync setupSeedPeerConnection $ \_ -> do
-                                        withAsync runEgressChainSync $ \_ -> do
-                                            withAsync runBlockCacheQueue $ \_ -> do
-                                                withAsync runPeerSync $ \_ -> do
-                                                    withAsync runSyncStatusChecker $ \z -> do
-                                                        _ <- LA.wait z
-                                                        return ()
-                            else LA.wait y)
+        runAppM
+            serviceEnv
+            (do bp2pEnv <- getBitcoinP2P
+                withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
+                    if (_nodeType node == NC.Master)
+                        then do
+                            withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
+                                withAsync setupSeedPeerConnection $ \_ -> do
+                                    withAsync runEgressChainSync $ \_ -> do
+                                        withAsync runBlockCacheQueue $ \_ -> do
+                                            withAsync runPeerSync $ \_ -> do
+                                                withAsync runSyncStatusChecker $ \z -> do
+                                                    _ <- LA.wait z
+                                                    return ()
+                        else LA.wait y)
         liftIO $ putStrLn $ "node recovering from fatal DB connection failure!"
     return ()
 
@@ -257,9 +246,7 @@ runSyncStatusChecker = do
         liftIO $ threadDelay (60 * 1000000)
 
 runNode :: Config.Config -> NC.NodeConfig -> BitcoinP2P -> [FilePath] -> IO ()
-runNode config nodeConf bp2p certPaths
-    -- p2pEnv <- mkP2PEnv config globalHandlerRpc globalHandlerPubSub [AriviService] []
- = do
+runNode config nodeConf bp2p certPaths = do
     lg <-
         LG.new
             (LG.setOutput

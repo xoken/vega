@@ -38,7 +38,7 @@ import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Transaction
 import StmContainers.Map as SM
 import System.Random
-import qualified System.ZMQ4 as Z
+
 import Text.Read
 import Xoken.NodeConfig
 
@@ -173,7 +173,7 @@ data Worker
           { woID :: !String
           , woIP :: !String
           , woPort :: !Word16
-          , woSocket :: !(Z.Socket Z.Dealer)
+          , woSocket :: !Socket
           , woRoles :: ![NodeRole]
           , woMsgMultiplexer :: !(TSH.TSHashTable Word32 (MVar ZRPCResponse))
           , woMsgCounter :: !(MVar Word32)

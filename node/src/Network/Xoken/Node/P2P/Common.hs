@@ -298,3 +298,35 @@ getEpochTxCF False = "ep_transactions_even"
 getEpochTxOutCF :: Bool -> String
 getEpochTxOutCF True = "ep_outputs_odd"
 getEpochTxOutCF False = "ep_outputs_even"
+
+-- Helper Functions
+recvAll :: (MonadIO m) => Socket -> Int64 -> m BSL.ByteString
+recvAll sock len = do
+    if len > 0
+        then do
+            res <- liftIO $ try $ LB.recv sock len
+            case res of
+                Left (e :: IOException) -> throw SocketReadException
+                Right mesg ->
+                    if BSL.length mesg == len
+                        then return mesg
+                        else if BSL.length mesg == 0
+                                 then throw ZeroLengthSocketReadException
+                                 else BSL.append mesg <$> recvAll sock (len - BSL.length mesg)
+        else return (BSL.empty)
+
+receiveMessage :: (MonadIO m) => Socket -> m BSL.ByteString
+receiveMessage sock = do
+    lp <- recvAll sock 4
+    case runGetLazy getWord32le lp of
+        Right x -> do
+            payload <- recvAll sock (fromIntegral x)
+            return payload
+        Left e -> Prelude.error e
+
+sendMessage :: (MonadIO m) => Socket -> BSL.ByteString -> m ()
+sendMessage sock payload = do
+    let len = LC.length payload
+        prefix = toLazyByteString $ (word32LE $ fromIntegral len)
+    liftIO $ LB.sendAll sock prefix
+    liftIO $ LB.sendAll sock payload

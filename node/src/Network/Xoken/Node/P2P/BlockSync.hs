@@ -98,7 +98,7 @@ import qualified Streamly.Prelude as S
 import System.Logger as LG
 import System.Logger.Message
 import System.Random
-import qualified System.ZMQ4 as Z
+
 import Text.Printf
 import Xoken
 import Xoken.NodeConfig as NC

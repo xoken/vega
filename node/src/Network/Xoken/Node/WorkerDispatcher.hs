@@ -49,6 +49,7 @@ import GHC.Base as GHCB
 import GHC.Generics
 import qualified Network.Simple.TCP.TLS as TLS
 import Network.Socket
+import Network.Socket.ByteString as SB (recv, sendAll)
 import qualified Network.TLS as NTLS
 import Network.Xoken.Block.Common
 import Network.Xoken.Crypto.Hash
@@ -62,7 +63,7 @@ import Network.Xoken.Transaction.Common
 import Prelude as P
 import StmContainers.Map as SM
 import System.Logger as LG
-import qualified System.ZMQ4 as Z
+
 import Text.Printf
 import Xoken.NodeConfig as NC
 
@@ -196,7 +197,7 @@ zRPCRequestDispatcher param wrk = do
     debug lg $ LG.msg $ "dispatching to worker 1: " ++ (show wrk)
     liftIO $ TSH.insert (woMsgMultiplexer wrk) mid sem
     debug lg $ LG.msg $ "dispatching to worker 2: " ++ (show wrk)
-    liftIO $ Z.send (woSocket wrk) [] (LC.toStrict $ CBOR.serialise msg)
+    liftIO $ sendMessage (woSocket wrk) (CBOR.serialise msg)
     debug lg $ LG.msg $ "dispatching to worker 3: " ++ (show wrk)
     resp <- liftIO $ takeMVar sem
     debug lg $ LG.msg $ "dispatching to worker 4: " ++ (show wrk)
