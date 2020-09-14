@@ -84,7 +84,6 @@ import Network.Xoken.Crypto.Hash
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
-import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Util (bsToInteger, integerToBS)
@@ -100,7 +99,7 @@ getChainIndex :: IO ChainIndex
 getChainIndex = do
     return $ ChainIndex M.empty []
 
-getChainIndexByHeight :: (HasXokenNodeEnv env m, MonadIO m) => Int32 -> m (Maybe DT.Text)
+getChainIndexByHeight :: (HasXokenNodeEnv env m, MonadIO m) => Int32 -> m (Maybe BlockHash)
 getChainIndexByHeight h = do
     bp2pEnv <- getBitcoinP2P
     ci <- liftIO $ readTVarIO (confChainIndex bp2pEnv)
@@ -111,13 +110,13 @@ getChainIndexByHeight h = do
         Nothing -> return Nothing
         Just h' -> return $ Just $ cht !! (fromIntegral $ h' - h)
 
-getChainIndexByHash :: (HasXokenNodeEnv env m, MonadIO m) => DT.Text -> m (Maybe Int32)
+getChainIndexByHash :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> m (Maybe Int32)
 getChainIndexByHash h = do
     bp2pEnv <- getBitcoinP2P
     ci <- liftIO $ readTVarIO (confChainIndex bp2pEnv)
     return $ M.lookup (h) (hashIndex ci)
 
-addBlockToChainIndex :: (HasXokenNodeEnv env m, MonadIO m) => DT.Text -> Int32 -> m ()
+addBlockToChainIndex :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> Int32 -> m ()
 addBlockToChainIndex hs ht = do
     bp2pEnv <- getBitcoinP2P
     liftIO $

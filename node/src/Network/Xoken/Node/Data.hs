@@ -989,8 +989,8 @@ instance Show RPCErrors where
 
 data ChainIndex =
     ChainIndex
-        { hashIndex :: M.Map T.Text Int32
-        , heightIndex :: [T.Text]
+        { hashIndex :: M.Map BlockHash Int32
+        , heightIndex :: [BlockHash]
         }
 
 --getOptPointKey :: TxShortHash -> Int16 -> B.ByteString

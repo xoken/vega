@@ -86,6 +86,7 @@ import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Node.Service.Chain
 import Network.Xoken.Node.WorkerDispatcher
 import Network.Xoken.Script.Standard
 import Network.Xoken.Transaction.Common
@@ -98,7 +99,6 @@ import qualified Streamly.Prelude as S
 import System.Logger as LG
 import System.Logger.Message
 import System.Random
-
 import Text.Printf
 import Xoken
 import Xoken.NodeConfig as NC
@@ -544,12 +544,12 @@ processConfTransaction tx bhash blkht txind = do
                                      ", " ++ show (outPointIndex $ prevOutput b) ++ ")" ++ (show e)
                                  throw e)
             (inputs)
-    -- LA.mapConcurrently_
-    --     (\(b, indx) -> do
-    --          let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
-    --          zRPCDispatchTraceOutputs opt bhash -- TODO: use appropriate Stale marker blockhash
-    --          return ())
-    --     (inputs)
+    LA.mapConcurrently_
+        (\(b, indx) -> do
+             let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
+             zRPCDispatchTraceOutputs opt bhash -- (getChainIndexByHeight $ blkht - 10) -- TODO: use appropriate Stale marker blockhash
+             return ())
+        (inputs)
     --
     let ipSum = foldl (+) 0 $ (\(val, _) -> val) <$> inputValsOutpoints
         opSum = foldl (+) 0 $ (\o -> outValue o) <$> (txOut tx)

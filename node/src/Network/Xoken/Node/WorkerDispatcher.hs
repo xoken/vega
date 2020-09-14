@@ -155,7 +155,6 @@ zRPCDispatchTraceOutputs outPoint bhash = do
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         txZUT = txZtxiUtxoTable bp2pEnv
-    -- let conn = keyValDB $ dbe'
     let shortHash = (getTxShortHash $ outPointHash outPoint) 20
         midCode = getTxMidCode $ outPointHash outPoint
         opIndex = outPointIndex outPoint
@@ -276,12 +275,8 @@ predecessorOf :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> BlockHash ->
 predecessorOf x y = do
     bp2pEnv <- getBitcoinP2P
     ci <- liftIO $ readTVarIO (confChainIndex bp2pEnv)
-    let tx = DTE.decodeUtf8' . fromShort . getHash256 . getBlockHash $ x
-        ty = DTE.decodeUtf8' . fromShort . getHash256 . getBlockHash $ y
-        ch = hashIndex ci
-    case (tx, ty) of
-        (Right tx', Right ty') -> return $ (M.lookup tx' ch) < (M.lookup ty' ch)
-        _ -> return False
+    let ch = hashIndex ci
+    return $ (M.lookup x ch) < (M.lookup y ch)
 
 validateOutpoint ::
        (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => OutPoint -> Int -> DS.Set BlockHash -> BlockHash -> m (Word64)
