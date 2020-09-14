@@ -90,8 +90,8 @@ workerMessageMultiplexer worker = do
                 err lg $ LG.msg $ "Error: deserialise Failed (workerMessageMultiplexer) : " ++ (show e)
                 return ()
 
-requestHandler :: (HasXokenNodeEnv env m, MonadIO m) => Socket -> LC.ByteString -> m ()
-requestHandler sock msg = do
+requestHandler :: (HasXokenNodeEnv env m, MonadIO m) => Socket -> MVar () -> LC.ByteString -> m ()
+requestHandler sock writeLock msg = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     resp <-
@@ -146,7 +146,7 @@ requestHandler sock msg = do
             Left e -> do
                 err lg $ LG.msg $ "Error: deserialise Failed (requestHandler) : " ++ (show e)
                 return $ errorResp (0) "Deserialise failed"
-    liftIO $ sendMessage sock resp
+    liftIO $ sendMessage sock writeLock resp
     debug lg $ LG.msg $ val $ "ZRPCResponse SENT "
   where
     successResp mid rsp = serialise $ ZRPCResponse mid (Right $ Just rsp)
@@ -169,11 +169,12 @@ startTCPServer ip port = do
     liftIO $ NS.close conn
     liftIO $ NS.close sock
   where
-    readLoop conn lg =
+    readLoop conn lg = do
+        wl <- liftIO $ newMVar ()
         forever $ do
             msg <- receiveMessage conn
             unless (LBS.null msg) $ do
-                LA.async $ requestHandler conn msg
+                LA.async $ requestHandler conn wl msg
                 -- debug lg $ LG.msg $ "msg received : " ++ (LC.unpack msg)
                 -- liftIO $ print ("TCP server received: " ++ LC.unpack msg)
                 return ()
@@ -201,7 +202,8 @@ initializeWorkers myNode clstrNodes = do
                          let inv = ZInvite clstrNodes clusterID
                          mux <- liftIO $ TSH.new 1
                          ctr <- liftIO $ newMVar 1
-                         let wrk = RemoteWorker (_nodeID w) (_nodeIPAddr w) (_nodePort w) sock (_nodeRoles w) mux ctr
+                         wl <- liftIO $ newMVar ()
+                         let wrk = RemoteWorker (_nodeID w) (_nodeIPAddr w) (_nodePort w) sock (_nodeRoles w) mux ctr wl
                          async $ workerMessageMultiplexer wrk
                          resp <- zRPCRequestDispatcher inv wrk
                          liftIO $ print $ "ZInvite - RESPONSE " ++ show resp

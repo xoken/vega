@@ -197,7 +197,7 @@ zRPCRequestDispatcher param wrk = do
     debug lg $ LG.msg $ "dispatching to worker 1: " ++ (show wrk)
     liftIO $ TSH.insert (woMsgMultiplexer wrk) mid sem
     debug lg $ LG.msg $ "dispatching to worker 2: " ++ (show wrk)
-    liftIO $ sendMessage (woSocket wrk) (CBOR.serialise msg)
+    liftIO $ sendMessage (woSocket wrk) (woWriteLock wrk) (CBOR.serialise msg)
     debug lg $ LG.msg $ "dispatching to worker 3: " ++ (show wrk)
     resp <- liftIO $ takeMVar sem
     debug lg $ LG.msg $ "dispatching to worker 4: " ++ (show wrk)

@@ -177,8 +177,9 @@ data Worker
           , woRoles :: ![NodeRole]
           , woMsgMultiplexer :: !(TSH.TSHashTable Word32 (MVar ZRPCResponse))
           , woMsgCounter :: !(MVar Word32)
+          , woWriteLock :: !(MVar ())
           }
 
 instance Show Worker where
     show (SelfWorker id _) = show ("Self", id)
-    show (RemoteWorker id ip pt _ _ _ _) = show ("Remote", id, ip, pt)
+    show (RemoteWorker id ip pt _ _ _ _ _) = show ("Remote", id, ip, pt)

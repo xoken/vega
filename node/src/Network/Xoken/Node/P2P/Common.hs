@@ -324,9 +324,13 @@ receiveMessage sock = do
             return payload
         Left e -> Prelude.error e
 
-sendMessage :: (MonadIO m) => Socket -> BSL.ByteString -> m ()
-sendMessage sock payload = do
+sendMessage :: (MonadIO m) => Socket -> MVar () -> BSL.ByteString -> m ()
+sendMessage sock writeLock payload = do
     let len = LC.length payload
         prefix = toLazyByteString $ (word32LE $ fromIntegral len)
-    liftIO $ LB.sendAll sock prefix
-    liftIO $ LB.sendAll sock payload
+    liftIO $
+        withMVar
+            writeLock
+            (\x -> do
+                 LB.sendAll sock prefix
+                 LB.sendAll sock payload)
