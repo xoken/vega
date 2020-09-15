@@ -14,8 +14,8 @@ module Network.Xoken.Node.P2P.ChainSync
     ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async as CA (async, mapConcurrently_, wait)
-import Control.Concurrent.Async.Lifted as LA (async, race)
+import Control.Concurrent.Async as CA (async, wait)
+import Control.Concurrent.Async.Lifted as LA (async, mapConcurrently_, race)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TVar
 import Control.Error.Util (hush)
@@ -47,7 +47,6 @@ import qualified Data.Text.Encoding as DTE
 import Data.Time.Clock
 import Data.Time.Clock.POSIX
 import Data.Word
-
 import qualified Database.RocksDB as R
 import Network.Socket
 import qualified Network.Socket.ByteString as SB (recv)
@@ -63,6 +62,8 @@ import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Node.Service.Chain
+import Network.Xoken.Node.WorkerDispatcher
 import Streamly
 import Streamly.Prelude ((|:), nil)
 import qualified Streamly.Prelude as S
@@ -182,7 +183,6 @@ getBlockLocator rkdb net = do
             debug lg $ LG.msg $ "[Error] getBlockLocator: " ++ show e
             throw e
 
-
 processHeaders :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Headers -> m ()
 processHeaders hdrs = do
     dbe' <- getDB
@@ -241,25 +241,26 @@ processHeaders hdrs = do
                                              Nothing -> throw BlockHashNotFoundException
             let lenIndexed = L.length indexed
             debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)
-            liftIO $
-                mapConcurrently_
-                    (\y -> do
-                         let hdrHash = blockHashToHex $ headerHash $ fst $ snd y
-                         resp <- liftIO $ try $ putDB rkdb (fst y) hdrHash
-                         case resp of
-                             Right () -> return ()
-                             Left (e :: SomeException) ->
-                                 liftIO $ do
-                                     err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
-                                     throw KeyValueDBInsertException
-                         resp' <- liftIO $ try $ putDB rkdb hdrHash (fst $ snd y , fst y)
-                         case resp' of
-                             Right () -> return ()
-                             Left (e :: SomeException) ->
-                                 liftIO $ do
-                                     err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
-                                     throw KeyValueDBInsertException)
-                    indexed
+            mapConcurrently_
+                (\y -> do
+                     let hdrHash = blockHashToHex $ headerHash $ fst $ snd y
+                     resp <- liftIO $ try $ putDB rkdb (fst y) hdrHash
+                     case resp of
+                         Right () -> return ()
+                         Left (e :: SomeException) ->
+                             liftIO $ do
+                                 err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
+                                 throw KeyValueDBInsertException
+                     resp' <- liftIO $ try $ putDB rkdb hdrHash (fst $ snd y, fst y)
+                     case resp' of
+                         Right () -> return ()
+                         Left (e :: SomeException) ->
+                             liftIO $ do
+                                 err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
+                                 throw KeyValueDBInsertException
+                     addBlockToChainIndex (headerHash $ fst $ snd y) (fromIntegral $ fst y)
+                     zRPCDispatchNotifyNewBlockHeader (headerHash $ fst $ snd y) (fromIntegral $ fst y))
+                indexed
             unless (L.null indexed) $ do
                 markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
                 liftIO $ putMVar (bestBlockUpdated bp2pEnv) True
@@ -274,4 +275,3 @@ fetchMatchBlockOffset rkdb hashes = do
     case x of
         Nothing -> return Nothing
         Just h -> return $ Just $ (hashes, read . T.unpack . DTE.decodeUtf8 $ h :: Int32)
-

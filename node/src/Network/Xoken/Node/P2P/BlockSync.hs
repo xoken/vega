@@ -491,14 +491,13 @@ processConfTransaction tx bhash blkht txind = do
     let conn = rocksDB $ dbe'
         cf = rocksCF dbe'
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
+    xxx <- liftIO $ TSH.toList $ txZtxiUtxoTable bp2pEnv
+    debug lg $ LG.msg $ "blockheight: " ++ (show blkht) ++ "sizaaa: " ++ show (L.length xxx)
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
     --
     let outpoints =
-            map
-                (\(b, _) ->
-                     (getTxShortHash (outPointHash $ prevOutput b) 20, fromIntegral $ outPointIndex $ prevOutput b))
-                (inputs)
+            map (\(b, _) -> ((outPointHash $ prevOutput b), fromIntegral $ outPointIndex $ prevOutput b)) (inputs)
     LA.mapConcurrently_
         (\(o, oindx) -> do
              debug lg $
@@ -508,9 +507,8 @@ processConfTransaction tx bhash blkht txind = do
              liftIO $
                  TSH.insert
                      (txZtxiUtxoTable bp2pEnv)
-                     (getTxShortHash (txHash tx) 20, oindx)
+                     ((txHash tx), oindx)
                      (ZtxiUtxo
-                          (getTxShortHash (txHash tx) 20)
                           (txHash tx)
                           (oindx)
                           [bhash] -- if already present then ADD to the existing list of BlockHashes
@@ -547,7 +545,13 @@ processConfTransaction tx bhash blkht txind = do
     LA.mapConcurrently_
         (\(b, indx) -> do
              let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
-             zRPCDispatchTraceOutputs opt bhash -- (getChainIndexByHeight $ blkht - 10) -- TODO: use appropriate Stale marker blockhash
+             predBlkHash <- getChainIndexByHeight $ fromIntegral blkht - 10
+             case predBlkHash of
+                 Just pbh -> zRPCDispatchTraceOutputs opt pbh -- TODO: use appropriate Stale marker blockhash
+                 Nothing -> do
+                     if blkht > 11
+                         then throw InvalidBlockHashException
+                         else return []
              return ())
         (inputs)
     --

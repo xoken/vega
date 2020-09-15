@@ -61,15 +61,15 @@ import Xoken.NodeConfig
 
 data ZRPCRequest =
     ZRPCRequest
-        { zrqId :: Word32
-        , zrqParams :: ZRPCRequestParam
+        { zrqId :: !Word32
+        , zrqParams :: !ZRPCRequestParam
         }
     deriving (Show, Generic, Eq, Serialise)
 
 data ZRPCResponse =
     ZRPCResponse
-        { zrsMatchId :: Word32
-        , zrsPayload :: Either ZRPCError (Maybe ZRPCResponseBody)
+        { zrsMatchId :: !Word32
+        , zrsPayload :: !(Either ZRPCError (Maybe ZRPCResponseBody))
         }
     deriving (Show, Generic, Hashable, Eq, Serialise)
 
@@ -78,41 +78,42 @@ data ZRPCResponse =
 --
 data ZRPCRequestParam
     = ZValidateTx -- M =>> C
-          { vtBlockHash :: BlockHash
-          , vtBlockHeight :: Word32
-          , vtTxIndex :: Word32
-          , vtTxSerialized :: Tx
+          { vtBlockHash :: !BlockHash
+          , vtBlockHeight :: !Word32
+          , vtTxIndex :: !Word32
+          , vtTxSerialized :: !Tx
           }
     | ZPutOutpoint -- C =>> C | C =>> M  | M =>> C 
-          { poTxID :: TxHash
-          , poIndex :: Word32
-          , poScript :: ByteString
-          , poValue :: Word64
+          { poTxID :: !TxHash
+          , poIndex :: !Word32
+          , poScript :: !ByteString
+          , poValue :: !Word64
           }
     | ZGetOutpoint -- C =>> C | C =>> M  | M =>> C 
-          { goTxID :: TxHash
-          , goIndex :: Word32
-          , goBlockHash :: BlockHash
-          , goPredecessors :: DS.Set BlockHash
+          { goTxID :: !TxHash
+          , goIndex :: !Word32
+          , goBlockHash :: !BlockHash
+          , goPredecessors :: !(DS.Set BlockHash)
           }
     | ZUnspendOutpoint -- C =>> C | C =>> M |  M =>> C 
-          { goTxID :: TxHash
-          , goIndex :: Word32
+          { goTxID :: !TxHash
+          , goIndex :: !Word32
           }
     | ZTraceOutputs
-          { toTxID :: TxHash
-          , toIndex :: Word32
-          , toBlockHash :: BlockHash
+          { toTxID :: !TxHash
+          , toIndex :: !Word32
+          , toBlockHash :: !BlockHash
           }
     | ZGetBlockHeaders -- C =>> M
-          { gbBlockHash :: BlockHash
+          { gbBlockHash :: !BlockHash
           }
     | ZNotifyNewBlockHeader -- M =>> C
-          { blockHeaders :: !(BlockHash, Hash256)
+          { blockHash :: !BlockHash
+          , blockHeight :: !BlockHeight
           }
     | ZInvite -- M =>> C | C =>> M | C =>> C
-          { cluster :: [Node]
-          , clusterID :: ByteString
+          { cluster :: ![Node]
+          , clusterID :: !ByteString
           }
     | ZPing -- M =>> C | C =>> M | C =>> C
     deriving (Show, Generic, Eq, Serialise)
@@ -135,8 +136,8 @@ deriving instance Store BlockHeader
 
 data ZRPCError =
     ZRPCError
-        { zrsStatusMessage :: ZRPCErrors
-        , zrsErrorData :: Maybe String
+        { zrsStatusMessage :: !ZRPCErrors
+        , zrsErrorData :: !(Maybe String)
         }
     deriving (Show, Generic, Hashable, Eq, Serialise)
 
@@ -164,10 +165,10 @@ data ZRPCResponseBody
           {
           }
     | ZTraceOutputsResp
-          { ztxiUtxoList :: [(TxShortHash, Word32)]
+          { ztxiUtxoList :: [(TxHash, Word32)]
           }
     | ZGetBlockHeadersResp
-          { blockHeaders :: ![(BlockHash, Hash256)]
+          { blockHeaders :: ![(BlockHash, Int32)]
           }
     | ZNotifyNewBlockHeaderResp
           {
@@ -989,8 +990,8 @@ instance Show RPCErrors where
 
 data ChainIndex =
     ChainIndex
-        { hashIndex :: M.Map BlockHash Int32
-        , heightIndex :: [BlockHash]
+        { hashIndex :: M.Map BlockHash BlockHeight
+        , heightIndex :: M.Map BlockHeight BlockHash
         }
 
 --getOptPointKey :: TxShortHash -> Int16 -> B.ByteString

@@ -86,7 +86,7 @@ data BitcoinP2P =
         , indexUnconfirmedTx :: !(TVar Bool)
         , userDataCache :: !(HashTable Text (Text, Int32, Int32, UTCTime, [Text])) -- (name, quota, used, expiry time, roles)
         , txProcFailAttempts :: !(TVar Int)
-        , txZtxiUtxoTable :: !(TSH.TSHashTable (TxShortHash, Word32) ZtxiUtxo)
+        , txZtxiUtxoTable :: !(TSH.TSHashTable (TxHash, Word32) ZtxiUtxo)
         , confChainIndex :: !(TVar (ChainIndex))
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))

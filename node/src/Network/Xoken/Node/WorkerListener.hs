@@ -58,12 +58,12 @@ import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Node.Service.Chain
 import Network.Xoken.Node.WorkerDispatcher
 import Network.Xoken.Transaction.Common
 import Prelude as P
 import StmContainers.Map as SM
 import System.Logger as LG
-
 import Text.Printf
 import Xoken.NodeConfig as NC
 
@@ -128,20 +128,29 @@ requestHandler sock writeLock msg = do
                                     Left (e :: SomeException) -> do
                                         return $ errorResp mid (show e)
                             ZTraceOutputs toTxID toIndex toBlockHash -> do
-                                let shortHash = (getTxShortHash toTxID) 20
-                                ret <- traceStaleSpentOutputs (txZtxiUtxoTable bp2pEnv) (shortHash, toIndex) toBlockHash
+                                ret <- traceStaleSpentOutputs (txZtxiUtxoTable bp2pEnv) (toTxID, toIndex) toBlockHash
                                 return $ successResp mid $ ZTraceOutputsResp ret
                             ZValidateTx bhash blkht txind tx -> do
                                 liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
                                 debug lg $ LG.msg $ "decoded ZValidateTx : " ++ (show $ txHash tx)
                                 res <-
-                                    LE.try $ processConfTransaction tx bhash (fromIntegral txind) (fromIntegral blkht)
+                                    LE.try $ processConfTransaction tx bhash (fromIntegral blkht) (fromIntegral txind)
                                 case res of
                                     Right () -> do
                                         liftIO $
                                             print $
                                             "ZValidateTx - sending RESPONSE " ++ (show $ txHash tx) ++ (show mid)
                                         return $ successResp mid (ZValidateTxResp True)
+                                    Left (e :: SomeException) -> return $ errorResp mid (show e)
+                            ZNotifyNewBlockHeader bhash blkht -> do
+                                liftIO $ print $ "ZNotifyNewBlockHeader - REQUEST " ++ (show (bhash, blkht))
+                                debug lg $ LG.msg $ "decoded ZNotifyNewBlockHeader : " ++ (show (bhash, blkht))
+                                res <- LE.try $ addBlockToChainIndex bhash (fromIntegral blkht)
+                                case res of
+                                    Right () -> do
+                                        liftIO $
+                                            print $ "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show (bhash, blkht))
+                                        return $ successResp mid (ZNotifyNewBlockHeaderResp)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
             Left e -> do
                 err lg $ LG.msg $ "Error: deserialise Failed (requestHandler) : " ++ (show e)

@@ -117,8 +117,7 @@ zRPCDispatchGetOutpoint outPoint bhash = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let midCode = getTxMidCode $ outPointHash outPoint
-        opIndex = outPointIndex $ outPoint
+    let opIndex = outPointIndex $ outPoint
         lexKey = getTxShortCode $ outPointHash outPoint
     worker <- getRemoteWorker lexKey GetOutpoint
     case worker of
@@ -148,21 +147,19 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
                     throw mex
 
-zRPCDispatchTraceOutputs :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> m ([(TxShortHash, Word32)])
+zRPCDispatchTraceOutputs :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> m ([(TxHash, Word32)])
 zRPCDispatchTraceOutputs outPoint bhash = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         txZUT = txZtxiUtxoTable bp2pEnv
-    let shortHash = (getTxShortHash $ outPointHash outPoint) 20
-        midCode = getTxMidCode $ outPointHash outPoint
-        opIndex = outPointIndex outPoint
+    let opIndex = outPointIndex outPoint
         lexKey = getTxShortCode $ outPointHash outPoint
     worker <- getRemoteWorker lexKey TraceOutputs
     case worker of
         Nothing -> do
-            traceStaleSpentOutputs txZUT (shortHash, opIndex) bhash
+            traceStaleSpentOutputs txZUT (outPointHash outPoint, opIndex) bhash
         Just wrk -> do
             let mparam = ZTraceOutputs (outPointHash outPoint) (outPointIndex outPoint) bhash
             resp <- zRPCRequestDispatcher mparam wrk
@@ -177,6 +174,34 @@ zRPCDispatchTraceOutputs outPoint bhash = do
                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
                     throw mex
+
+zRPCDispatchNotifyNewBlockHeader :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> BlockHeight -> m ()
+zRPCDispatchNotifyNewBlockHeader bhash blkht = do
+    dbe' <- getDB
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        txZUT = txZtxiUtxoTable bp2pEnv
+    mapM_
+        (\wrk -> do
+             case wrk of
+                 SelfWorker {..} -> return ()
+                 RemoteWorker {..} -> do
+                     let mparam = ZNotifyNewBlockHeader bhash blkht
+                     resp <- zRPCRequestDispatcher mparam wrk
+                     case zrsPayload resp of
+                         Right spl -> do
+                             case spl of
+                                 Just pl ->
+                                     case pl of
+                                         ZNotifyNewBlockHeaderResp -> return ()
+                                 Nothing -> throw InvalidMessageTypeException
+                         Left er -> do
+                             err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
+                             let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
+                             throw mex)
+        (wrkrs)
 
 zRPCRequestDispatcher :: (HasXokenNodeEnv env m, MonadIO m) => ZRPCRequestParam -> Worker -> m (ZRPCResponse)
 zRPCRequestDispatcher param wrk = do
@@ -241,30 +266,35 @@ getRemoteWorker shardingLex role = do
 --     return ()
 traceStaleSpentOutputs ::
        (HasXokenNodeEnv env m, MonadIO m)
-    => (TSH.TSHashTable (TxShortHash, Word32) ZtxiUtxo)
-    -> (TxShortHash, Word32)
+    => (TSH.TSHashTable (TxHash, Word32) ZtxiUtxo)
+    -> (TxHash, Word32)
     -> BlockHash
-    -> m ([(TxShortHash, Word32)])
-traceStaleSpentOutputs txZUT (shortHash, opIndex) staleMarker = do
-    op <- liftIO $ TSH.lookup (txZUT) (shortHash, opIndex)
+    -> m ([(TxHash, Word32)])
+traceStaleSpentOutputs txZUT (txId, opIndex) staleMarker = do
+    op <- liftIO $ TSH.lookup (txZUT) (txId, opIndex)
+    lg <- getLogger
     case op of
         Just zu -> do
             res <-
                 P.mapM
                     (\opt -> do
-                         val <- traceStaleSpentOutputs txZUT opt staleMarker
+                         val <- zRPCDispatchTraceOutputs (OutPoint (fst opt) (snd opt)) staleMarker
                          x <-
                              traverse
                                  (\bhsh -> do
                                       predOf <- bhsh `predecessorOf` staleMarker
                                       if predOf
-                                          then return (val ++ [(zuTxShortHash zu, zuOpIndex zu)])
+                                          then return (val ++ [(zuTxHash zu, zuOpIndex zu)])
                                           else return val)
                                  (zuBlockHash zu)
                          return $ P.concat x)
                     (zuInputs zu)
             -- delete in same context
-            mapM_ (\x -> do liftIO $ TSH.delete (txZUT) (fst x, snd x)) (DS.toList $ DS.fromList (P.concat res))
+            mapM_
+                (\x -> do
+                     debug lg $ LG.msg $ "Deleting ZUT : " ++ show (fst x, snd x)
+                     liftIO $ TSH.delete (txZUT) (fst x, snd x))
+                (DS.toList $ DS.fromList (P.concat res))
             return $ P.concat res
         Nothing -> return []
 
@@ -287,9 +317,8 @@ validateOutpoint outPoint waitSecs predecessors curBlkHash = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         txZUT = txZtxiUtxoTable bp2pEnv
         txSync = txSynchronizer bp2pEnv
-        shortHash = getTxShortHash (outPointHash outPoint) 20
         opindx = fromIntegral $ outPointIndex outPoint
-    op <- liftIO $ TSH.lookup (txZUT) (shortHash, opindx)
+    op <- liftIO $ TSH.lookup (txZUT) (outPointHash outPoint, opindx)
     case op of
         Just zu -> do
             debug lg $ LG.msg $ " ZUT entry found : " ++ (show zu)
@@ -300,11 +329,11 @@ validateOutpoint outPoint waitSecs predecessors curBlkHash = do
                          else return ())
                 (zuSpending zu)
             -- eagerly mark spent, in the unlikely scenario script stack eval fails, mark unspent
-            let vx = spendZtxiUtxo curBlkHash (shortHash) (opindx) zu
-            liftIO $ TSH.insert (txZtxiUtxoTable bp2pEnv) (shortHash, opindx) vx
+            let vx = spendZtxiUtxo curBlkHash (outPointHash outPoint) (opindx) zu
+            liftIO $ TSH.insert (txZtxiUtxoTable bp2pEnv) (outPointHash outPoint, opindx) vx
             return $ zuSatoshiValue zu
         Nothing -> do
-            debug lg $ LG.msg $ " ZUT entry not found for : " ++ (show (shortHash, opindx))
+            debug lg $ LG.msg $ " ZUT entry not found for : " ++ (show (outPointHash outPoint, opindx))
             vl <- liftIO $ TSH.lookup txSync (outPointHash outPoint)
             event <-
                 case vl of
@@ -322,11 +351,10 @@ validateOutpoint outPoint waitSecs predecessors curBlkHash = do
                     throw TxIDNotFoundException
                 else validateOutpoint outPoint waitSecs predecessors curBlkHash
 
-spendZtxiUtxo :: BlockHash -> TxShortHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
+spendZtxiUtxo :: BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
 spendZtxiUtxo bh tsh ind zu =
     ZtxiUtxo
-        { zuTxShortHash = zuTxShortHash zu
-        , zuTxFullHash = zuTxFullHash zu
+        { zuTxHash = zuTxHash zu
         , zuOpIndex = zuOpIndex zu
         , zuBlockHash = zuBlockHash zu
         , zuBlockHeight = zuBlockHeight zu
@@ -335,11 +363,10 @@ spendZtxiUtxo bh tsh ind zu =
         , zuSatoshiValue = zuSatoshiValue zu
         }
 
-unSpendZtxiUtxo :: BlockHash -> TxShortHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
+unSpendZtxiUtxo :: BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
 unSpendZtxiUtxo bh tsh ind zu =
     ZtxiUtxo
-        { zuTxShortHash = zuTxShortHash zu
-        , zuTxFullHash = zuTxFullHash zu
+        { zuTxHash = zuTxHash zu
         , zuOpIndex = zuOpIndex zu
         , zuBlockHash = zuBlockHash zu
         , zuBlockHeight = zuBlockHeight zu

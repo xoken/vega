@@ -145,12 +145,11 @@ data ServerState =
 
 data ZtxiUtxo =
     ZtxiUtxo
-        { zuTxShortHash :: !TxShortHash
-        , zuTxFullHash :: !TxHash
+        { zuTxHash :: !TxHash
         , zuOpIndex :: !Word32
         , zuBlockHash :: ![BlockHash]
         , zuBlockHeight :: !Word32
-        , zuInputs :: ![(TxShortHash, Word32)]
+        , zuInputs :: ![(TxHash, Word32)]
         , zuSpending :: ![Spending]
         , zuSatoshiValue :: !Word64
         }
@@ -159,7 +158,7 @@ data ZtxiUtxo =
 data Spending =
     Spending
         { spBlockHash :: !BlockHash
-        , spTxShortHash :: !TxShortHash
+        , spTxShortHash :: !TxHash
         , spInputIndex :: !Word32
         }
     deriving (Show, Eq, Ord, Generic, Serialise)

@@ -97,28 +97,25 @@ import qualified Xoken.NodeConfig as NC
 
 getChainIndex :: IO ChainIndex
 getChainIndex = do
-    return $ ChainIndex M.empty []
+    return $ ChainIndex M.empty M.empty
 
-getChainIndexByHeight :: (HasXokenNodeEnv env m, MonadIO m) => Int32 -> m (Maybe BlockHash)
-getChainIndexByHeight h = do
+getChainIndexByHeight :: (HasXokenNodeEnv env m, MonadIO m) => BlockHeight -> m (Maybe BlockHash)
+getChainIndexByHeight ht = do
     bp2pEnv <- getBitcoinP2P
     ci <- liftIO $ readTVarIO (confChainIndex bp2pEnv)
-    let ch = hashIndex ci
-        cht = heightIndex ci
-        mh = M.lookup (head (heightIndex ci)) ch
-    case mh of
-        Nothing -> return Nothing
-        Just h' -> return $ Just $ cht !! (fromIntegral $ h' - h)
+    return $ M.lookup ht (heightIndex ci)
 
-getChainIndexByHash :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> m (Maybe Int32)
+getChainIndexByHash :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> m (Maybe BlockHeight)
 getChainIndexByHash h = do
     bp2pEnv <- getBitcoinP2P
     ci <- liftIO $ readTVarIO (confChainIndex bp2pEnv)
     return $ M.lookup (h) (hashIndex ci)
 
-addBlockToChainIndex :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> Int32 -> m ()
+addBlockToChainIndex :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> BlockHeight -> m ()
 addBlockToChainIndex hs ht = do
     bp2pEnv <- getBitcoinP2P
     liftIO $
         atomically $
-        modifyTVar' (confChainIndex bp2pEnv) (\(ChainIndex ch cht) -> ChainIndex (M.insert hs ht ch) (hs : cht))
+        modifyTVar'
+            (confChainIndex bp2pEnv)
+            (\(ChainIndex ch cht) -> ChainIndex (M.insert hs ht ch) (M.insert ht hs cht))
