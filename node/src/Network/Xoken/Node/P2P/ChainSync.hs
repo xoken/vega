@@ -258,9 +258,10 @@ processHeaders hdrs = do
                              liftIO $ do
                                  err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
                                  throw KeyValueDBInsertException
-                     addBlockToChainIndex (headerHash $ fst $ snd y) (fromIntegral $ fst y)
-                     zRPCDispatchNotifyNewBlockHeader (headerHash $ fst $ snd y) (fromIntegral $ fst y))
+                     addBlockToChainIndex (headerHash $ fst $ snd y) (fromIntegral $ fst y))
                 indexed
+            let headers = map (\z -> ZBlockHeader (headerHash $ fst $ snd z) (fromIntegral $ fst z)) indexed
+            zRPCDispatchNotifyNewBlockHeader headers
             unless (L.null indexed) $ do
                 markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
                 liftIO $ putMVar (bestBlockUpdated bp2pEnv) True

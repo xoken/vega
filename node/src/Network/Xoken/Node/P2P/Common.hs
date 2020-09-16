@@ -271,6 +271,9 @@ putDB rkdb k v = R.put rkdb (DS.encode k) (DS.encode v)
 putDBCF :: (Store a, Store b, MonadIO m) => R.DB -> R.ColumnFamily -> a -> b -> m ()
 putDBCF rkdb cf k v = R.putCF rkdb cf (DS.encode k) (DS.encode v)
 
+deleteDBCF :: (Store a, MonadIO m) => R.DB -> R.ColumnFamily -> a -> m ()
+deleteDBCF rkdb cf k = R.deleteCF rkdb cf (DS.encode k)
+
 getDB' :: (Store a, Store b, MonadIO m) => R.DB -> a -> m (Maybe b)
 getDB' rkdb k = do
     res <- R.get rkdb (DS.encode k)

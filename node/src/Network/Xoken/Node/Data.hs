@@ -103,19 +103,26 @@ data ZRPCRequestParam
           { toTxID :: !TxHash
           , toIndex :: !Word32
           , toBlockHash :: !BlockHash
+          , toIsPrevFresh :: !Bool
           }
     | ZGetBlockHeaders -- C =>> M
           { gbBlockHash :: !BlockHash
           }
     | ZNotifyNewBlockHeader -- M =>> C
-          { blockHash :: !BlockHash
-          , blockHeight :: !BlockHeight
+          { znBlockHeaders :: ![ZBlockHeader]
           }
     | ZInvite -- M =>> C | C =>> M | C =>> C
           { cluster :: ![Node]
           , clusterID :: !ByteString
           }
     | ZPing -- M =>> C | C =>> M | C =>> C
+    deriving (Show, Generic, Eq, Serialise)
+
+data ZBlockHeader =
+    ZBlockHeader
+        { zBlockHash :: !BlockHash
+        , zBlockHeight :: !BlockHeight
+        }
     deriving (Show, Generic, Eq, Serialise)
 
 deriving instance Store BlockHash
@@ -165,7 +172,7 @@ data ZRPCResponseBody
           {
           }
     | ZTraceOutputsResp
-          { ztxiUtxoList :: [(TxHash, Word32)]
+          { ztIsRoot :: !Bool
           }
     | ZGetBlockHeadersResp
           { blockHeaders :: ![(BlockHash, Int32)]

@@ -127,8 +127,13 @@ requestHandler sock writeLock msg = do
                                         return $ successResp mid $ ZGetOutpointResp val B.empty
                                     Left (e :: SomeException) -> do
                                         return $ errorResp mid (show e)
-                            ZTraceOutputs toTxID toIndex toBlockHash -> do
-                                ret <- traceStaleSpentOutputs (txZtxiUtxoTable bp2pEnv) (toTxID, toIndex) toBlockHash
+                            ZTraceOutputs toTxID toIndex toBlockHash prevFresh -> do
+                                ret <-
+                                    traceStaleSpentOutputs
+                                        (txZtxiUtxoTable bp2pEnv)
+                                        (toTxID, toIndex)
+                                        toBlockHash
+                                        prevFresh
                                 return $ successResp mid $ ZTraceOutputsResp ret
                             ZValidateTx bhash blkht txind tx -> do
                                 liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
@@ -142,14 +147,20 @@ requestHandler sock writeLock msg = do
                                             "ZValidateTx - sending RESPONSE " ++ (show $ txHash tx) ++ (show mid)
                                         return $ successResp mid (ZValidateTxResp True)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
-                            ZNotifyNewBlockHeader bhash blkht -> do
-                                liftIO $ print $ "ZNotifyNewBlockHeader - REQUEST " ++ (show (bhash, blkht))
-                                debug lg $ LG.msg $ "decoded ZNotifyNewBlockHeader : " ++ (show (bhash, blkht))
-                                res <- LE.try $ addBlockToChainIndex bhash (fromIntegral blkht)
+                            ZNotifyNewBlockHeader headers -> do
+                                liftIO $ print $ "ZNotifyNewBlockHeader - REQUEST " ++ (show $ P.head headers)
+                                debug lg $ LG.msg $ "decoded ZNotifyNewBlockHeader : " ++ (show $ P.head headers)
+                                res <-
+                                    LE.try $
+                                    mapM_
+                                        (\(ZBlockHeader bhash blkht) -> do
+                                             addBlockToChainIndex bhash (fromIntegral blkht))
+                                        headers
                                 case res of
                                     Right () -> do
                                         liftIO $
-                                            print $ "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show (bhash, blkht))
+                                            print $
+                                            "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show $ P.head headers)
                                         return $ successResp mid (ZNotifyNewBlockHeaderResp)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
             Left e -> do

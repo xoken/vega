@@ -547,11 +547,13 @@ processConfTransaction tx bhash blkht txind = do
              let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
              predBlkHash <- getChainIndexByHeight $ fromIntegral blkht - 10
              case predBlkHash of
-                 Just pbh -> zRPCDispatchTraceOutputs opt pbh -- TODO: use appropriate Stale marker blockhash
+                 Just pbh -> do
+                     _ <- zRPCDispatchTraceOutputs opt pbh True -- TODO: use appropriate Stale marker blockhash
+                     return ()
                  Nothing -> do
                      if blkht > 11
                          then throw InvalidBlockHashException
-                         else return []
+                         else return ()
              return ())
         (inputs)
     --
