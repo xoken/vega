@@ -265,6 +265,7 @@ traceStaleSpentOutputs ::
     -> m (Bool)
 traceStaleSpentOutputs txZUT (txId, opIndex) staleMarker prevFresh = do
     op <- liftIO $ TSH.lookup (txZUT) (txId, opIndex)
+    bp2pEnv <- getBitcoinP2P
     dbe <- getDB
     let rkdb = rocksDB dbe
         cfs = rocksCF dbe
@@ -281,6 +282,11 @@ traceStaleSpentOutputs txZUT (txId, opIndex) staleMarker prevFresh = do
                          else do
                              isRoot <- zRPCDispatchTraceOutputs (OutPoint (fst opt) (snd opt)) staleMarker False
                              debug lg $ LG.msg $ "Deleting ZUT : " ++ show (txId, opIndex)
+                             liftIO $
+                                 TSH.insert
+                                     (recentPrunedOutputs bp2pEnv)
+                                     (getTxShortHash (txId) 20, opIndex)
+                                     (zuSatoshiValue zu)
                              liftIO $ TSH.delete (txZUT) (txId, opIndex)
                              cf <- liftIO $ TSH.lookup cfs ("finalized_outputs")
                              if isRoot
@@ -326,7 +332,8 @@ validateOutpoint outPoint waitSecs predecessors curBlkHash = do
         txZUT = txZtxiUtxoTable bp2pEnv
         txSync = txSynchronizer bp2pEnv
         opindx = fromIntegral $ outPointIndex outPoint
-    op <- liftIO $ TSH.lookup (txZUT) (outPointHash outPoint, opindx)
+        optxid = outPointHash outPoint
+    op <- liftIO $ TSH.lookup (txZUT) (optxid, opindx)
     case op of
         Just zu -> do
             debug lg $ LG.msg $ " ZUT entry found : " ++ (show zu)
@@ -337,27 +344,34 @@ validateOutpoint outPoint waitSecs predecessors curBlkHash = do
                          else return ())
                 (zuSpending zu)
             -- eagerly mark spent, in the unlikely scenario script stack eval fails, mark unspent
-            let vx = spendZtxiUtxo curBlkHash (outPointHash outPoint) (opindx) zu
-            liftIO $ TSH.insert (txZtxiUtxoTable bp2pEnv) (outPointHash outPoint, opindx) vx
+            let vx = spendZtxiUtxo curBlkHash (optxid) (opindx) zu
+            liftIO $ TSH.insert (txZtxiUtxoTable bp2pEnv) (optxid, opindx) vx
             return $ zuSatoshiValue zu
         Nothing -> do
-            debug lg $ LG.msg $ " ZUT entry not found for : " ++ (show (outPointHash outPoint, opindx))
-            vl <- liftIO $ TSH.lookup txSync (outPointHash outPoint)
-            event <-
-                case vl of
-                    Just evt -> return evt
-                    Nothing -> liftIO $ EV.new
-            liftIO $ TSH.insert txSync (outPointHash outPoint) event
-            tofl <- liftIO $ waitTimeout event (1000000 * (fromIntegral $ waitSecs))
-            if tofl == False
-                then do
-                    liftIO $ TSH.delete (txSync) (outPointHash outPoint)
+            pres <- liftIO $ TSH.lookup (recentPrunedOutputs bp2pEnv) (getTxShortHash optxid 20, opindx)
+            case pres of
+                Just recPruned -> do
                     debug lg $
-                        LG.msg $
-                        "TxIDNotFoundException: While querying txid_outputs for (TxID, Index): " ++
-                        (show $ txHashToHex $ outPointHash outPoint) ++ ", " ++ show (outPointIndex $ outPoint) ++ ")"
-                    throw TxIDNotFoundException
-                else validateOutpoint outPoint waitSecs predecessors curBlkHash
+                        LG.msg $ " O/p pruned recently : " ++ show optxid ++ " retrieving value : " ++ (show recPruned)
+                    return recPruned
+                Nothing -> do
+                    debug lg $ LG.msg $ " ZUT entry not found for : " ++ (show (optxid, opindx))
+                    vl <- liftIO $ TSH.lookup txSync optxid
+                    event <-
+                        case vl of
+                            Just evt -> return evt
+                            Nothing -> liftIO $ EV.new
+                    liftIO $ TSH.insert txSync optxid event
+                    tofl <- liftIO $ waitTimeout event (1000000 * (fromIntegral $ waitSecs))
+                    if tofl == False
+                        then do
+                            liftIO $ TSH.delete txSync optxid
+                            debug lg $
+                                LG.msg $
+                                "TxIDNotFoundException: While querying txid_outputs for (TxID, Index): " ++
+                                (show $ txHashToHex $ optxid) ++ ", " ++ show (outPointIndex $ outPoint) ++ ")"
+                            throw TxIDNotFoundException
+                        else validateOutpoint outPoint waitSecs predecessors curBlkHash
 
 spendZtxiUtxo :: BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
 spendZtxiUtxo bh tsh ind zu =

@@ -158,9 +158,10 @@ runEpochSwitcher =
         liftIO $ atomically $ writeTVar (epochType bp2pEnv) epoch
         if minute == 0
             then do
-                let (op_cf,tx_cf) = case epoch of
-                                        True -> ("ep_outputs_odd", "ep_transactions_odd")
-                                        False -> ("ep_outputs_even", "ep_transactions_even")
+                let (op_cf, tx_cf) =
+                        case epoch of
+                            True -> ("ep_outputs_odd", "ep_transactions_odd")
+                            False -> ("ep_outputs_even", "ep_transactions_even")
                 --R.dropCF rkdb op_cf
                 --R.dropCF rkdb tx_cf
                 --o_ptr <- R.createCF rkdb config op_cf
@@ -182,7 +183,7 @@ insertEpochTxIdOutputs ::
 insertEpochTxIdOutputs conn epoch (txid, outputIndex) address script value cfs = do
     lg <- getLogger
     cf <- liftIO $ TSH.lookup cfs (getEpochTxCF epoch)
-    res <- liftIO $ try $ putDBCF conn (fromJust cf) (txid,outputIndex) (address,script,value)
+    res <- liftIO $ try $ putDBCF conn (fromJust cf) (txid, outputIndex) (address, script, value)
     case res of
         Right _ -> return ()
         Left (e :: SomeException) -> do
@@ -216,62 +217,20 @@ processUnconfTransaction tx = do
     inputs <-
         mapM
             (\(b, j) -> do
-                 tuple <-
-                     liftIO $
-                     TSH.lookup
-                         (txOutputValuesCache bp2pEnv)
-                         (getTxShortHash (txHash tx) (txOutputValuesCacheKeyBits $ nodeConfig bp2pEnv))
                  val <-
-                     case tuple of
-                         Just (ftxh, indexvals) ->
-                             if ftxh == (outPointHash $ prevOutput b)
-                                 then do
-                                     let rr =
-                                             head $
-                                             filter
-                                                 (\x -> fst x == (fromIntegral $ outPointIndex $ prevOutput b))
-                                                 indexvals
-                                     return $ snd $ rr
-                                 else do
-                                     valFromDB <-
-                                         liftIO $
-                                         getSatsValueFromEpochOutpoint
-                                             conn
-                                             epoch
-                                             (txSynchronizer bp2pEnv)
-                                             lg
-                                             net
-                                             (prevOutput b)
-                                             (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
-                                             cfs
-                                     return valFromDB
-                         Nothing -> do
-                             valFromDB <-
-                                 liftIO $
-                                 getSatsValueFromEpochOutpoint
-                                     conn
-                                     epoch
-                                     (txSynchronizer bp2pEnv)
-                                     lg
-                                     net
-                                     (prevOutput b)
-                                     (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
-                                     cfs
-                             return valFromDB
-                 return
-                     ((txHashToHex $ outPointHash $ prevOutput b, outPointIndex $ prevOutput b), j, val))
+                     liftIO $
+                     getSatsValueFromEpochOutpoint
+                         conn
+                         epoch
+                         (txSynchronizer bp2pEnv)
+                         lg
+                         net
+                         (prevOutput b)
+                         (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
+                         cfs
+                 return ((txHashToHex $ outPointHash $ prevOutput b, outPointIndex $ prevOutput b), j, val))
             inAddrs
-    let ovs =
-            map
-                (\(a, o, i) ->
-                     ( fromIntegral $ i
-                     , (a, (scriptOutput o), fromIntegral $ outValue o)))
-                outAddrs
-    liftIO $
-        TSH.insert
-            (txOutputValuesCache bp2pEnv)
-            (getTxShortHash (txHash tx) (txOutputValuesCacheKeyBits $ nodeConfig bp2pEnv))
-            (txHash tx, ovs)
+    let ovs = map (\(a, o, i) -> (fromIntegral $ i, (a, (scriptOutput o), fromIntegral $ outValue o))) outAddrs
     --
     mapM_
         (\(a, o, i) -> do
@@ -294,7 +253,7 @@ processUnconfTransaction tx = do
     --
     cf <- liftIO $ TSH.lookup cfs (getEpochTxCF epoch)
     liftIO $ debug lg $ LG.msg $ val "[rdb] b processUnconfTx"
-    res <- liftIO $ try $ putDBCF conn (fromJust cf) (txHashToHex $ txHash tx) (tx,inputs,fees)
+    res <- liftIO $ try $ putDBCF conn (fromJust cf) (txHashToHex $ txHash tx) (tx, inputs, fees)
     liftIO $ debug lg $ LG.msg $ val "[rdb] a processUnconfTx"
     case res of
         Right _ -> return ()
@@ -319,7 +278,10 @@ getSatsValueFromEpochOutpoint ::
     -> IO (Text, C.ByteString, Int64)
 getSatsValueFromEpochOutpoint rkdb epoch txSync lg net outPoint waitSecs cfs = do
     cf <- liftIO $ TSH.lookup cfs (getEpochTxCF epoch)
-    res <- liftIO $ try $ getDBCF rkdb (fromJust cf) (txHashToHex $ outPointHash outPoint,fromIntegral $ outPointIndex outPoint :: Int32)
+    res <-
+        liftIO $
+        try $
+        getDBCF rkdb (fromJust cf) (txHashToHex $ outPointHash outPoint, fromIntegral $ outPointIndex outPoint :: Int32)
     case res of
         Right Nothing -> do
             debug lg $
@@ -337,8 +299,7 @@ getSatsValueFromEpochOutpoint rkdb epoch txSync lg net outPoint waitSecs cfs = d
                 then do
                     liftIO $ TSH.delete txSync (outPointHash outPoint)
                     debug lg $
-                        LG.msg $
-                            "[Unconfirmed] TxIDNotFoundException: " ++ (show $ txHashToHex $ outPointHash outPoint)
+                        LG.msg $ "[Unconfirmed] TxIDNotFoundException: " ++ (show $ txHashToHex $ outPointHash outPoint)
                     throw TxIDNotFoundException
                 else getSatsValueFromEpochOutpoint rkdb epoch txSync lg net outPoint waitSecs cfs
         Right (Just sv) -> return sv
