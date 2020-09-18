@@ -126,9 +126,10 @@ zRPCDispatchGetOutpoint outPoint bhash = do
             val <-
                 validateOutpoint
                     (outPoint)
-                    (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                     (DS.singleton bhash) -- TODO: needs to contains more predecessors
                     bhash
+                    (250)
+                    (1000 * (txProcInputDependenciesWait $ nodeConfig bp2pEnv))
             return val
         Just wrk -> do
             liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
@@ -272,43 +273,56 @@ traceStaleSpentOutputs txZUT (txId, opIndex) staleMarker prevFresh = do
     lg <- getLogger
     case op of
         Just zu -> do
+            cf <- liftIO $ TSH.lookup cfs ("finalized_outputs")
+            rst <- P.mapM (\bhash -> bhash `predecessorOf` staleMarker) (zuBlockHash zu)
+            let noneStale = P.null $ P.filter (\x -> x == True) rst
+            isLast <- liftIO $ newIORef False
             P.mapM_
                 (\opt -> do
-                     rst <- P.mapM (\bhash -> bhash `predecessorOf` staleMarker) (zuBlockHash zu)
-                     if P.null $ P.filter (\x -> x == True) rst
+                     if noneStale
                          then do
                              _ <- zRPCDispatchTraceOutputs (OutPoint (fst opt) (snd opt)) staleMarker True
                              return ()
                          else do
-                             isRoot <- zRPCDispatchTraceOutputs (OutPoint (fst opt) (snd opt)) staleMarker False
-                             debug lg $ LG.msg $ "Deleting ZUT : " ++ show (txId, opIndex)
-                             liftIO $
-                                 TSH.insert
-                                     (recentPrunedOutputs bp2pEnv)
-                                     (getTxShortHash (txId) 20, opIndex)
-                                     (zuSatoshiValue zu)
-                             liftIO $ TSH.delete (txZUT) (txId, opIndex)
-                             cf <- liftIO $ TSH.lookup cfs ("finalized_outputs")
-                             if isRoot
-                                 then do
-                                     res <- liftIO $ try $ deleteDBCF rkdb (fromJust cf) (txId, opIndex)
-                                     case res of
-                                         Right _ -> return ()
-                                         Left (e :: SomeException) -> do
-                                             err lg $ LG.msg $ "Error: Deleting from " ++ (show cf) ++ ": " ++ show e
-                                             throw KeyValueDBInsertException
-                                 else return ()
-                             if prevFresh == True
-                                 then do
-                                     res <-
-                                         liftIO $ try $ putDBCF rkdb (fromJust cf) (txId, opIndex) (zuSatoshiValue zu)
-                                     case res of
-                                         Right _ -> return ()
-                                         Left (e :: SomeException) -> do
-                                             err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
-                                             throw KeyValueDBInsertException
+                             res <- zRPCDispatchTraceOutputs (OutPoint (fst opt) (snd opt)) staleMarker False
+                             if res
+                                 then liftIO $ writeIORef isLast True
                                  else return ())
                 (zuInputs zu)
+            if not noneStale -- if current ZUT is stale
+                then do
+                    last <- liftIO $ readIORef isLast
+                    if not prevFresh
+                        then do
+                            debug lg $ LG.msg $ "Deleting stale ZUT : " ++ show (txId, opIndex)
+                            liftIO $ TSH.delete (txZUT) (txId, opIndex)
+                            liftIO $
+                                TSH.insert
+                                    (recentPrunedOutputs bp2pEnv)
+                                    (getTxShortHash (txId) 20, opIndex)
+                                    (zuSatoshiValue zu)
+                        else return ()
+                    if not prevFresh && last
+                        then do
+                            debug lg $ LG.msg $ "Deleting finalized spent-TXO : " ++ show (txId, opIndex)
+                            res <- liftIO $ try $ deleteDBCF rkdb (fromJust cf) (txId, opIndex)
+                            case res of
+                                Right _ -> return ()
+                                Left (e :: SomeException) -> do
+                                    err lg $ LG.msg $ "Error: Deleting from " ++ (show cf) ++ ": " ++ show e
+                                    throw KeyValueDBInsertException
+                        else return ()
+                    if prevFresh
+                        then do
+                            debug lg $ LG.msg $ "Inserting finalized UTXO : " ++ show (txId, opIndex)
+                            res <- liftIO $ try $ putDBCF rkdb (fromJust cf) (txId, opIndex) (zuSatoshiValue zu)
+                            case res of
+                                Right _ -> return ()
+                                Left (e :: SomeException) -> do
+                                    err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
+                                    throw KeyValueDBInsertException
+                        else return ()
+                else return ()
             return (False)
         Nothing -> return (True)
 
@@ -323,8 +337,14 @@ predecessorOf x y = do
     return $ (M.lookup x ch) < (M.lookup y ch)
 
 validateOutpoint ::
-       (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => OutPoint -> Int -> DS.Set BlockHash -> BlockHash -> m (Word64)
-validateOutpoint outPoint waitSecs predecessors curBlkHash = do
+       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+    => OutPoint
+    -> DS.Set BlockHash
+    -> BlockHash
+    -> Int
+    -> Int
+    -> m (Word64)
+validateOutpoint outPoint predecessors curBlkHash wait maxWait = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
@@ -362,16 +382,19 @@ validateOutpoint outPoint waitSecs predecessors curBlkHash = do
                             Just evt -> return evt
                             Nothing -> liftIO $ EV.new
                     liftIO $ TSH.insert txSync optxid event
-                    tofl <- liftIO $ waitTimeout event (1000000 * (fromIntegral $ waitSecs))
+                    tofl <- liftIO $ waitTimeout event (1000 * (fromIntegral wait))
                     if tofl == False
-                        then do
-                            liftIO $ TSH.delete txSync optxid
-                            debug lg $
-                                LG.msg $
-                                "TxIDNotFoundException: While querying txid_outputs for (TxID, Index): " ++
-                                (show $ txHashToHex $ optxid) ++ ", " ++ show (outPointIndex $ outPoint) ++ ")"
-                            throw TxIDNotFoundException
-                        else validateOutpoint outPoint waitSecs predecessors curBlkHash
+                        then if (wait < 66000)
+                                 then do
+                                     validateOutpoint outPoint predecessors curBlkHash (2 * wait) maxWait
+                                 else do
+                                     liftIO $ TSH.delete txSync optxid
+                                     debug lg $
+                                         LG.msg $ "TxIDNotFoundException: While querying: " ++ show (optxid, opindx)
+                                     throw TxIDNotFoundException
+                        else do
+                            debug lg $ LG.msg $ "event received _available_: " ++ show (optxid, opindx)
+                            validateOutpoint outPoint predecessors curBlkHash wait maxWait
 
 spendZtxiUtxo :: BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
 spendZtxiUtxo bh tsh ind zu =

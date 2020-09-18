@@ -116,9 +116,10 @@ requestHandler sock writeLock msg = do
                                     LE.try $
                                     validateOutpoint
                                         (OutPoint txId index)
-                                        (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                         (DS.singleton bhash) -- TODO: needs to contains more predecessors
                                         bhash
+                                        (250)
+                                        (1000 * (txProcInputDependenciesWait $ nodeConfig bp2pEnv))
                                 case zz of
                                     Right val -> do
                                         liftIO $
