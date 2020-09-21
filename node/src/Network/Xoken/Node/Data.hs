@@ -104,6 +104,7 @@ data ZRPCRequestParam
           , toIndex :: !Word32
           , toBlockHash :: !BlockHash
           , toIsPrevFresh :: !Bool
+          , htt :: !Int
           }
     | ZGetBlockHeaders -- C =>> M
           { gbBlockHash :: !BlockHash

@@ -128,13 +128,8 @@ requestHandler sock writeLock msg = do
                                         return $ successResp mid $ ZGetOutpointResp val B.empty
                                     Left (e :: SomeException) -> do
                                         return $ errorResp mid (show e)
-                            ZTraceOutputs toTxID toIndex toBlockHash prevFresh -> do
-                                ret <-
-                                    traceStaleSpentOutputs
-                                        (txZtxiUtxoTable bp2pEnv)
-                                        (toTxID, toIndex)
-                                        toBlockHash
-                                        prevFresh
+                            ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
+                                ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
                                 return $ successResp mid $ ZTraceOutputsResp ret
                             ZValidateTx bhash blkht txind tx -> do
                                 liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)

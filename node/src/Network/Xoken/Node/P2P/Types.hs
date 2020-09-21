@@ -3,6 +3,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Network.Xoken.Node.P2P.Types where
 
@@ -27,6 +28,7 @@ import Data.Word
 import Database.Bolt as BT
 import qualified Database.RocksDB as R
 
+import Data.Store
 import GHC.Generics
 import Network.Socket hiding (send)
 import Network.Xoken.Block
@@ -38,7 +40,6 @@ import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Transaction
 import StmContainers.Map as SM
 import System.Random
-
 import Text.Read
 import Xoken.NodeConfig
 
@@ -155,6 +156,8 @@ data ZtxiUtxo =
         }
     deriving (Show, Eq, Ord, Generic, Serialise)
 
+deriving instance Store ZtxiUtxo
+
 data Spending =
     Spending
         { spBlockHash :: !BlockHash
@@ -162,6 +165,8 @@ data Spending =
         , spInputIndex :: !Word32
         }
     deriving (Show, Eq, Ord, Generic, Serialise)
+
+deriving instance Store Spending
 
 data Worker
     = SelfWorker

@@ -169,14 +169,7 @@ defaultConfig = do
 conf :: R.Config
 conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = True, R.prefixLength = Just 3}
 
-cfStr =
-    [ "finalized_outputs"
-    , "ep_outputs_odd"
-    , "ep_outputs_even"
-    , "ep_transactions_odd"
-    , "ep_transactions_even"
-    , "transactions"
-    ]
+cfStr = ["outputs", "ep_outputs_odd", "ep_outputs_even", "ep_transactions_odd", "ep_transactions_even", "transactions"]
 
 columnFamilies = fmap (\x -> (x, conf)) cfStr
 
@@ -289,12 +282,12 @@ defBitcoinP2P nodeCnf = do
     iut <- newTVarIO False
     udc <- H.new
     tpfa <- newTVarIO 0
-    ztux <- TSH.new 1
+    -- ztux <- TSH.new 1
     ci <- getChainIndex
     tci <- newTVarIO ci
     wrkc <- newTVarIO []
     bsb <- newTVarIO Nothing
-    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc vc (rpf, rpc) mq ts tbt iut udc tpfa ztux tci wrkc bsb
+    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc vc (rpf, rpc) mq ts tbt iut udc tpfa tci wrkc bsb
 
 initVega :: IO ()
 initVega = do

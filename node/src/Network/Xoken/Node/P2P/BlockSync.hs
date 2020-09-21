@@ -491,35 +491,14 @@ processConfTransaction tx bhash blkht txind = do
     let conn = rocksDB $ dbe'
         cf = rocksCF dbe'
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
-    xxx <- liftIO $ TSH.toList $ txZtxiUtxoTable bp2pEnv
-    debug lg $ LG.msg $ "blockheight: " ++ (show blkht) ++ "sizaaa: " ++ show (L.length xxx)
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
     --
     let outpoints =
             map (\(b, _) -> ((outPointHash $ prevOutput b), fromIntegral $ outPointIndex $ prevOutput b)) (inputs)
-    mapM_
-        (\(o, oindx) -> do
-             debug lg $
-                 LG.msg $
-                 " insert ZUT record : " ++
-                 (show (txHashToHex $ txHash tx)) ++ " - " ++ (show $ (getTxShortHash (txHash tx) 20, oindx))
-             liftIO $
-                 TSH.insert
-                     (txZtxiUtxoTable bp2pEnv)
-                     ((txHash tx), oindx)
-                     (ZtxiUtxo
-                          (txHash tx)
-                          (oindx)
-                          [bhash] -- if already present then ADD to the existing list of BlockHashes
-                          (fromIntegral blkht)
-                          outpoints
-                          []
-                          (fromIntegral $ outValue o)))
-        (outputs)
     --
     inputValsOutpoints <-
-        LA.mapConcurrently
+        mapM
             (\(b, indx) -> do
                  let shortHash = getTxShortHash (outPointHash $ prevOutput b) 20
                  let opindx = fromIntegral $ outPointIndex $ prevOutput b
@@ -542,29 +521,36 @@ processConfTransaction tx bhash blkht txind = do
                                      ", " ++ show (outPointIndex $ prevOutput b) ++ ")" ++ (show e)
                                  throw e)
             (inputs)
-    -- insert coinbase UTXO/s
-    if (outPointHash nullOutPoint) == (outPointHash $ prevOutput $ fst $ head $ inputs) && L.length inputs == 1
-        then do
-            cf' <- liftIO $ TSH.lookup cf ("finalized_outputs")
-            mapM_
-                (\(opt, oindex) -> do
-                     debug lg $
-                         LG.msg $ "Inserting coinbase minted UTXO (albeit prematurely): " ++ show (txHash tx, oindex)
-                     res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) (outValue opt)
-                     case res of
-                         Right _ -> return ()
-                         Left (e :: SomeException) -> do
-                             err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf') ++ ": " ++ show e
-                             throw KeyValueDBInsertException)
-                outputs
-        else return ()
-    LA.mapConcurrently_
+    -- insert UTXO/s
+    cf' <- liftIO $ TSH.lookup cf ("outputs")
+    mapM_
+        (\(opt, oindex) -> do
+             debug lg $ LG.msg $ "Inserting UTXO : " ++ show (txHash tx, oindex)
+             let zut =
+                     ZtxiUtxo
+                         (txHash tx)
+                         (oindex)
+                         [bhash] -- if already present then ADD to the existing list of BlockHashes
+                         (fromIntegral blkht)
+                         outpoints
+                         []
+                         (fromIntegral $ outValue opt)
+             res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
+             case res of
+                 Right _ -> return ()
+                 Left (e :: SomeException) -> do
+                     err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf') ++ ": " ++ show e
+                     throw KeyValueDBInsertException)
+        outputs
+    --
+    --
+    mapM_
         (\(b, indx) -> do
              let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
              predBlkHash <- getChainIndexByHeight $ fromIntegral blkht - 10
              case predBlkHash of
                  Just pbh -> do
-                     _ <- zRPCDispatchTraceOutputs opt pbh True -- TODO: use appropriate Stale marker blockhash
+                     _ <- zRPCDispatchTraceOutputs opt pbh True 0 -- TODO: use appropriate Stale marker blockhash
                      return ()
                  Nothing -> do
                      if blkht > 11
