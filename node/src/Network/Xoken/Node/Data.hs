@@ -112,6 +112,9 @@ data ZRPCRequestParam
     | ZNotifyNewBlockHeader -- M =>> C
           { znBlockHeaders :: ![ZBlockHeader]
           }
+    | ZPruneBlockTxOutputs
+          { prBlockHashes :: ![BlockHash]
+          }
     | ZInvite -- M =>> C | C =>> M | C =>> C
           { cluster :: ![Node]
           , clusterID :: !ByteString
@@ -181,6 +184,7 @@ data ZRPCResponseBody
     | ZNotifyNewBlockHeaderResp
           {
           }
+    | ZPruneBlockTxOutputsResp
     | ZOk
     | ZPong
     deriving (Show, Generic, Hashable, Eq, Serialise)

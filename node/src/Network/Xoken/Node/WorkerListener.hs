@@ -110,8 +110,9 @@ requestHandler sock writeLock msg = do
                                         return $ successResp mid ZOk
                             ZPing -> do
                                 return $ successResp mid ZPong
-                            ZGetOutpoint txId index bhash pred -> do
-                                liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
+                            ZGetOutpoint txId index bhash pred
+                                -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
+                             -> do
                                 zz <-
                                     LE.try $
                                     validateOutpoint
@@ -121,30 +122,50 @@ requestHandler sock writeLock msg = do
                                         (250)
                                         (1000 * (txProcInputDependenciesWait $ nodeConfig bp2pEnv))
                                 case zz of
-                                    Right val -> do
-                                        liftIO $
-                                            print $
-                                            "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
+                                    Right val
+                                        -- liftIO $
+                                        --     print $
+                                        --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
+                                     -> do
                                         return $ successResp mid $ ZGetOutpointResp val B.empty
                                     Left (e :: SomeException) -> do
                                         return $ errorResp mid (show e)
                             ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
                                 ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
                                 return $ successResp mid $ ZTraceOutputsResp ret
-                            ZValidateTx bhash blkht txind tx -> do
-                                liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
+                            ZValidateTx bhash blkht txind tx
+                                -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
+                             -> do
                                 debug lg $ LG.msg $ "decoded ZValidateTx : " ++ (show $ txHash tx)
                                 res <-
                                     LE.try $ processConfTransaction tx bhash (fromIntegral blkht) (fromIntegral txind)
                                 case res of
-                                    Right () -> do
-                                        liftIO $
-                                            print $
-                                            "ZValidateTx - sending RESPONSE " ++ (show $ txHash tx) ++ (show mid)
+                                    Right outpts -> do
+                                        mapM_
+                                            (\opt -> do
+                                                 ress <- liftIO $ TSH.lookup (pruneUtxoQueue bp2pEnv) bhash
+                                                 case ress of
+                                                     Just blktxq -> do
+                                                         liftIO $ TSH.insert blktxq opt ()
+                                                         liftIO $
+                                                             print $
+                                                             "ZValidateTx - sending RESPONSE " ++
+                                                             (show $ txHash tx) ++ (show mid)
+                                                     Nothing -> do
+                                                         debug lg $ LG.msg ("New Prune queue " ++ show bhash)
+                                                         opq <- liftIO $ TSH.new 1
+                                                         liftIO $ TSH.insert (pruneUtxoQueue bp2pEnv) bhash opq)
+                                            outpts
                                         return $ successResp mid (ZValidateTxResp True)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
-                            ZNotifyNewBlockHeader headers -> do
-                                liftIO $ print $ "ZNotifyNewBlockHeader - REQUEST " ++ (show $ P.head headers)
+                            ZPruneBlockTxOutputs blockHashes
+                                -- liftIO $ print $ "ZPruneBlockTxOutputs - REQUEST " ++ (show blockHashes)
+                             -> do
+                                pruneBlocksTxnsOutputs blockHashes
+                                return $ successResp mid $ ZPruneBlockTxOutputsResp
+                            ZNotifyNewBlockHeader headers
+                                -- liftIO $ print $ "ZNotifyNewBlockHeader - REQUEST " ++ (show $ P.head headers)
+                             -> do
                                 debug lg $ LG.msg $ "decoded ZNotifyNewBlockHeader : " ++ (show $ P.head headers)
                                 res <-
                                     LE.try $

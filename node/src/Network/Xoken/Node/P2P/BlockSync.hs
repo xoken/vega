@@ -228,7 +228,7 @@ markBestSyncedBlock hash height = do
     rkdb <- rocksDB <$> getDB
     R.put rkdb "best_synced_hash" $ DTE.encodeUtf8 hash
     R.put rkdb "best_synced_height" $ C.pack $ show height
-    liftIO $ print "MARKED BEST SYNCED INTO ROCKS DB"
+    -- liftIO $ print "MARKED BEST SYNCED INTO ROCKS DB"
 
 checkBlocksFullySynced :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Bool
 checkBlocksFullySynced net = do
@@ -391,6 +391,9 @@ runBlockCacheQueue =
                             let !lelm = last $ L.sortOn (snd . snd) (syt)
                             debug lg $ LG.msg $ ("marking best synced " ++ show (blockHashToHex $ fst $ lelm))
                             markBestSyncedBlock (blockHashToHex $ fst $ lelm) (fromIntegral $ snd $ snd $ lelm)
+                            --
+                            _ <- LA.async $ zRPCDispatchBlocksTxsOutputs (fst $ unzip syt)
+                            --
                             mapM
                                 (\(k, _) -> do
                                      liftIO $ TSH.delete (blockSyncStatusMap bp2pEnv) k
@@ -459,11 +462,12 @@ fetchBestSyncedBlock rkdb net = do
     hash <- liftIO $ R.get rkdb "best_synced_hash"
     height <- liftIO $ R.get rkdb "best_synced_height"
     case (hash, height) of
-        (Just hs, Just ht) -> do
-            liftIO $
-                print $
-                "FETCHED BEST SYNCED FROM ROCKS DB: " ++
-                (T.unpack $ DTE.decodeUtf8 hs) ++ " " ++ (T.unpack . DTE.decodeUtf8 $ ht)
+        (Just hs, Just ht)
+            -- liftIO $
+            --     print $
+            --     "FETCHED BEST SYNCED FROM ROCKS DB: " ++
+            --     (T.unpack $ DTE.decodeUtf8 hs) ++ " " ++ (T.unpack . DTE.decodeUtf8 $ ht)
+         -> do
             case hexToBlockHash $ DTE.decodeUtf8 hs of
                 Nothing -> throw InvalidBlockHashException
                 Just hs' -> return (hs', read . T.unpack . DTE.decodeUtf8 $ ht :: Int32)
@@ -481,7 +485,8 @@ insertTxIdOutputs conn cf (txid, outputIndex) txOut = do
             err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
             throw KeyValueDBInsertException
 
-processConfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ()
+processConfTransaction ::
+       (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ([OutPoint])
 processConfTransaction tx bhash blkht txind = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
@@ -544,20 +549,20 @@ processConfTransaction tx bhash blkht txind = do
         outputs
     --
     --
-    mapM_
-        (\(b, indx) -> do
-             let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
-             predBlkHash <- getChainIndexByHeight $ fromIntegral blkht - 10
-             case predBlkHash of
-                 Just pbh -> do
-                     _ <- zRPCDispatchTraceOutputs opt pbh True 0 -- TODO: use appropriate Stale marker blockhash
-                     return ()
-                 Nothing -> do
-                     if blkht > 11
-                         then throw InvalidBlockHashException
-                         else return ()
-             return ())
-        (inputs)
+    -- mapM_
+    --     (\(b, indx) -> do
+    --          let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
+    --          predBlkHash <- getChainIndexByHeight $ fromIntegral blkht - 10
+    --          case predBlkHash of
+    --              Just pbh -> do
+    --                  _ <- zRPCDispatchTraceOutputs opt pbh True 0 -- TODO: use appropriate Stale marker blockhash
+    --                  return ()
+    --              Nothing -> do
+    --                  if blkht > 11
+    --                      then throw InvalidBlockHashException
+    --                      else return ()
+    --          return ())
+    --     (inputs)
     --
     let ipSum = foldl (+) 0 $ (\(val, _) -> val) <$> inputValsOutpoints
         opSum = foldl (+) 0 $ (\o -> outValue o) <$> (txOut tx)
@@ -579,11 +584,11 @@ processConfTransaction tx bhash blkht txind = do
             mapM_
                 (\(txOut, oind) -> do
                      debug lg $ LG.msg $ "inserting output " ++ show txOut
-                     insertTxIdOutputs conn cf'' (txHash tx, oind) (txOut)
-                     x <- (getDBCF conn cf'' (txHash tx, oind))
-                     liftIO $ print (x :: Maybe TxOut))
+                     insertTxIdOutputs conn cf'' (txHash tx, oind) (txOut))
                 outputs
         Nothing -> return () -- ideally should be unreachable
+    let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
+    return (outpts)
 
 {-
 dagEpochSwitcher :: (HasXokenNodeEnv env m, MonadIO m) => m ()

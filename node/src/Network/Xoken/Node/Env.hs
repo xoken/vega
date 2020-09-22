@@ -89,6 +89,7 @@ data BitcoinP2P =
         , confChainIndex :: !(TVar (ChainIndex))
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
+        , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
         }
 
 class HasBitcoinP2P m where

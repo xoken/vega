@@ -69,7 +69,7 @@ import Xoken.NodeConfig as NC
 
 zRPCDispatchTxValidate ::
        (HasXokenNodeEnv env m, MonadIO m)
-    => (Tx -> BlockHash -> Word32 -> Word32 -> m ())
+    => (Tx -> BlockHash -> Word32 -> Word32 -> m ([OutPoint]))
     -> Tx
     -> BlockHash
     -> Word32
@@ -82,19 +82,31 @@ zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
     let lexKey = getTxShortCode (txHash tx)
     worker <- getRemoteWorker lexKey TxValidation
     case worker of
-        Nothing -> do
-            liftIO $ print "zRPCDispatchTxValidate - SELF"
+        Nothing
+            -- liftIO $ print "zRPCDispatchTxValidate - SELF"
+         -> do
             res <- LE.try $ selfFunc tx bhash bheight txindex
             case res of
-                Right () -> return ()
+                Right outpts -> do
+                    mapM_
+                        (\opt -> do
+                             ress <- liftIO $ TSH.lookup (pruneUtxoQueue bp2pEnv) bhash
+                             case ress of
+                                 Just blktxq -> liftIO $ TSH.insert blktxq opt ()
+                                 Nothing -> do
+                                     debug lg $ LG.msg ("New Prune queue " ++ show bhash)
+                                     opq <- liftIO $ TSH.new 1
+                                     liftIO $ TSH.insert (pruneUtxoQueue bp2pEnv) bhash opq)
+                        outpts
                 Left (e :: SomeException) -> do
                     err lg $ LG.msg ("[ERROR] processConfTransaction " ++ show e)
                     throw e
-        Just wrk -> do
-            liftIO $ print $ "zRPCDispatchTxValidate - " ++ show wrk
+        Just wrk
+            -- liftIO $ print $ "zRPCDispatchTxValidate - " ++ show wrk
+         -> do
             let mparam = ZValidateTx bhash bheight txindex tx
             resp <- zRPCRequestDispatcher mparam wrk
-            liftIO $ print $ "zRPCRequestDispatcher - RESPONSE " ++ show resp
+            -- liftIO $ print $ "zRPCRequestDispatcher - RESPONSE " ++ show resp
             case zrsPayload resp of
                 Right spl -> do
                     case spl of
@@ -121,8 +133,9 @@ zRPCDispatchGetOutpoint outPoint bhash = do
         lexKey = getTxShortCode $ outPointHash outPoint
     worker <- getRemoteWorker lexKey GetOutpoint
     case worker of
-        Nothing -> do
-            liftIO $ print "zRPCDispatchGetOutpoint - SELF"
+        Nothing
+            -- liftIO $ print "zRPCDispatchGetOutpoint - SELF"
+         -> do
             val <-
                 validateOutpoint
                     (outPoint)
@@ -131,11 +144,12 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     (250)
                     (1000 * (txProcInputDependenciesWait $ nodeConfig bp2pEnv))
             return val
-        Just wrk -> do
-            liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
+        Just wrk
+            -- liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
+         -> do
             let mparam = ZGetOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash (DS.singleton bhash)
             resp <- zRPCRequestDispatcher mparam wrk
-            liftIO $ print $ "zRPCDispatchGetOutpoint - RESPONSE " ++ show resp
+            -- liftIO $ print $ "zRPCDispatchGetOutpoint - RESPONSE " ++ show resp
             case zrsPayload resp of
                 Right spl -> do
                     case spl of
@@ -147,6 +161,33 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
                     throw mex
+
+zRPCDispatchBlocksTxsOutputs :: (HasXokenNodeEnv env m, MonadIO m) => [BlockHash] -> m ()
+zRPCDispatchBlocksTxsOutputs blockHashes = do
+    dbe' <- getDB
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    mapM_
+        (\wrk -> do
+             case wrk of
+                 SelfWorker {..} -> pruneBlocksTxnsOutputs blockHashes
+                 RemoteWorker {..} -> do
+                     let mparam = ZPruneBlockTxOutputs blockHashes
+                     resp <- zRPCRequestDispatcher mparam wrk
+                     case zrsPayload resp of
+                         Right spl -> do
+                             case spl of
+                                 Just pl ->
+                                     case pl of
+                                         ZPruneBlockTxOutputsResp -> return ()
+                                 Nothing -> throw InvalidMessageTypeException
+                         Left er -> do
+                             err lg $ LG.msg $ "decoding PruneBlockTxOutputs error resp : " ++ show er
+                             let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
+                             throw mex)
+        (wrkrs)
 
 zRPCDispatchTraceOutputs :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Bool -> Int -> m (Bool)
 zRPCDispatchTraceOutputs outPoint bhash isPrevFresh htt = do
@@ -180,8 +221,6 @@ zRPCDispatchNotifyNewBlockHeader headers = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
-    -- let bhash = zBlockHash headers
-    --     blkht = zBlockHeight headers
     wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     mapM_
@@ -217,7 +256,7 @@ zRPCRequestDispatcher param wrk = do
                  if a == maxBound
                      then return (1, 1)
                      else return (a + 1, a + 1))
-    liftIO $ print $ "=====> " ++ (show mid)
+    -- liftIO $ print $ "=====> " ++ (show mid)
     let msg = ZRPCRequest mid param
     -- debug lg $ LG.msg $ "dispatching to worker 1: " ++ (show wrk)
     liftIO $ TSH.insert (woMsgMultiplexer wrk) mid sem
@@ -248,11 +287,13 @@ getRemoteWorker shardingLex role = do
     let wind = nx `mod` (L.length workers)
         wrk = workers !! wind
     case wrk of
-        SelfWorker {..} -> do
-            liftIO $ print "^^^"
+        SelfWorker {..}
+            -- liftIO $ print "^^^"
+         -> do
             return Nothing
-        RemoteWorker {..} -> do
-            liftIO $ print ">>>"
+        RemoteWorker {..}
+            -- liftIO $ print ">>>"
+         -> do
             return $ Just wrk
 
 pruneSpentOutputs :: (HasXokenNodeEnv env m, MonadIO m) => (TxHash, Word32) -> BlockHash -> Bool -> Int -> m (Bool)
@@ -397,6 +438,36 @@ validateOutpoint outPoint predecessors curBlkHash wait maxWait = do
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
             throw KeyValueDBInsertException
+
+pruneBlocksTxnsOutputs :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => [BlockHash] -> m ()
+pruneBlocksTxnsOutputs blockHashes = do
+    bp2pEnv <- getBitcoinP2P
+    dbe <- getDB
+    let rkdb = rocksDB dbe
+        cfs = rocksCF dbe
+    lg <- getLogger
+    cf <- liftIO $ TSH.lookup cfs ("outputs")
+    mapM_
+        (\bhash -> do
+             opqueue <- liftIO $ TSH.lookup (pruneUtxoQueue bp2pEnv) bhash
+            -- oplist <- liftIO $ TSH.toList (que)
+             case opqueue of
+                 Just opq -> do
+                     liftIO $
+                         TSH.mapM_
+                             (\(OutPoint txId opIndex, ()) -> do
+                                  debug lg $ LG.msg $ "Pruning spent-TXO : " ++ show (txId, opIndex)
+                                  res <- try $ deleteDBCF rkdb (fromJust cf) (txId, opIndex)
+                                  case res of
+                                      Right _ -> return ()
+                                      Left (e :: SomeException) -> do
+                                          err lg $ LG.msg $ "Error: Deleting from " ++ (show cf) ++ ": " ++ show e
+                                          throw KeyValueDBInsertException)
+                             opq
+                 Nothing -> debug lg $ LG.msg $ "BlockHash not found, nothing to prune! " ++ (show bhash)
+             liftIO $ TSH.delete (pruneUtxoQueue bp2pEnv) bhash)
+        blockHashes
+    return ()
 
 spendZtxiUtxo :: BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
 spendZtxiUtxo bh tsh ind zu =

@@ -243,11 +243,12 @@ fetchBestBlock rkdb net = do
     hash <- liftIO $ R.get rkdb "best_chain_tip_hash"
     height <- liftIO $ R.get rkdb "best_chain_tip_height"
     case (hash, height) of
-        (Just hs, Just ht) -> do
-            liftIO $
-                print $
-                "FETCHED BEST BLOCK FROM DB: " ++
-                (T.unpack $ DTE.decodeUtf8 hs) ++ " " ++ (T.unpack . DTE.decodeUtf8 $ ht)
+        (Just hs, Just ht)
+            -- liftIO $
+            --     print $
+            --     "FETCHED BEST BLOCK FROM DB: " ++
+            --     (T.unpack $ DTE.decodeUtf8 hs) ++ " " ++ (T.unpack . DTE.decodeUtf8 $ ht)
+         -> do
             case hexToBlockHash $ DTE.decodeUtf8 hs of
                 Nothing -> throw InvalidBlockHashException
                 Just hs' -> return (hs', read . T.unpack . DTE.decodeUtf8 $ ht :: Int32)
