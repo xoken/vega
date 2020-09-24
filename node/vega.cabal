@@ -45,7 +45,8 @@ executable vega
       Network.Xoken.Node.WorkerDispatcher
       Network.Xoken.Node.P2P.UnconfTxSync
 
-  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded
+  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N
+
   hs-source-dirs:
       app, src
 
