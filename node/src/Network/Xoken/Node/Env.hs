@@ -78,7 +78,6 @@ data BitcoinP2P =
         , blockTxProcessingLeftMap :: !(TSH.TSHashTable BlockHash ((TSH.TSHashTable TxHash Int), Int))
         , epochType :: !(TVar Bool)
         , unconfirmedTxCache :: !(TSH.TSHashTable TxShortHash (Bool, TxHash))
-        , recentPrunedOutputs :: !(TSH.TSHashTable (TxShortHash, Word32) Word64)
         , peerReset :: !(MVar Bool, TVar Int)
         , merkleQueueMap :: !(TSH.TSHashTable BlockHash (TQueue (TxHash, Bool)))
         , txSynchronizer :: !(TSH.TSHashTable TxHash Event)

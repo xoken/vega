@@ -14,7 +14,8 @@ import Arivi.P2P.RPC.Fetch
 import Arivi.P2P.Types
 import Codec.Serialise
 import qualified Codec.Serialise as CBOR
-import Control.Concurrent.Async.Lifted as LA (async)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async.Lifted as LA (async, race)
 import Control.Concurrent.Event as EV
 import Control.Concurrent.MVar
 import Control.Concurrent.STM
@@ -79,7 +80,7 @@ zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     debug lg $ LG.msg $ "encoded Tx : " ++ (show $ txHash tx)
-    let lexKey = getTxShortCode (txHash tx)
+    let lexKey = getTxShortHash (txHash tx) 8
     worker <- getRemoteWorker lexKey TxValidation
     case worker of
         Nothing
@@ -130,7 +131,7 @@ zRPCDispatchGetOutpoint outPoint bhash = do
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let opIndex = outPointIndex $ outPoint
-        lexKey = getTxShortCode $ outPointHash outPoint
+        lexKey = getTxShortHash (outPointHash outPoint) 8
     worker <- getRemoteWorker lexKey GetOutpoint
     case worker of
         Nothing
@@ -141,8 +142,7 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     (outPoint)
                     (DS.singleton bhash) -- TODO: needs to contains more predecessors
                     bhash
-                    (250)
-                    (1000 * (txProcInputDependenciesWait $ nodeConfig bp2pEnv))
+                    (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
             return val
         Just wrk
             -- liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
@@ -196,7 +196,7 @@ zRPCDispatchTraceOutputs outPoint bhash isPrevFresh htt = do
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         opIndex = outPointIndex outPoint
-        lexKey = getTxShortCode $ outPointHash outPoint
+        lexKey = getTxShortHash (outPointHash outPoint) 8
     worker <- getRemoteWorker lexKey TraceOutputs
     case worker of
         Nothing -> do
@@ -268,7 +268,7 @@ zRPCRequestDispatcher param wrk = do
     liftIO $ TSH.delete (woMsgMultiplexer wrk) mid
     return resp
 
-getRemoteWorker :: (HasXokenNodeEnv env m, MonadIO m) => Word8 -> NodeRole -> m (Maybe Worker)
+getRemoteWorker :: (HasXokenNodeEnv env m, MonadIO m) => Word32 -> NodeRole -> m (Maybe Worker)
 getRemoteWorker shardingLex role = do
     bp2pEnv <- getBitcoinP2P
     wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
@@ -370,14 +370,8 @@ predecessorOf x y = do
     return $ (M.lookup x ch) < (M.lookup y ch)
 
 validateOutpoint ::
-       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
-    => OutPoint
-    -> DS.Set BlockHash
-    -> BlockHash
-    -> Int
-    -> Int
-    -> m (Word64)
-validateOutpoint outPoint predecessors curBlkHash wait maxWait = do
+       (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => OutPoint -> DS.Set BlockHash -> BlockHash -> Int -> m (Word64)
+validateOutpoint outPoint predecessors curBlkHash wait = do
     dbe <- getDB
     let rkdb = rocksDB dbe
         cfs = rocksCF dbe
@@ -397,44 +391,32 @@ validateOutpoint outPoint predecessors curBlkHash wait maxWait = do
                     mapM_
                         (\s ->
                              if (spBlockHash s) `DS.member` predecessors
-                                 then return () -- TODO: throw OutputAlreadySpentException -- predecessors to be passed correctly
+                                 then return () -- throw OutputAlreadySpentException -- predecessors to be passed correctly
                                  else return ())
                         (zuSpending zu)
                         -- eagerly mark spent, in the unlikely scenario script stack eval fails, mark unspent
                     let vx = spendZtxiUtxo curBlkHash (optxid) (opindx) zu
-                        -- TODO: TEMPORARILY COMMENTED OUT
-                        -- liftIO $ TSH.insert (txZtxiUtxoTable bp2pEnv) (optxid, opindx) vx
+                    liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) vx
                     return $ zuSatoshiValue zu
                 Nothing -> do
-                    pres <- liftIO $ TSH.lookup (recentPrunedOutputs bp2pEnv) (getTxShortHash optxid 20, opindx)
-                    case pres of
-                        Just recPruned -> do
+                    debug lg $
+                        LG.msg $
+                        "Tx not found: " ++ (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
+                    valx <- liftIO $ TSH.lookup txSync (outPointHash outPoint)
+                    event <-
+                        case valx of
+                            Just evt -> return evt
+                            Nothing -> liftIO $ EV.new
+                    liftIO $ TSH.insert txSync (outPointHash outPoint) event
+                    tofl <- liftIO $ waitTimeout (event) (fromIntegral (wait * 1000000))
+                    if tofl == False
+                        then do
+                            liftIO $ TSH.delete txSync (outPointHash outPoint)
+                            throw TxIDNotFoundException
+                        else do
                             debug lg $
-                                LG.msg $
-                                " O/p pruned recently : " ++ show optxid ++ " retrieving value : " ++ (show recPruned)
-                            return recPruned
-                        Nothing -> do
-                            debug lg $ LG.msg $ " ZUT entry not found for : " ++ (show (optxid, opindx))
-                            vl <- liftIO $ TSH.lookup txSync optxid
-                            event <-
-                                case vl of
-                                    Just evt -> return evt
-                                    Nothing -> liftIO $ EV.new
-                            liftIO $ TSH.insert txSync optxid event
-                            tofl <- liftIO $ waitTimeout event (1000 * (fromIntegral wait))
-                            if tofl == False
-                                then if (wait < 66000)
-                                         then do
-                                             validateOutpoint outPoint predecessors curBlkHash (2 * wait) maxWait
-                                         else do
-                                             liftIO $ TSH.delete txSync optxid
-                                             debug lg $
-                                                 LG.msg $
-                                                 "TxIDNotFoundException: While querying: " ++ show (optxid, opindx)
-                                             throw TxIDNotFoundException
-                                else do
-                                    debug lg $ LG.msg $ "event received _available_: " ++ show (optxid, opindx)
-                                    validateOutpoint outPoint predecessors curBlkHash wait maxWait
+                                LG.msg $ "event received _available_: " ++ (show $ txHashToHex $ outPointHash outPoint)
+                            validateOutpoint outPoint predecessors curBlkHash 0
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
             throw KeyValueDBInsertException

@@ -24,7 +24,14 @@ import Codec.Serialise
 import qualified Codec.Serialise as CBOR
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled, mapConcurrently, mapConcurrently_, race_)
-import qualified Control.Concurrent.Async.Lifted as LA (async, concurrently_, mapConcurrently, mapConcurrently_, wait)
+import qualified Control.Concurrent.Async.Lifted as LA
+    ( async
+    , concurrently_
+    , mapConcurrently
+    , mapConcurrently_
+    , race
+    , wait
+    )
 import Control.Concurrent.Event as EV
 import Control.Concurrent.MVar
 import Control.Concurrent.QSem
@@ -528,25 +535,26 @@ processConfTransaction tx bhash blkht txind = do
             (inputs)
     -- insert UTXO/s
     cf' <- liftIO $ TSH.lookup cf ("outputs")
-    mapM_
-        (\(opt, oindex) -> do
-             debug lg $ LG.msg $ "Inserting UTXO : " ++ show (txHash tx, oindex)
-             let zut =
-                     ZtxiUtxo
-                         (txHash tx)
-                         (oindex)
-                         [bhash] -- if already present then ADD to the existing list of BlockHashes
-                         (fromIntegral blkht)
-                         outpoints
-                         []
-                         (fromIntegral $ outValue opt)
-             res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
-             case res of
-                 Right _ -> return ()
-                 Left (e :: SomeException) -> do
-                     err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf') ++ ": " ++ show e
-                     throw KeyValueDBInsertException)
-        outputs
+    ovs <-
+        mapM
+            (\(opt, oindex) -> do
+                 debug lg $ LG.msg $ "Inserting UTXO : " ++ show (txHash tx, oindex)
+                 let zut =
+                         ZtxiUtxo
+                             (txHash tx)
+                             (oindex)
+                             [bhash] -- if already present then ADD to the existing list of BlockHashes
+                             (fromIntegral blkht)
+                             outpoints
+                             []
+                             (fromIntegral $ outValue opt)
+                 res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
+                 case res of
+                     Right _ -> return (zut)
+                     Left (e :: SomeException) -> do
+                         err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf') ++ ": " ++ show e
+                         throw KeyValueDBInsertException)
+            outputs
     --
     --
     -- mapM_
@@ -573,9 +581,9 @@ processConfTransaction tx bhash blkht txind = do
         else return ()
     -- signal 'done' event for tx's that were processed out of sequence 
     --
-    txSyncMap <- liftIO $ TSH.lookup (txSynchronizer bp2pEnv) (txHash tx)
-    case (txSyncMap) of
-        Just ev -> liftIO $ EV.signal $ ev
+    vall <- liftIO $ TSH.lookup (txSynchronizer bp2pEnv) (txHash tx)
+    case vall of
+        Just ev -> liftIO $ EV.signal ev
         Nothing -> return ()
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
     cf' <- liftIO $ TSH.lookup cf (getEpochTxOutCF epoch)
@@ -590,6 +598,47 @@ processConfTransaction tx bhash blkht txind = do
     let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
     return (outpts)
 
+--
+-- Get ZUT from outpoint
+-- getZUTFromOutpoint ::
+--        (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+--     => Int
+--     -> TSH.TSHashTable (TxHash, Word32) (MVar (Text, Text, Int64))
+--     -> Logger
+--     -> Network
+--     -> OutPoint
+--     -> Int
+--     -> m (ZtxiUtxo)
+-- getZUTFromOutpoint conn txSync lg net outPoint maxWait = do
+--     bp2pEnv <- getBitcoinP2P
+--     dbe <- getDB
+--     let rkdb = rocksDB dbe
+--         cfs = rocksCF dbe
+--     lg <- getLogger
+--     cf <- liftIO $ TSH.lookup cfs ("outputs")
+--     res <- try $ deleteDBCF rkdb (fromJust cf) (outPointHash outPoint, opIndex)
+--     case res of
+--         Right results -> do
+--             debug lg $
+--                 LG.msg $ "Tx not found: " ++ (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
+--             valx <- liftIO $ TSH.lookup txSync (outPointHash outPoint, outPointIndex outPoint)
+--             event <-
+--                 case valx of
+--                     Just evt -> return evt
+--                     Nothing -> newEmptyMVar
+--             liftIO $ TSH.insert txSync (outPointHash outPoint, outPointIndex outPoint) event
+--             ores <- LA.race (liftIO $ readMVar event) (liftIO $ threadDelay (maxWait * 1000000))
+--             case ores of
+--                 Right () -> do
+--                     liftIO $ TSH.delete txSync (outPointHash outPoint, outPointIndex outPoint)
+--                     throw TxIDNotFoundException
+--                 Left res -> do
+--                     debug lg $ LG.msg $ "event received _available_: " ++ (show $ txHashToHex $ outPointHash outPoint)
+--                     liftIO $ TSH.delete txSync (outPointHash outPoint, outPointIndex outPoint)
+--                     return res
+--         Left (e :: SomeException) -> do
+--             err lg $ LG.msg $ "Error: getSatsValueFromOutpoint: " ++ show e
+--             throw e
 {-
 dagEpochSwitcher :: (HasXokenNodeEnv env m, MonadIO m) => m ()
 dagEpochSwitcher = do

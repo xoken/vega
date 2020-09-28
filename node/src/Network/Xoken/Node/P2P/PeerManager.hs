@@ -79,8 +79,8 @@ import Network.Xoken.Transaction.Common
 import Network.Xoken.Util
 import StmContainers.Map as SM
 import StmContainers.Set as SS
-import Streamly
-import Streamly.Prelude ((|:), drain, nil)
+import Streamly as S
+import Streamly.Prelude ((|:), drain, each, nil)
 import qualified Streamly.Prelude as S
 import System.Logger as LG
 import System.Logger.Message
@@ -729,7 +729,9 @@ processTxBatch txns iss = do
                                      then debug lg $ LG.msg $ (" (error) Tx__index: " ++ show idx ++ show bf)
                                      else debug lg $ LG.msg $ ("Tx__index: " ++ show idx)
                                  return ((txns !! idx), bf, cidx)) &
-                        S.mapM (processTxStream)
+                        S.mapM (processTxStream) &
+                        S.maxBuffer (maxTxProcessingBuffer $ nodeConfig bp2pEnv) &
+                        S.maxThreads (maxTxProcessingThreads $ nodeConfig bp2pEnv)
                     valy <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (biBlockHash bf)
                     case valy of
                         Just lefta -> liftIO $ TSH.insert (fst lefta) (txHash $ head txns) (L.length txns)
@@ -839,8 +841,9 @@ handleIncomingMessages pr = do
              aheadly $
              S.repeatM (readNextMessage' pr rlk) & -- read next msgs
              S.mapM (messageHandler pr) & -- handle read msgs
-             S.mapM (logMessage pr) -- log msgs & collect stats
-             )
+             S.mapM (logMessage pr) & -- log msgs & collect stats
+             S.maxBuffer 2 &
+             S.maxThreads 2)
     case res of
         Right (a) -> return ()
         Left (e :: SomeException) -> do

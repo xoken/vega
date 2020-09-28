@@ -119,7 +119,6 @@ requestHandler sock writeLock msg = do
                                         (OutPoint txId index)
                                         (DS.singleton bhash) -- TODO: needs to contains more predecessors
                                         bhash
-                                        (250)
                                         (1000 * (txProcInputDependenciesWait $ nodeConfig bp2pEnv))
                                 case zz of
                                     Right val

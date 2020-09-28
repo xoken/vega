@@ -1,25 +1,23 @@
 vegaNode:
-      nodeID: vm
-      nodeType: Master
-      nodeRoles: []
-      nodeIPAddr: 127.0.0.1
-      nodePort: 7770
+  nodeID: vm
+  nodeType: Master
+  nodeRoles: []
+  nodeIPAddr: 127.0.0.1
+  nodePort: 7770
 
-      
-vegaCluster: 
-  
-    - nodeID: c1
-      nodeType: Compute
-      nodeRoles: [TxValidation, OutputStore]
-      nodeIPAddr: 127.0.0.1
-      nodePort: 7771
+vegaCluster:
+  - nodeID: c1
+    nodeType: Compute
+    nodeRoles: [TxValidation, OutputStore]
+    nodeIPAddr: 127.0.0.1
+    nodePort: 7771
 
-    - nodeID: c2
-      nodeType: Compute
-      nodeRoles: [TxValidation, OutputStore]
-      nodeIPAddr: 127.0.0.1
-      nodePort: 7772
-      
+  - nodeID: c2
+    nodeType: Compute
+    nodeRoles: [TxValidation, OutputStore]
+    nodeIPAddr: 127.0.0.1
+    nodePort: 7772
+
 bitcoinNetwork: bsv
 
 logLevel: Debug
@@ -52,26 +50,30 @@ maxTMTQueueSize: 1024
 
 txProcInputDependenciesWait: 240
 
-txProcTimeoutSecs : 250
+txProcTimeoutSecs: 250
 
-tlsCertificatePath : ./example.crt
+tlsCertificatePath: ./example.crt
 
-tlsKeyfilePath : ./example.key
+tlsKeyfilePath: ./example.key
 
-tlsCertificateStorePath : ./
+tlsCertificateStorePath: ./
 
-neo4jUsername : neo4j
+neo4jUsername: neo4j
 
-neo4jPassword : neo4j
+neo4jPassword: neo4j
 
 allegoryNameUtxoSatoshis: 5555
 
-allegoryTxFeeSatsProducerAction : 400
+allegoryTxFeeSatsProducerAction: 400
 
-allegoryTxFeeSatsOwnerAction : 200
+allegoryTxFeeSatsOwnerAction: 200
 
-txOutputValuesCacheKeyBits : 20
+txOutputValuesCacheKeyBits: 20
 
-unconfirmedTxCacheKeyBits : 16
+unconfirmedTxCacheKeyBits: 16
 
-shardingHashSecretSalt : 29347693
+shardingHashSecretSalt: 29347693
+
+maxTxProcessingThreads: 100
+
+maxTxProcessingBuffer: 100
