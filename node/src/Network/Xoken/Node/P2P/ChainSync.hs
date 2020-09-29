@@ -243,25 +243,24 @@ processHeaders hdrs = do
             debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)
             mapConcurrently_
                 (\y -> do
-                     let hdrHash = blockHashToHex $ headerHash $ fst $ snd y
-                     resp <- liftIO $ try $ putDB rkdb (fst y) hdrHash
+                     let header = fst $ snd y
+                         hdrHash = blockHashToHex $ headerHash header
+                         blkht = fst y
+                     resp <-
+                         liftIO $
+                         try $ do
+                             putDB rkdb blkht (hdrHash, header)
+                             putDB rkdb hdrHash (blkht, header)
                      case resp of
                          Right () -> return ()
                          Left (e :: SomeException) ->
                              liftIO $ do
                                  err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
                                  throw KeyValueDBInsertException
-                     resp' <- liftIO $ try $ putDB rkdb hdrHash (fst $ snd y, fst y)
-                     case resp' of
-                         Right () -> return ()
-                         Left (e :: SomeException) ->
-                             liftIO $ do
-                                 err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
-                                 throw KeyValueDBInsertException
-                     addBlockToChainIndex (headerHash $ fst $ snd y) (fromIntegral $ fst y))
+                     addBlockToChainIndex (headerHash header) (fromIntegral blkht))
                 indexed
             unless (L.null indexed) $ do
-                let headers = map (\z -> ZBlockHeader (headerHash $ fst $ snd z) (fromIntegral $ fst z)) indexed
+                let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ fst z)) indexed
                 zRPCDispatchNotifyNewBlockHeader headers
                 markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
                 liftIO $ putMVar (bestBlockUpdated bp2pEnv) True

@@ -93,7 +93,9 @@ workerMessageMultiplexer worker = do
 requestHandler :: (HasXokenNodeEnv env m, MonadIO m) => Socket -> MVar () -> LC.ByteString -> m ()
 requestHandler sock writeLock msg = do
     lg <- getLogger
+    dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
+    let rkdb = rocksDB dbe'
     resp <-
         case (deserialiseOrFail msg) of
             Right ms ->
@@ -169,8 +171,21 @@ requestHandler sock writeLock msg = do
                                 res <-
                                     LE.try $
                                     mapM_
-                                        (\(ZBlockHeader bhash blkht) -> do
-                                             addBlockToChainIndex bhash (fromIntegral blkht))
+                                        (\(ZBlockHeader header blkht) -> do
+                                             let hdrHash = blockHashToHex $ headerHash header
+                                             resp <-
+                                                 liftIO $
+                                                 try $ do
+                                                     putDB rkdb blkht (hdrHash, header)
+                                                     putDB rkdb hdrHash (blkht, header)
+                                             case resp of
+                                                 Right () -> return ()
+                                                 Left (e :: SomeException) ->
+                                                     liftIO $ do
+                                                         err lg $
+                                                             LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
+                                                         throw KeyValueDBInsertException
+                                             addBlockToChainIndex (headerHash header) (fromIntegral blkht))
                                         headers
                                 case res of
                                     Right () -> do

@@ -124,7 +124,7 @@ data ZRPCRequestParam
 
 data ZBlockHeader =
     ZBlockHeader
-        { zBlockHash :: !BlockHash
+        { zBlockHeader :: !BlockHeader
         , zBlockHeight :: !BlockHeight
         }
     deriving (Show, Generic, Eq, Serialise)
