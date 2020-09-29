@@ -260,9 +260,9 @@ processHeaders hdrs = do
                                  throw KeyValueDBInsertException
                      addBlockToChainIndex (headerHash $ fst $ snd y) (fromIntegral $ fst y))
                 indexed
-            let headers = map (\z -> ZBlockHeader (headerHash $ fst $ snd z) (fromIntegral $ fst z)) indexed
-            zRPCDispatchNotifyNewBlockHeader headers
             unless (L.null indexed) $ do
+                let headers = map (\z -> ZBlockHeader (headerHash $ fst $ snd z) (fromIntegral $ fst z)) indexed
+                zRPCDispatchNotifyNewBlockHeader headers
                 markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
                 liftIO $ putMVar (bestBlockUpdated bp2pEnv) True
         False -> do
