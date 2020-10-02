@@ -74,6 +74,7 @@ import Network.Xoken.Node.P2P.ChainSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.UnconfTxSync
+import Network.Xoken.Node.WorkerDispatcher
 import Network.Xoken.Node.WorkerListener
 import Network.Xoken.Transaction.Common
 import Network.Xoken.Util
@@ -665,7 +666,17 @@ messageHandler peer (mm, ingss) = do
                             err lg $ LG.msg $ val ("[???] Unconfirmed Tx ")
                     return $ msgType msg
                 MTx tx -> do
-                    processUnconfTransaction tx
+                    res <- LE.try $ zRPCDispatchUnconfirmedTxValidate processUnconfTransaction tx
+                    case res of
+                        Right ((candBlkHashes, depTxHashes)) -> return ()
+                        Left TxIDNotFoundException -> do
+                            throw TxIDNotFoundException
+                        Left KeyValueDBInsertException -> do
+                            err lg $ LG.msg $ val "[ERROR] KeyValueDBInsertException"
+                            throw KeyValueDBInsertException
+                        Left e -> do
+                            err lg $ LG.msg ("[ERROR] Unhandled exception!" ++ show e)
+                            throw e
                     return $ msgType msg
                 MBlock blk
                     -- debug lg $ LG.msg $ LG.val ("DEBUG receiving block ")

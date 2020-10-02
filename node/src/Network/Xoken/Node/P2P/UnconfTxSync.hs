@@ -43,6 +43,7 @@ import qualified Data.IntMap as I
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import Data.Sequence ((|>))
 import Data.Serialize
 import Data.Serialize as S
 import Data.String.Conversions
@@ -190,7 +191,7 @@ insertEpochTxIdOutputs conn epoch (txid, outputIndex) address script value cfs =
             err lg $ LG.msg $ "Error: INSERTing into ep_txid_outputs: " ++ show e
             throw KeyValueDBInsertException
 
-processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ()
+processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([BlockHash], [TxHash])
 processUnconfTransaction tx = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
@@ -265,6 +266,7 @@ processUnconfTransaction tx = do
     case vall of
         Just ev -> liftIO $ EV.signal $ ev
         Nothing -> return ()
+    return ([], []) -- TODO: proper response to be set
 
 getSatsValueFromEpochOutpoint ::
        R.DB
@@ -311,3 +313,37 @@ convertToScriptHash :: Network -> String -> Maybe String
 convertToScriptHash net s = do
     let addr = stringToAddr net (T.pack s)
     (T.unpack . txHashToHex . TxHash . sha256 . addressToScriptBS) <$> addr
+
+constructCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TxHash -> [BlockHash] -> [TxHash] -> m ()
+constructCandidateBlock txHash candBlockHashes depTxHashes = do
+    dbe' <- getDB
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    let conn = rocksDB $ dbe'
+        cfs = rocksCF dbe'
+    debug lg $ LG.msg $ "Appending Tx to candidate block: " ++ show (txHash)
+    mapM_
+        (\bhash -> do
+             q <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
+             case q of
+                 Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show bhash)
+                 Just (seq, htab) -> do
+                     res <-
+                         mapM
+                             (\txid -> do
+                                  y <- liftIO $ TSH.lookup (htab) (txHash)
+                                  case y of
+                                      Nothing -> do
+                                          trace lg $ LG.msg $ "parent Tx not found : " ++ show txid
+                                          return False
+                                      Just () -> return True)
+                             depTxHashes
+                     if all (\x -> x == True) res
+                         then do
+                             let __ = seq |> txHash
+                             return ()
+                         else return ()
+                     return ())
+        candBlockHashes

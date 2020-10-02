@@ -286,7 +286,8 @@ defBitcoinP2P nodeCnf = do
     wrkc <- newTVarIO []
     bsb <- newTVarIO Nothing
     prntxq <- TSH.new 1
-    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc tpfa tci wrkc bsb prntxq
+    candBlk <- TSH.new 1
+    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc tpfa tci wrkc bsb prntxq candBlk
 
 initVega :: IO ()
 initVega = do

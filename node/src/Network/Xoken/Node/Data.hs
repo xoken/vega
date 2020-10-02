@@ -115,6 +115,9 @@ data ZRPCRequestParam
     | ZPruneBlockTxOutputs
           { prBlockHashes :: ![BlockHash]
           }
+    | ZValidateUnconfirmedTx -- M =>> C
+          { vtTxSerialized :: !Tx
+          }
     | ZInvite -- M =>> C | C =>> M | C =>> C
           { cluster :: ![Node]
           , clusterID :: !ByteString
@@ -185,6 +188,10 @@ data ZRPCResponseBody
           {
           }
     | ZPruneBlockTxOutputsResp
+    | ZValidateUnconfirmedTxResp
+          { utCandidateParentBlock :: ![BlockHash]
+          , utDependentTransaction :: ![TxHash]
+          }
     | ZOk
     | ZPong
     deriving (Show, Generic, Hashable, Eq, Serialise)

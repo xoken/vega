@@ -56,6 +56,7 @@ import Network.Xoken.Block.Common
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.Common
@@ -64,7 +65,6 @@ import Network.Xoken.Transaction.Common
 import Prelude as P
 import StmContainers.Map as SM
 import System.Logger as LG
-
 import Text.Printf
 import Xoken.NodeConfig as NC
 
@@ -243,6 +243,45 @@ zRPCDispatchNotifyNewBlockHeader headers = do
                              throw mex)
         (wrkrs)
 
+--
+zRPCDispatchUnconfirmedTxValidate ::
+       (HasXokenNodeEnv env m, MonadIO m) => (Tx -> m (([BlockHash], [TxHash]))) -> Tx -> m (([BlockHash], [TxHash]))
+zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    debug lg $ LG.msg $ "encoded Tx : " ++ (show $ txHash tx)
+    let lexKey = getTxShortHash (txHash tx) 8
+    worker <- getRemoteWorker lexKey TxValidation
+    case worker of
+        Nothing
+            -- liftIO $ print "zRPCDispatchUnconfirmedTxValidate - SELF"
+         -> do
+            res <- LE.try $ selfFunc tx
+            case res of
+                Right val -> do
+                    return (val)
+                Left (e :: SomeException) -> do
+                    err lg $ LG.msg ("[ERROR] processUnconfirmedTransaction " ++ show e)
+                    throw e
+        Just wrk
+            -- liftIO $ print $ "zRPCDispatchUnconfirmedTxValidate - " ++ show wrk
+         -> do
+            let mparam = ZValidateUnconfirmedTx tx
+            resp <- zRPCRequestDispatcher mparam wrk
+            -- liftIO $ print $ "zRPCRequestDispatcher - RESPONSE " ++ show resp
+            case zrsPayload resp of
+                Right spl -> do
+                    case spl of
+                        Just pl ->
+                            case pl of
+                                ZValidateUnconfirmedTxResp prntBlk dpTx -> return (prntBlk, dpTx)
+                        Nothing -> throw InvalidMessageTypeException
+                Left er -> do
+                    err lg $ LG.msg $ "decoding Unconfirmed Tx validation error resp : " ++ show er
+                    let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
+                    throw mex
+
+--
 zRPCRequestDispatcher :: (HasXokenNodeEnv env m, MonadIO m) => ZRPCRequestParam -> Worker -> m (ZRPCResponse)
 zRPCRequestDispatcher param wrk = do
     bp2pEnv <- getBitcoinP2P

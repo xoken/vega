@@ -24,6 +24,7 @@ import qualified Data.HashTable.IO as H
 import Data.Hashable
 import Data.Int
 import qualified Data.Map.Strict as M
+import Data.Sequence
 import Data.Text
 import Data.Time.Clock
 import Data.Word
@@ -39,7 +40,6 @@ import StmContainers.Map as SM
 import StmContainers.Set as SS
 import System.Logger
 import System.Random
-
 import Text.Read
 import Xoken.NodeConfig
 
@@ -89,6 +89,7 @@ data BitcoinP2P =
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
+        , candidateBlocks :: !(TSH.TSHashTable BlockHash (Seq TxHash, TSH.TSHashTable TxHash ()))
         }
 
 class HasBitcoinP2P m where
