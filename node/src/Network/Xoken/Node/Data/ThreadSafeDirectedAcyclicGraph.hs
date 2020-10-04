@@ -32,7 +32,7 @@ import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Numeric as N
 
 data DAGException
-    = DependentTxNotFound
+    = InsertTimeoutException
     | DependentAlreadyQueued
     deriving (Show)
 
@@ -71,7 +71,12 @@ coalesce dag vt edges = do
                     etry <- TSH.lookup (vertices dag) vt
                     case etry of
                         Just x -> do
-                            TSH.insert (topologicalSorted dag) head (sq <> x)
+                            hseq <- TSH.lookup (topologicalSorted dag) x
+                            case hseq of
+                                Just hs -> do
+                                    TSH.insert (topologicalSorted dag) head (sq <> hs)
+                                Nothing -> do
+                                    TSH.insert (topologicalSorted dag) head (sq |> vt)
                         Nothing -> do
                             TSH.insert (topologicalSorted dag) head (sq |> vt)
                             TSH.insert (vertices dag) vt head
