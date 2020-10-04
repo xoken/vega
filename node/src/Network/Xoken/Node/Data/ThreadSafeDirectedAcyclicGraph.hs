@@ -31,9 +31,8 @@ import Data.Text as T
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Numeric as N
 
-data DAGException
-    = InsertTimeoutException
-    | DependentAlreadyQueued
+data DAGException =
+    InsertTimeoutException
     deriving (Show)
 
 instance Exception DAGException
@@ -102,7 +101,7 @@ coalesce dag vt edges = do
                          TSH.insert (dependents dag) dep event
                          ores <- LA.race (liftIO $ readMVar event) (liftIO $ threadDelay (60 * 1000000))
                          case ores of
-                             Right () -> throw DependentTxNotFound
+                             Right () -> throw InsertTimeoutException
                              Left res -> do
                                  return res)
                     vals
