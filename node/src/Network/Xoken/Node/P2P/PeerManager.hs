@@ -668,7 +668,8 @@ messageHandler peer (mm, ingss) = do
                 MTx tx -> do
                     res <- LE.try $ zRPCDispatchUnconfirmedTxValidate processUnconfTransaction tx
                     case res of
-                        Right ((candBlkHashes, depTxHashes)) -> return ()
+                        Right ((candBlkHashes, depTxHashes)) -> do
+                            addTxCandidateBlocks (txHash tx) candBlkHashes depTxHashes
                         Left TxIDNotFoundException -> do
                             throw TxIDNotFoundException
                         Left KeyValueDBInsertException -> do

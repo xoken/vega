@@ -33,6 +33,7 @@ import GHC.Generics
 import Network.Socket hiding (send)
 import Network.Xoken.Block.Common
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Transaction
@@ -89,7 +90,7 @@ data BitcoinP2P =
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
-        , candidateBlocks :: !(TSH.TSHashTable BlockHash (Seq TxHash, TSH.TSHashTable TxHash ()))
+        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash))
         }
 
 class HasBitcoinP2P m where

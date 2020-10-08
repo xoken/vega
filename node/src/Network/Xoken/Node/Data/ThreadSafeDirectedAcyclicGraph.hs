@@ -11,6 +11,7 @@
 
 module Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
     ( TSDirectedAcyclicGraph(..)
+    , coalesce
     ) where
 
 import Control.Concurrent (threadDelay)
