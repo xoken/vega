@@ -11,6 +11,7 @@
 
 module Network.Xoken.Node.P2P.BlockSync
     ( processBlock
+    , processCompactBlock
     , processConfTransaction
     , peerBlockSync
     , checkBlocksFullySynced
@@ -54,6 +55,7 @@ import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.ByteString.Short as BSS
 import Data.Function ((&))
 import Data.Functor.Identity
+import qualified Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
 import Data.IORef
 import Data.Int
@@ -62,6 +64,7 @@ import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Pool
+import qualified Data.Sequence as SQ
 import Data.Serialize
 import Data.Serialize as S
 import qualified Data.Set as DS
@@ -86,6 +89,7 @@ import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
+import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
@@ -687,4 +691,27 @@ processBlock dblk = do
     bp2pEnv <- getBitcoinP2P
     debug lg $ LG.msg ("processing deflated Block! " ++ show dblk)
     -- liftIO $ signalQSem (blockFetchBalance bp2pEnv)
+    return ()
+
+getShortTxID :: TxHash -> BlockHash -> Word64 -> Word64
+getShortTxID txid bhash nonce = undefined
+
+processCompactBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => CompactBlock -> m ()
+processCompactBlock cmpct = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    let bhash = headerHash $ cbHeader cmpct
+    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    let cmpctTxMap = zip (cbShortIDs cmpct) [1 ..]
+    mpTxLst <- liftIO $ TSH.toList $ mempoolTxIDs bp2pEnv
+    let mpShortTxIDList = map (\(txid, _) -> do (getShortTxID txid bhash (cbNonce cmpct), ())) mpTxLst
+    let mpShortTxIDMap = HM.fromList mpShortTxIDList
+    let missing =
+            L.filter
+                (\(sid, index) -> do
+                     let idx = HM.lookup sid mpShortTxIDMap
+                     case idx of
+                         Just x -> False
+                         Nothing -> True)
+                cmpctTxMap
     return ()

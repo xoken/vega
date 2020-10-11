@@ -20,6 +20,7 @@ import Control.Monad.Reader
 import Control.Monad.Trans.Control
 import Crypto.Secp256k1
 import qualified Data.ByteString.Char8 as C
+import qualified Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
 import Data.Hashable
 import Data.Int
@@ -85,12 +86,13 @@ data BitcoinP2P =
         , maxTMTBuilderThreadLock :: !(MSem Int)
         , indexUnconfirmedTx :: !(TVar Bool)
         , userDataCache :: !(HashTable Text (Text, Int32, Int32, UTCTime, [Text])) -- (name, quota, used, expiry time, roles)
-        , txProcFailAttempts :: !(TVar Int)
         , confChainIndex :: !(TVar (ChainIndex))
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
         , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash))
+        , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
+        , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
 
 class HasBitcoinP2P m where

@@ -65,6 +65,7 @@ import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
+import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
@@ -86,7 +87,6 @@ import qualified Streamly.Prelude as S
 import System.Logger as LG
 import System.Logger.Message
 import System.Random
-
 import Xoken.NodeConfig as NC
 
 createSocket :: AddrInfo -> IO (Maybe Socket)
@@ -683,6 +683,16 @@ messageHandler peer (mm, ingss) = do
                     -- debug lg $ LG.msg $ LG.val ("DEBUG receiving block ")
                  -> do
                     res <- LE.try $ processBlock blk
+                    case res of
+                        Right () -> return ()
+                        Left BlockHashNotFoundException -> return ()
+                        Left EmptyHeadersMessageException -> return ()
+                        Left e -> do
+                            err lg $ LG.msg ("[ERROR] Unhandled exception!" ++ show e)
+                            throw e
+                    return $ msgType msg
+                MCompactBlock cmpct -> do
+                    res <- LE.try $ processCompactBlock cmpct
                     case res of
                         Right () -> return ()
                         Left BlockHashNotFoundException -> return ()
