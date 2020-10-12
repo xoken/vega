@@ -129,6 +129,8 @@ executable vega
     , zeromq4-haskell 
     , list-t
     , store
+    , siphash
+    
   default-language: Haskell2010
 
 -- test-suite vega-test

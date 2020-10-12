@@ -12,6 +12,7 @@
 module Network.Xoken.Node.P2P.BlockSync
     ( processBlock
     , processCompactBlock
+    , processBlockTransactions
     , processConfTransaction
     , peerBlockSync
     , checkBlocksFullySynced
@@ -46,6 +47,7 @@ import Control.Monad.Reader
 import Control.Monad.STM
 import Control.Monad.State.Strict
 import Control.Monad.Trans.Control
+import Crypto.MAC.SipHash as SH
 import qualified Data.Aeson as A (decode, encode)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Base16 as B16 (decode, encode)
@@ -104,7 +106,7 @@ import Network.Xoken.Transaction.Common
 import Network.Xoken.Util
 import StmContainers.Map as SM
 import StmContainers.Set as SS
-import Streamly
+import Streamly as S
 import Streamly.Prelude ((|:), nil)
 import qualified Streamly.Prelude as S
 import System.Logger as LG
@@ -694,10 +696,23 @@ processBlock dblk = do
     return ()
 
 getShortTxID :: TxHash -> BlockHash -> Word64 -> Word64
-getShortTxID txid bhash nonce = undefined
+getShortTxID txid bhash nonce = do
+    let keyhash = sha256 $ S.encode bhash `C.append` S.encode nonce
+        bs = S.encode keyhash
+        k0 =
+            case runGet getWord64le bs of
+                Left e -> Prelude.error e
+                Right a -> a
+        k1 =
+            case runGet getWord64le $ B.drop 8 bs of
+                Left e -> Prelude.error e
+                Right a -> a
+        skey = SipKey k0 k1
+        (SipHash val) = hashWith 2 4 skey $ S.encode txid
+    val
 
-processCompactBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => CompactBlock -> m ()
-processCompactBlock cmpct = do
+processCompactBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => CompactBlock -> BitcoinPeer -> m ()
+processCompactBlock cmpct peer = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     let bhash = headerHash $ cbHeader cmpct
@@ -706,7 +721,7 @@ processCompactBlock cmpct = do
     mpTxLst <- liftIO $ TSH.toList $ mempoolTxIDs bp2pEnv
     let mpShortTxIDList = map (\(txid, _) -> do (getShortTxID txid bhash (cbNonce cmpct), ())) mpTxLst
     let mpShortTxIDMap = HM.fromList mpShortTxIDList
-    let missing =
+    let missingTxns =
             L.filter
                 (\(sid, index) -> do
                      let idx = HM.lookup sid mpShortTxIDMap
@@ -714,4 +729,44 @@ processCompactBlock cmpct = do
                          Just x -> False
                          Nothing -> True)
                 cmpctTxMap
+    lastIndex <- liftIO $ newIORef 0
+    mtxIndexes <-
+        mapM
+            (\(__, indx) -> do
+                 prev <- liftIO $ readIORef lastIndex
+                 liftIO $ writeIORef lastIndex indx
+                 return $ indx - prev)
+            missingTxns
+    let gbtxn = GetBlockTxns bhash (fromIntegral $ L.length mtxIndexes) mtxIndexes
+    sendRequestMessages peer $ MGetBlockTxns gbtxn
     return ()
+
+--
+processBlockTransactions :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockTxns -> m ()
+processBlockTransactions blockTxns = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    let bhash = btBlockhash blockTxns
+    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    S.drain $
+        aheadly $
+        S.fromList (btTransactions blockTxns) & S.mapM (processDeltaTx bhash) &
+        S.maxBuffer (maxTxProcessingBuffer $ nodeConfig bp2pEnv) &
+        S.maxThreads (maxTxProcessingThreads $ nodeConfig bp2pEnv)
+
+processDeltaTx :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> Tx -> m ()
+processDeltaTx bhash tx = do
+    let bheight = 999999
+        txIndex = 0
+    lg <- getLogger
+    res <- LE.try $ zRPCDispatchTxValidate processConfTransaction tx bhash bheight (fromIntegral txIndex)
+    case res of
+        Right () -> return ()
+        Left TxIDNotFoundException -> do
+            throw TxIDNotFoundException
+        Left KeyValueDBInsertException -> do
+            err lg $ LG.msg $ val "[ERROR] KeyValueDBInsertException"
+            throw KeyValueDBInsertException
+        Left e -> do
+            err lg $ LG.msg ("[ERROR] Unhandled exception!" ++ show e)
+            throw e

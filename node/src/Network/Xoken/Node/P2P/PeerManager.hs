@@ -692,7 +692,17 @@ messageHandler peer (mm, ingss) = do
                             throw e
                     return $ msgType msg
                 MCompactBlock cmpct -> do
-                    res <- LE.try $ processCompactBlock cmpct
+                    res <- LE.try $ processCompactBlock cmpct peer
+                    case res of
+                        Right () -> return ()
+                        Left BlockHashNotFoundException -> return ()
+                        Left EmptyHeadersMessageException -> return ()
+                        Left e -> do
+                            err lg $ LG.msg ("[ERROR] Unhandled exception!" ++ show e)
+                            throw e
+                    return $ msgType msg
+                MBlockTxns blockTxns -> do
+                    res <- LE.try $ processBlockTransactions blockTxns
                     case res of
                         Right () -> return ()
                         Left BlockHashNotFoundException -> return ()
