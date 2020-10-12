@@ -633,18 +633,20 @@ messageHandler peer (mm, ingss) = do
                 MInv inv -> do
                     mapM_
                         (\x ->
-                             if (invType x) == InvBlock
-                                 then do
+                             case (invType x) of
+                                 InvBlock -> do
                                      trace lg $ LG.msg ("INV - new Block: " ++ (show $ invHash x))
                                      liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
-                                 else if (invType x == InvTx)
-                                          then do
-                                              indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
-                                              trace lg $ LG.msg ("INV - new Tx: " ++ (show $ invHash x))
-                                              if indexUnconfirmedTx == True
-                                                  then processTxGetData peer $ invHash x
-                                                  else return ()
-                                          else return ())
+                                 InvTx -> do
+                                     indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
+                                     trace lg $ LG.msg ("INV - new Tx: " ++ (show $ invHash x))
+                                     if indexUnconfirmedTx == True
+                                         then processTxGetData peer $ invHash x
+                                         else return ()
+                                 InvCompactBlock -> do
+                                     trace lg $ LG.msg ("INV - Compact Block: " ++ (show $ invHash x))
+                                     processCompactBlockGetData peer $ invHash x
+                                 otherwise -> return ())
                         (invList inv)
                     return $ msgType msg
                 MAddr addrs -> do

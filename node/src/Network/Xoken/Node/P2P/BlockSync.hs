@@ -20,6 +20,7 @@ module Network.Xoken.Node.P2P.BlockSync
     , runBlockCacheQueue
     , sendRequestMessages
     , zRPCDispatchTxValidate
+    , processCompactBlockGetData
     ) where
 
 import Codec.Serialise
@@ -695,9 +696,14 @@ processBlock dblk = do
     -- liftIO $ signalQSem (blockFetchBalance bp2pEnv)
     return ()
 
-getShortTxID :: TxHash -> BlockHash -> Word64 -> Word64
-getShortTxID txid bhash nonce = do
-    let keyhash = sha256 $ S.encode bhash `C.append` S.encode nonce
+processCompactBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => CompactBlock -> BitcoinPeer -> m ()
+processCompactBlock cmpct peer = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    let bhash = headerHash $ cbHeader cmpct
+    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    --
+    let keyhash = sha256 $ S.encode bhash `C.append` S.encode (cbNonce cmpct)
         bs = S.encode keyhash
         k0 =
             case runGet getWord64le bs of
@@ -708,18 +714,15 @@ getShortTxID txid bhash nonce = do
                 Left e -> Prelude.error e
                 Right a -> a
         skey = SipKey k0 k1
-        (SipHash val) = hashWith 2 4 skey $ S.encode txid
-    val
-
-processCompactBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => CompactBlock -> BitcoinPeer -> m ()
-processCompactBlock cmpct peer = do
-    lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
-    let bhash = headerHash $ cbHeader cmpct
-    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    --
     let cmpctTxMap = zip (cbShortIDs cmpct) [1 ..]
     mpTxLst <- liftIO $ TSH.toList $ mempoolTxIDs bp2pEnv
-    let mpShortTxIDList = map (\(txid, _) -> do (getShortTxID txid bhash (cbNonce cmpct), ())) mpTxLst
+    let mpShortTxIDList =
+            map
+                (\(txid, _) -> do
+                     let (SipHash val) = hashWith 2 4 skey $ S.encode txid
+                     (val, ()))
+                mpTxLst
     let mpShortTxIDMap = HM.fromList mpShortTxIDList
     let missingTxns =
             L.filter
@@ -770,3 +773,37 @@ processDeltaTx bhash tx = do
         Left e -> do
             err lg $ LG.msg ("[ERROR] Unhandled exception!" ++ show e)
             throw e
+
+processCompactBlockGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
+processCompactBlockGetData pr hash = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    debug lg $ LG.msg $ val "processCompactBlockGetData - called."
+    bp2pEnv <- getBitcoinP2P
+    res <- liftIO $ TSH.lookup (ingressCompactBlocks bp2pEnv) (BlockHash hash)
+    case res of
+        Just bh -> do
+            liftIO $ threadDelay (1000000 * 10)
+            res2 <- liftIO $ TSH.lookup (ingressCompactBlocks bp2pEnv) (BlockHash hash)
+            case res2 of
+                Just bh2 -> return ()
+                Nothing -> sendCompactBlockGetData pr hash
+        Nothing -> sendCompactBlockGetData pr hash
+
+sendCompactBlockGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
+sendCompactBlockGetData pr hash = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    let gd = GetData $ [InvVector InvCompactBlock hash]
+        msg = MGetData gd
+    debug lg $ LG.msg $ "sendCompactBlockGetData: " ++ show gd
+    case (bpSocket pr) of
+        Just s -> do
+            let em = runPut . putMessage net $ msg
+            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
+            case res of
+                Right _ -> liftIO $ TSH.insert (ingressCompactBlocks bp2pEnv) (BlockHash hash) True
+                Left (e :: SomeException) -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
+            debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
+        Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
