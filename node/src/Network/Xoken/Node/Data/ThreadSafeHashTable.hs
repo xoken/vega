@@ -15,12 +15,12 @@ module Network.Xoken.Node.Data.ThreadSafeHashTable
     , insert
     , delete
     , Network.Xoken.Node.Data.ThreadSafeHashTable.lookup
-    , mutate
+    , mutateIO
     , Network.Xoken.Node.Data.ThreadSafeHashTable.mapM_
     , fromList
     , toList
-    -- , lookupIndex
-    -- , nextByIndex
+    , lookupIndex
+    , nextByIndex
     ) where
 
 import Control.Concurrent.MVar
@@ -68,16 +68,21 @@ lookup tsh k = do
     let index = (hash k) `mod` (fromIntegral $ size tsh)
     withMVar ((hashTableList tsh) !! index) (\hx -> H.lookup hx k)
 
-mutate :: (Eq k, Hashable k) => TSHashTable k v -> k -> (Maybe v -> (Maybe v, a)) -> IO a
-mutate tsh k f = do
-    v <- Network.Xoken.Node.Data.ThreadSafeHashTable.lookup tsh k
-    case f v of
-        (Nothing, a) -> do
-            delete tsh k
-            return a
-        (Just v, a) -> do
-            insert tsh k v
-            return a
+mutateIO :: (Eq k, Hashable k) => TSHashTable k v -> k -> (Maybe v -> IO (Maybe v, a)) -> IO a
+mutateIO tsh k f = do
+    let index = (hash k) `mod` (fromIntegral $ size tsh)
+    withMVar
+        ((hashTableList tsh) !! index)
+        (\hx -> do
+             mv <- H.lookup hx k
+             (newval, a) <- f mv
+             case newval of
+                 Just nv -> do
+                     H.insert hx k nv
+                     return a
+                 Nothing -> do
+                     H.delete hx k
+                     return a)
 
 mapM_ :: ((k, v) -> IO a) -> TSHashTable k v -> IO ()
 mapM_ f tsh = do
@@ -92,24 +97,13 @@ fromList size kv = do
     tsh <- new size
     traverse (\(k, v) -> insert tsh k v) kv
     return tsh
---    
--- lookupIndex :: (Eq k, Hashable k) => TSHashTable k v -> k -> IO (Maybe (Int, Word))
--- lookupIndex tsh k = lookupIndex' (hashTableList tsh) k 0
---   where
---     lookupIndex' [] _ _ = return Nothing
---     lookupIndex' (h:hs) k i = do
---         ind <- H.lookupIndex h k
---         case ind of
---             Nothing -> lookupIndex' hs k (i + 1)
---             Just w -> return $ Just $ (i, w)
---
--- nextByIndex :: (Eq k, Hashable k) => TSHashTable k v -> (Int, Word) -> IO (Maybe (k, v))
--- nextByIndex tsh (i, w) = do
---     let hts = hashTableList tsh
---     if L.length hts <= i
---         then return Nothing
---         else do
---             nbi <- H.nextByIndex (hts !! i) w
---             case nbi of
---                 Nothing -> return Nothing
---                 Just (_, k, v) -> return $ Just (k, v)
+
+lookupIndex :: (Eq k, Hashable k) => TSHashTable k v -> k -> IO (Maybe (Word))
+lookupIndex tsh k = do
+    let index = (hash k) `mod` (fromIntegral $ size tsh)
+    withMVar ((hashTableList tsh) !! index) (\hx -> H.lookupIndex hx k)
+
+nextByIndex :: (Eq k, Hashable k) => TSHashTable k v -> (k, Word) -> IO (Maybe (Word, k, v))
+nextByIndex tsh (k, w) = do
+    let index = (hash k) `mod` (fromIntegral $ size tsh)
+    withMVar ((hashTableList tsh) !! index) (\hx -> H.nextByIndex hx w)
