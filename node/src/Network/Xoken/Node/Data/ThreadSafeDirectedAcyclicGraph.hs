@@ -14,6 +14,7 @@ module Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
     , new
     , coalesce
     , consolidate
+    , getTopologicalSortedForest
     ) where
 
 import Control.Concurrent (threadDelay)
@@ -63,6 +64,26 @@ new def = do
     topSort <- TSH.new 100
     TSH.insert topSort def (SQ.empty)
     return $ TSDirectedAcyclicGraph vertices topSort dep def lock
+
+getTopologicalSortedForest :: (Eq v, Hashable v, Ord v, Show v) => TSDirectedAcyclicGraph v -> IO ([(v, Maybe v)])
+getTopologicalSortedForest dag = do
+    forest <- TSH.toList $ topologicalSorted dag
+    return $
+        L.concatMap
+            (\(vt, dg) -> do
+                 let rt =
+                         if vt == baseVertex dag
+                             then Nothing
+                             else Just vt
+                 L.map (\x -> do (x, rt)) (FD.toList dg))
+            forest
+
+getPrimaryTopologicalSorted :: (Eq v, Hashable v, Ord v, Show v) => TSDirectedAcyclicGraph v -> IO ([v])
+getPrimaryTopologicalSorted dag = do
+    primary <- TSH.lookup (topologicalSorted dag) (baseVertex dag)
+    case primary of
+        Just pdag -> return $ FD.toList pdag
+        Nothing -> return []
 
 consolidate :: (Eq v, Hashable v, Ord v, Show v) => TSDirectedAcyclicGraph v -> IO ()
 consolidate dag = do

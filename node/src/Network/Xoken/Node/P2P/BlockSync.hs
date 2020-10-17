@@ -95,6 +95,7 @@ import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
@@ -714,35 +715,51 @@ processCompactBlock cmpct peer = do
                 Left e -> Prelude.error e
                 Right a -> a
         skey = SipKey k0 k1
-    --
-    let cmpctTxMap = zip (cbShortIDs cmpct) [1 ..]
-    mpTxLst <- liftIO $ TSH.toList $ mempoolTxIDs bp2pEnv
-    let mpShortTxIDList =
-            map
-                (\(txid, _) -> do
-                     let (SipHash val) = hashWith 2 4 skey $ S.encode txid
-                     (val, ()))
-                mpTxLst
-    let mpShortTxIDMap = HM.fromList mpShortTxIDList
-    let missingTxns =
-            L.filter
-                (\(sid, index) -> do
-                     let idx = HM.lookup sid mpShortTxIDMap
-                     case idx of
-                         Just x -> False
-                         Nothing -> True)
-                cmpctTxMap
-    lastIndex <- liftIO $ newIORef 0
-    mtxIndexes <-
-        mapM
-            (\(__, indx) -> do
-                 prev <- liftIO $ readIORef lastIndex
-                 liftIO $ writeIORef lastIndex indx
-                 return $ indx - prev)
-            missingTxns
-    let gbtxn = GetBlockTxns bhash (fromIntegral $ L.length mtxIndexes) mtxIndexes
-    sendRequestMessages peer $ MGetBlockTxns gbtxn
-    return ()
+    let cmpctTxLst = zip (cbShortIDs cmpct) [1 ..]
+    cb <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
+    case cb of
+        Nothing -> err lg $ LG.msg $ ("Candidate block not found!: " ++ show bhash)
+        Just dag -> do
+            mpTxLst <- liftIO $ getTopologicalSortedForest dag
+            let mpShortTxIDList =
+                    map
+                        (\(txid, rt) -> do
+                             let (SipHash val) = hashWith 2 4 skey $ S.encode txid
+                             (val, (txid, rt)))
+                        mpTxLst
+            let mpShortTxIDMap = HM.fromList mpShortTxIDList
+            let (usedTxns, missingTxns) =
+                    L.partition
+                        (\(sid, index) -> do
+                             let idx = HM.lookup sid mpShortTxIDMap
+                             case idx of
+                                 Just x -> True
+                                 Nothing -> False)
+                        cmpctTxLst
+            let usedTxnMap = HM.fromList usedTxns
+            mapM
+                (\(sid, (txid, rt)) -> do
+                     let fd = HM.lookup sid usedTxnMap
+                     case fd of
+                         Just x -> return ()
+                         Nothing
+                             -- TODO: lock the previous dag and insert into a NEW dag!!
+                          -> do
+                             case rt of
+                                 Just p -> liftIO $ DAG.coalesce dag txid [p]
+                                 Nothing -> liftIO $ DAG.coalesce dag txid [])
+                mpShortTxIDList
+            lastIndex <- liftIO $ newIORef 0
+            mtxIndexes <-
+                mapM
+                    (\(__, indx) -> do
+                         prev <- liftIO $ readIORef lastIndex
+                         liftIO $ writeIORef lastIndex indx
+                         return $ indx - prev)
+                    missingTxns
+            let gbtxn = GetBlockTxns bhash (fromIntegral $ L.length mtxIndexes) mtxIndexes
+            sendRequestMessages peer $ MGetBlockTxns gbtxn
+            return ()
 
 --
 processBlockTransactions :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockTxns -> m ()
