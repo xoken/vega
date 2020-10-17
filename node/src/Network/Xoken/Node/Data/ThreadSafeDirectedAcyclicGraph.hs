@@ -55,13 +55,13 @@ data TSDirectedAcyclicGraph v =
         , lock :: MVar ()
         }
 
-new :: (Eq v, Hashable v, Ord v, Show v) => v -> IO (TSDirectedAcyclicGraph v)
-new def = do
-    vertices <- TSH.new 100
-    dep <- TSH.new 100
+new :: (Eq v, Hashable v, Ord v, Show v) => v -> Int16 -> Int16 -> IO (TSDirectedAcyclicGraph v)
+new def vertexParts topSortParts = do
+    vertices <- TSH.new vertexParts
+    dep <- TSH.new 1
     TSH.insert vertices def (def, True)
     lock <- newMVar ()
-    topSort <- TSH.new 100
+    topSort <- TSH.new topSortParts
     TSH.insert topSort def (SQ.empty)
     return $ TSDirectedAcyclicGraph vertices topSort dep def lock
 
