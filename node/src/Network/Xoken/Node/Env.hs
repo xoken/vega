@@ -92,7 +92,7 @@ data BitcoinP2P =
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
         , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash))
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
-        , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
+        -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
 
 class HasBitcoinP2P m where

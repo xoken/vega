@@ -200,6 +200,16 @@ processUnconfTransaction tx = do
     let outpoints =
             map (\(b, _) -> ((outPointHash $ prevOutput b), fromIntegral $ outPointIndex $ prevOutput b)) (inputs)
  --
+    debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
+    cf' <- liftIO $ TSH.lookup cf (getEpochTxOutCF epoch)
+    case cf' of
+        Just cf'' -> do
+            mapM_
+                (\(txOut, oind) -> do
+                     debug lg $ LG.msg $ "inserting output " ++ show txOut
+                     insertTxIdOutputs conn cf'' (txHash tx, oind) (txOut))
+                outputs
+        Nothing -> return () -- ideally should be unreachable
     inputValsOutpoints <-
         mapM
             (\(b, indx) -> do
@@ -281,16 +291,6 @@ processUnconfTransaction tx = do
     case vall of
         Just ev -> liftIO $ EV.signal ev
         Nothing -> return ()
-    debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
-    cf' <- liftIO $ TSH.lookup cf (getEpochTxOutCF epoch)
-    case cf' of
-        Just cf'' -> do
-            mapM_
-                (\(txOut, oind) -> do
-                     debug lg $ LG.msg $ "inserting output " ++ show txOut
-                     insertTxIdOutputs conn cf'' (txHash tx, oind) (txOut))
-                outputs
-        Nothing -> return () -- ideally should be unreachable
     -- let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
     return ([], []) -- TODO: proper response to be set
 
