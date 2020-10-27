@@ -30,6 +30,7 @@ executable vega
       Paths_vega
       Network.Xoken.Node.Data
       Network.Xoken.Node.Data.ThreadSafeHashTable
+      Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
       Network.Xoken.Node.AriviService
       Network.Xoken.Node.P2P.ChainSync
       Network.Xoken.Node.P2P.Types
