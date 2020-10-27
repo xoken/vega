@@ -173,12 +173,13 @@ getBlockLocator rkdb net = do
             liftIO $ mapM CA.wait v
     case res of
         Right vs' -> do
-            let vs = catMaybes vs'
+            let vs :: [(Text,BlockHeader)]
+                vs = catMaybes vs'
             if L.null vs
                 then return [headerHash $ getGenesisHeader net]
                 else do
                     debug lg $ LG.msg $ "Best-block from ROCKS DB: " ++ show (last $ vs)
-                    return $ reverse $ catMaybes $ fmap hexToBlockHash vs
+                    return $ reverse $ catMaybes $ fmap (hexToBlockHash . fst) vs
         Left (e :: SomeException) -> do
             debug lg $ LG.msg $ "[Error] getBlockLocator: " ++ show e
             throw e
