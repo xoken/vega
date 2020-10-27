@@ -301,21 +301,20 @@ runBlockCacheQueue =
                         liftIO $
                         try $
                         mapM
-                            (\(kb, k) -> do
-                                 x <- R.get rkdb kb
+                            (\k -> do
+                                 x <- getDB' rkdb k -- Maybe (Text, BlockHeader)
                                  return $
-                                     (\v ->
-                                          case DSE.decode v :: Either DSE.PeekException T.Text of
-                                              Left _ -> Nothing
-                                              Right v' -> Just (k, v')) <$>
-                                     x)
-                            ((\k -> (DSE.encode k, k)) <$> bks)
+                                     case x :: Maybe (Text,BlockHeader) of
+                                         Nothing -> Nothing
+                                         Just (x',_) -> Just (k,x')
+                                     )
+                            (bks)
                     case res of
                         Left (e :: SomeException) -> do
                             err lg $ LG.msg ("Error: runBlockCacheQueue: " ++ show e)
                             throw e
-                        Right (op') -> do
-                            let op = catMaybes $ fmap join op'
+                        Right (op' :: [Maybe (Int32,Text)]) -> do
+                            let op = catMaybes $ op'
                             if L.length op == 0
                                 then do
                                     debug lg $ LG.msg $ val "Synced fully!"

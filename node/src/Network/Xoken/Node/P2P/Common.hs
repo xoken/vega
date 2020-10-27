@@ -277,9 +277,9 @@ getDB' :: (Store a, Store b, MonadIO m) => R.DB -> a -> m (Maybe b)
 getDB' rkdb k = do
     res <- R.get rkdb (DS.encode k)
     case DS.decode <$> res of
-        Just (Left _) -> do
-            liftIO $ print "getDBCF ERROR"
-            return Nothing
+        Just (Left e) -> do
+            liftIO $ print $ "getDB' ERROR: " ++ show e
+            throw KeyValueDBLookupException
         Just (Right m) -> return $ Just m
         Nothing -> return Nothing
 
@@ -287,9 +287,9 @@ getDBCF :: (Store a, Store b, MonadIO m) => R.DB -> R.ColumnFamily -> a -> m (Ma
 getDBCF rkdb cf k = do
     res <- R.getCF rkdb cf (DS.encode k)
     case DS.decode <$> res of
-        Just (Left _) -> do
-            liftIO $ print "getDBCF ERROR"
-            return Nothing
+        Just (Left e) -> do
+            liftIO $ print $ "getDBCF ERROR" ++ show e
+            throw KeyValueDBLookupException
         Just (Right m) -> return $ Just m
         Nothing -> return Nothing
 
