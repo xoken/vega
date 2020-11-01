@@ -356,6 +356,6 @@ addTxCandidateBlocks txHash candBlockHashes depTxHashes = do
              case q of
                  Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show bhash)
                  Just dag -> do
-                     liftIO $ DAG.coalesce dag txHash depTxHashes
+                     liftIO $ DAG.coalesce dag txHash depTxHashes 0 (+)
                      return ())
         candBlockHashes

@@ -90,7 +90,7 @@ data BitcoinP2P =
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
-        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash))
+        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64))
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }

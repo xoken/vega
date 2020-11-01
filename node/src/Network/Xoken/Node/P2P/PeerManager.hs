@@ -192,12 +192,17 @@ setupSeedPeerConnection =
                                                                       modifyTVar'
                                                                           (bitcoinPeers bp2pEnv)
                                                                           (M.insert (addrAddress y) bp)
+                                                                  liftIO $ print "Sending sendcmpt.."
+                                                                  sendcmpt bp
                                                                   handleIncomingMessages bp
                                                               Nothing -> return ()
                                                       Left (SocketConnectException addr) ->
                                                           warn lg $ msg ("SocketConnectException: " ++ show addr)))
             (addrs)
         liftIO $ threadDelay (30 * 1000000)
+
+sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
+sendcmpt bp = sendRequestMessages bp $ MSendCompact $ SendCompact 0 1
 
 setupPeerConnection :: (HasXokenNodeEnv env m, MonadIO m) => SockAddr -> m (Maybe BitcoinPeer)
 setupPeerConnection saddr = do
@@ -543,7 +548,9 @@ readNextMessage net sock ingss = do
                                                 b <- recvAll sock (fromIntegral len)
                                                 return (hdr `BSL.append` b)
                                     case runGetLazy (getMessage net) byts of
-                                        Left e -> throw MessageParsingException
+                                        Left e -> do
+                                            debug lg $ msg ("Message parse error' : " ++ (show e) ++ "; cmd: " ++ (show cmd))
+                                            throw MessageParsingException
                                         Right mg -> do
                                             debug lg $ msg ("Message recv' : " ++ (show $ msgType mg))
                                             return (Just mg, Nothing)
@@ -601,6 +608,7 @@ messageHandler peer (mm, ingss) = do
     lg <- getLogger
     case mm of
         Just msg -> do
+            liftIO $ print $ "MSG: " ++ (show $ msgType msg)
             case (msg) of
                 MHeaders hdrs -> do
                     liftIO $ takeMVar (headersWriteLock bp2pEnv)
@@ -632,11 +640,13 @@ messageHandler peer (mm, ingss) = do
                     return $ msgType msg
                 MInv inv -> do
                     mapM_
-                        (\x ->
+                        (\x -> do
+                             liftIO $ print $ "INVTYPE: " ++ (show $ invType x)
                              case (invType x) of
                                  InvBlock -> do
                                      trace lg $ LG.msg ("INV - new Block: " ++ (show $ invHash x))
-                                     liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
+                                     processCompactBlockGetData peer $ invHash x
+                                     --liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
                                      indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
                                      trace lg $ LG.msg ("INV - new Tx: " ++ (show $ invHash x))

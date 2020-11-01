@@ -745,8 +745,8 @@ processCompactBlock cmpct peer = do
                              -- TODO: lock the previous dag and insert into a NEW dag!!
                           -> do
                              case rt of
-                                 Just p -> liftIO $ DAG.coalesce dag txid [p]
-                                 Nothing -> liftIO $ DAG.coalesce dag txid [])
+                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 0 (+)
+                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 0 (+))
                 mpShortTxIDList
             lastIndex <- liftIO $ newIORef 0
             mtxIndexes <-
@@ -823,3 +823,23 @@ sendCompactBlockGetData pr hash = do
                 Left (e :: SomeException) -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
+
+newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
+newCandidateBlock hash = do
+    bp2pEnv <- getBitcoinP2P
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) 16 16
+    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
+    
+
+newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+newCandidateBlockChainTip = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    dbe' <- getDB
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        conn = rocksDB dbe'
+    (hash,_) <- fetchBestBlock conn net
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) 16 16
+    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
+    
+defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"
