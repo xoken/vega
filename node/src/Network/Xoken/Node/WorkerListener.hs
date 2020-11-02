@@ -130,7 +130,7 @@ requestHandler sock writeLock msg = do
                                      -> do
                                         return $ successResp mid $ ZGetOutpointResp val B.empty
                                     Left (e :: SomeException) -> do
-                                        return $ errorResp mid (show e)
+                                        return $ errorResp mid 0 (show e)
                             ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
                                 ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
                                 return $ successResp mid $ ZTraceOutputsResp ret
@@ -158,7 +158,7 @@ requestHandler sock writeLock msg = do
                                                          liftIO $ TSH.insert (pruneUtxoQueue bp2pEnv) bhash opq)
                                             outpts
                                         return $ successResp mid (ZValidateTxResp True)
-                                    Left (e :: SomeException) -> return $ errorResp mid (show e)
+                                    Left (e :: SomeException) -> return $ errorResp mid 1 (show e)
                             ZPruneBlockTxOutputs blockHashes
                                 -- liftIO $ print $ "ZPruneBlockTxOutputs - REQUEST " ++ (show blockHashes)
                              -> do
@@ -193,15 +193,15 @@ requestHandler sock writeLock msg = do
                                             print $
                                             "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show $ P.head headers)
                                         return $ successResp mid (ZNotifyNewBlockHeaderResp)
-                                    Left (e :: SomeException) -> return $ errorResp mid (show e)
+                                    Left (e :: SomeException) -> return $ errorResp 2 mid (show e)
             Left e -> do
                 err lg $ LG.msg $ "Error: deserialise Failed (requestHandler) : " ++ (show e)
-                return $ errorResp (0) "Deserialise failed"
+                return $ errorResp (0) 3 "Deserialise failed"
     liftIO $ sendMessage sock writeLock resp
     debug lg $ LG.msg $ val $ "ZRPCResponse SENT "
   where
     successResp mid rsp = serialise $ ZRPCResponse mid (Right $ Just rsp)
-    errorResp mid err = serialise $ ZRPCResponse mid (Left $ ZRPCError Z_INTERNAL_ERROR (Just err))
+    errorResp mid i err = serialise $ ZRPCResponse mid (Left $ ZRPCError Z_INTERNAL_ERROR (Just $ "(" ++ show i ++ ")" ++ err))
 
 -- 
 startTCPServer :: (HasXokenNodeEnv env m, MonadIO m) => String -> Word16 -> m ()
