@@ -21,6 +21,7 @@ module Network.Xoken.Node.P2P.BlockSync
     , sendRequestMessages
     , zRPCDispatchTxValidate
     , processCompactBlockGetData
+    , newCandidateBlock
     ) where
 
 import Codec.Serialise
@@ -717,8 +718,12 @@ processCompactBlock cmpct peer = do
     let cmpctTxLst = zip (cbShortIDs cmpct) [1 ..]
     cb <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
     case cb of
-        Nothing -> err lg $ LG.msg $ ("Candidate block not found!: " ++ show bhash)
+        Nothing -> do
+            err lg $ LG.msg $ ("Candidate block not found!: " ++ show bhash)
+            debug lg $ LG.msg $ ("Creating New Candidate Block over: " ++ show bhash)
+            newCandidateBlock bhash
         Just dag -> do
+            debug lg $ LG.msg $ ("New Candidate Found Block over: " ++ show bhash)
             mpTxLst <- liftIO $ getTopologicalSortedForest dag
             let mpShortTxIDList =
                     map

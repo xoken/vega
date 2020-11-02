@@ -644,7 +644,9 @@ messageHandler peer (mm, ingss) = do
                              liftIO $ print $ "INVTYPE: " ++ (show $ invType x)
                              case (invType x) of
                                  InvBlock -> do
-                                     trace lg $ LG.msg ("INV - new Block: " ++ (show $ invHash x))
+                                     let bhash = invHash x
+                                     trace lg $ LG.msg ("INV - new Block: " ++ (show bhash))
+                                     newCandidateBlock $ BlockHash bhash
                                      processCompactBlockGetData peer $ invHash x
                                      --liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
@@ -654,7 +656,9 @@ messageHandler peer (mm, ingss) = do
                                          then processTxGetData peer $ invHash x
                                          else return ()
                                  InvCompactBlock -> do
-                                     trace lg $ LG.msg ("INV - Compact Block: " ++ (show $ invHash x))
+                                     let bhash = invHash x
+                                     trace lg $ LG.msg ("INV - Compact Block: " ++ (show bhash))
+                                     newCandidateBlock $ BlockHash bhash
                                      processCompactBlockGetData peer $ invHash x
                                  otherwise -> return ())
                         (invList inv)
