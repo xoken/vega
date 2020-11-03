@@ -94,28 +94,3 @@ import System.Random
 import Text.Read
 import Xoken
 import qualified Xoken.NodeConfig as NC
-
-getChainIndex :: IO ChainIndex
-getChainIndex = do
-    return $ ChainIndex M.empty M.empty
-
-getChainIndexByHeight :: (HasXokenNodeEnv env m, MonadIO m) => BlockHeight -> m (Maybe BlockHash)
-getChainIndexByHeight ht = do
-    bp2pEnv <- getBitcoinP2P
-    ci <- liftIO $ readTVarIO (confChainIndex bp2pEnv)
-    return $ M.lookup ht (heightIndex ci)
-
-getChainIndexByHash :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> m (Maybe BlockHeight)
-getChainIndexByHash h = do
-    bp2pEnv <- getBitcoinP2P
-    ci <- liftIO $ readTVarIO (confChainIndex bp2pEnv)
-    return $ M.lookup (h) (hashIndex ci)
-
-addBlockToChainIndex :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> BlockHeight -> m ()
-addBlockToChainIndex hs ht = do
-    bp2pEnv <- getBitcoinP2P
-    liftIO $
-        atomically $
-        modifyTVar'
-            (confChainIndex bp2pEnv)
-            (\(ChainIndex ch cht) -> ChainIndex (M.insert hs ht ch) (M.insert ht hs cht))

@@ -86,7 +86,7 @@ data BitcoinP2P =
         , maxTMTBuilderThreadLock :: !(MSem Int)
         , indexUnconfirmedTx :: !(TVar Bool)
         , userDataCache :: !(HashTable Text (Text, Int32, Int32, UTCTime, [Text])) -- (name, quota, used, expiry time, roles)
-        , confChainIndex :: !(TVar (ChainIndex))
+        , blockTree :: !(TSH.TSHashTable BlockHash (BlockHeight, BlockHeader))
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))

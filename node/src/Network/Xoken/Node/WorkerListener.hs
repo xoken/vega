@@ -131,9 +131,9 @@ requestHandler sock writeLock msg = do
                                         return $ successResp mid $ ZGetOutpointResp val B.empty
                                     Left (e :: SomeException) -> do
                                         return $ errorResp mid (show e)
-                            ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
-                                ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
-                                return $ successResp mid $ ZTraceOutputsResp ret
+                            -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
+                            --     ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
+                            --     return $ successResp mid $ ZTraceOutputsResp ret
                             ZValidateTx bhash blkht txind tx
                                 -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
                              -> do
@@ -185,7 +185,11 @@ requestHandler sock writeLock msg = do
                                                          err lg $
                                                              LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
                                                          throw KeyValueDBInsertException
-                                             addBlockToChainIndex (headerHash header) (fromIntegral blkht))
+                                             liftIO $
+                                                 TSH.insert
+                                                     (blockTree bp2pEnv)
+                                                     (headerHash header)
+                                                     (fromIntegral blkht, header))
                                         headers
                                 case res of
                                     Right () -> do
