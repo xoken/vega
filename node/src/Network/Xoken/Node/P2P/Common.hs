@@ -293,6 +293,17 @@ getDBCF rkdb cf k = do
         Just (Right m) -> return $ Just m
         Nothing -> return Nothing
 
+
+getDBCF_ :: (Store a, Store b) => R.DB -> R.ColumnFamily -> a -> IO (Maybe b)
+getDBCF_ rkdb cf k = do
+    res <- R.getCF rkdb cf (DS.encode k)
+    case DS.decode <$> res of
+        Just (Left e) -> do
+            print $ "getDBCF_ ERROR" ++ show e
+            throw KeyValueDBLookupException
+        Just (Right m) -> return $ Just m
+        Nothing -> return Nothing
+
 getEpochTxCF :: Bool -> String
 getEpochTxCF True = "ep_transactions_odd"
 getEpochTxCF False = "ep_transactions_even"
