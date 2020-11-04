@@ -22,6 +22,7 @@ module Network.Xoken.Node.P2P.BlockSync
     , zRPCDispatchTxValidate
     , processCompactBlockGetData
     , newCandidateBlock
+    , newCandidateBlockChainTip
     ) where
 
 import Codec.Serialise
@@ -253,6 +254,14 @@ checkBlocksFullySynced net = do
     bestSynced <- fetchBestSyncedBlock rkdb net
     return $ bestBlock == bestSynced
 
+
+checkBlocksFullySynced_ :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Int -> Network -> m Bool
+checkBlocksFullySynced_ n net = do
+    rkdb <- rocksDB <$> getDB
+    bestBlock <- fetchBestBlock rkdb net
+    bestSynced <- fetchBestSyncedBlock rkdb net
+    return $ (snd bestBlock) - (snd bestSynced) <= 3
+
 getBatchSizeMainnet :: Int32 -> Int32 -> [Int32]
 getBatchSizeMainnet peerCount n
     | n < 200000 =
@@ -273,6 +282,7 @@ getBatchSizeTestnet peerCount n
 getBatchSize :: Network -> Int32 -> Int32 -> [Int32]
 getBatchSize net peerCount n
     | (getNetworkName net == "bsvtest") = getBatchSizeTestnet peerCount n
+    | (getNetworkName net == "regtest") = [1]
     | otherwise = getBatchSizeMainnet peerCount n
 
 runBlockCacheQueue :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
@@ -723,8 +733,8 @@ processCompactBlock cmpct peer = do
             debug lg $ LG.msg $ ("Creating New Candidate Block over: " ++ show bhash)
             newCandidateBlock bhash
         Just dag -> do
-            debug lg $ LG.msg $ ("New Candidate Found Block over: " ++ show bhash)
-            mpTxLst <- liftIO $ getTopologicalSortedForest dag
+            debug lg $ LG.msg $ ("New Candidate Block Found over: " ++ show bhash)
+            mpTxLst <- liftIO $ DAG.getTopologicalSortedForest dag
             let mpShortTxIDList =
                     map
                         (\(txid, rt) -> do
