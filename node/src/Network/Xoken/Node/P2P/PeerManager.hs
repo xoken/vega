@@ -68,6 +68,7 @@ import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.BlockSync
@@ -608,7 +609,7 @@ messageHandler peer (mm, ingss) = do
     lg <- getLogger
     case mm of
         Just msg -> do
-            liftIO $ print $ "MSG: " ++ (show $ msgType msg)
+            --liftIO $ print $ "MSG: " ++ (show $ msgType msg)
             case (msg) of
                 MHeaders hdrs -> do
                     liftIO $ takeMVar (headersWriteLock bp2pEnv)
@@ -641,23 +642,23 @@ messageHandler peer (mm, ingss) = do
                 MInv inv -> do
                     mapM_
                         (\x -> do
-                             liftIO $ print $ "INVTYPE: " ++ (show $ invType x)
+                             --liftIO $ print $ "INVTYPE: " ++ (show $ invType x)
                              case (invType x) of
                                  InvBlock -> do
                                      let bhash = invHash x
-                                     trace lg $ LG.msg ("INV - new Block: " ++ (show bhash))
+                                     debug lg $ LG.msg ("INV - new Block: " ++ (show bhash))
                                      newCandidateBlock $ BlockHash bhash
                                      processCompactBlockGetData peer $ invHash x
                                      --liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
                                      indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
-                                     trace lg $ LG.msg ("INV - new Tx: " ++ (show $ invHash x))
+                                     debug lg $ LG.msg ("INV - new Tx: " ++ (show $ invHash x))
                                      if indexUnconfirmedTx == True
                                          then processTxGetData peer $ invHash x
                                          else return ()
                                  InvCompactBlock -> do
                                      let bhash = invHash x
-                                     trace lg $ LG.msg ("INV - Compact Block: " ++ (show bhash))
+                                     debug lg $ LG.msg ("INV - Compact Block: " ++ (show bhash))
                                      newCandidateBlock $ BlockHash bhash
                                      processCompactBlockGetData peer $ invHash x
                                  otherwise -> return ())
@@ -682,6 +683,7 @@ messageHandler peer (mm, ingss) = do
                             err lg $ LG.msg $ val ("[???] Unconfirmed Tx ")
                     return $ msgType msg
                 MTx tx -> do
+                    debug lg $ LG.msg $ val "Processing Unconf Tx"
                     res <- LE.try $ zRPCDispatchUnconfirmedTxValidate processUnconfTransaction tx
                     case res of
                         Right ((candBlkHashes, depTxHashes)) -> do

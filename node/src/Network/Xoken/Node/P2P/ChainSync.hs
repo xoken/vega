@@ -157,7 +157,7 @@ markBestBlock :: (HasLogger m, MonadIO m) => R.DB -> Text -> Int32 -> m ()
 markBestBlock rkdb hash height = do
     R.put rkdb "best_chain_tip_hash" $ DTE.encodeUtf8 hash
     R.put rkdb "best_chain_tip_height" $ C.pack $ show height
-    liftIO $ print "MARKED BEST BLOCK FROM ROCKS DB"
+    --liftIO $ print "MARKED BEST BLOCK FROM ROCKS DB"
 
 getBlockLocator :: (HasLogger m, MonadIO m) => R.DB -> Network -> m ([BlockHash])
 getBlockLocator rkdb net = do
