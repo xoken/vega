@@ -184,6 +184,15 @@ insertTxIdOutputs conn cf (txid, outputIndex) txOut = do
             err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
             throw KeyValueDBInsertException
 
+isNotConfirmed :: TxHash -> IO Bool
+isNotConfirmed txHash = return False
+
+coalesceUnconfTransaction :: (TSDirectedAcyclicGraph TxHash Word64) -> TxHash -> [TxHash] -> Word64 -> IO ()
+coalesceUnconfTransaction dag txhash hashes sats = do
+    print $ "coalesceUnconfTransaction called for tx: " ++ show (txhash)
+    unconfHashes <- filterM (isNotConfirmed) hashes
+    DAG.coalesce dag txhash unconfHashes sats (+)
+
 processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([BlockHash], [TxHash])
 processUnconfTransaction tx = do
     dbe' <- getDB
@@ -193,7 +202,7 @@ processUnconfTransaction tx = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let conn = rocksDB $ dbe'
         cf = rocksCF dbe'
-    debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
+    debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
  --
@@ -213,34 +222,51 @@ processUnconfTransaction tx = do
     inputValsOutpoints <-
         mapM
             (\(b, indx) -> do
-                 let shortHash = getTxShortHash (outPointHash $ prevOutput b) 20
+                 let opHash = outPointHash $ prevOutput b
+                     shortHash = getTxShortHash opHash 20
                  let opindx = fromIntegral $ outPointIndex $ prevOutput b
-                 if (outPointHash nullOutPoint) == (outPointHash $ prevOutput b)
+                 if (outPointHash nullOutPoint) == opHash
                      then do
-                         let sval = fromIntegral $ computeSubsidy net $ (fromIntegral 9999999 :: Word32) -- TODO: replace with correct  block height
-                         return (sval, (shortHash, opindx))
+                         let sval = fromIntegral $ computeSubsidy net $ (fromIntegral 100 :: Word32) -- TODO: replace with correct  block height
+                         return (sval, (shortHash, opHash, opindx))
                      else do
                          zz <-
                              LE.try $
-                             zRPCDispatchGetOutpoint (prevOutput b) (fromJust $ hexToBlockHash $ T.pack $ show 999999) -- bhash
+                             zRPCDispatchGetOutpoint (prevOutput b) (fromJust $ hexToBlockHash $ "0000000000000000000000000000000000000000000000000000000000000000") -- bhash
                          -- validateOutpoint timeout value should be zero, and TimeOut not to be considered an error 
                          -- even if parent tx is missing, lets proceed hoping it will become available soon. 
                          -- this assumption is crucial for async ZTXI logic.    
                          case zz of
                              Right val -> do
-                                 return (val, (shortHash, opindx))
+                                 return (val, (shortHash, opHash, opindx))
                              Left (e :: SomeException) -> do
                                  err lg $
                                      LG.msg $
-                                     "Error: [pCT calling gSVFO] WHILE Processing TxID " ++
+                                     "Error: [pCT calling gSVFO] WHILE Processing Unconf TxID " ++
                                      show (txHashToHex $ txHash tx) ++
                                      ", getting value for dependent input (TxID,Index): (" ++
                                      show (txHashToHex $ outPointHash (prevOutput b)) ++
                                      ", " ++ show (outPointIndex $ prevOutput b) ++ ")" ++ (show e)
                                  throw e)
             (inputs)
- -- insert UTXO/s
+    -- insert UTXO/s
     cf' <- liftIO $ TSH.lookup cf ("outputs")
+    liftIO $ print $ "cf: " ++ show cf'
+    liftIO $ print "BEFORE COALESCE"
+    liftIO $ TSH.mapM_ (\(bsh,dag) -> do
+                            z <- try $ mapM (\(_,(_,txh,txind)) -> do
+                                                            v <- getDBCF_ conn (fromJust cf') (txh,fromIntegral txind :: Word32)
+                                                            case v :: (Maybe ZtxiUtxo) of
+                                                                Nothing -> return $ Just txh
+                                                                Just v' -> case zuBlockHash v' of
+                                                                                [] -> return $ Just txh
+                                                                                (x:_) -> return Nothing) inputValsOutpoints
+                            case z of
+                                Left (e :: SomeException) -> return ()
+                                Right z' -> do
+                                                let zj = catMaybes z'
+                                                DAG.coalesce dag (txHash tx) zj 0 (+)) (candidateBlocks bp2pEnv)
+    liftIO $ print "AFTER COALESCE"
     ovs <-
         mapM
             (\(opt, oindex) -> do
