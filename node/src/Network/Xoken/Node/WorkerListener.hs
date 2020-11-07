@@ -116,18 +116,19 @@ requestHandler sock writeLock msg = do
                             ZGetOutpoint txId index bhash pred
                                 -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
                              -> do
-                                zz <- do
-                                    let bhash' = case bhash of
-                                                    Nothing -> DS.empty
-                                                    Just bh -> (DS.singleton bh) -- TODO: needs to contains more predecessors
-                                    LE.try $
-                                        validateOutpoint
-                                            (OutPoint txId index)
-                                            bhash'
-                                            bhash
-                                            (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
+                                zz <-
+                                    do let bhash' =
+                                               case bhash of
+                                                   Nothing -> DS.empty
+                                                   Just bh -> (DS.singleton bh) -- TODO: needs to contains more predecessors
+                                       LE.try $
+                                           validateOutpoint
+                                               (OutPoint txId index)
+                                               bhash'
+                                               bhash
+                                               (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                 case zz of
-                                    Right (val,bhs)
+                                    Right (val, bhs)
                                         -- liftIO $
                                         --     print $
                                         --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
@@ -167,11 +168,10 @@ requestHandler sock writeLock msg = do
                                 -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
                              -> do
                                 debug lg $ LG.msg $ "decoded ZValidateTx (Unconf) : " ++ (show $ txHash tx)
-                                res <-
-                                    LE.try $ processUnconfTransaction tx
+                                res <- LE.try $ processUnconfTransaction tx
                                 case res of
-                                    Right (bhs,txs) -> do
-                                        return $ successResp mid (ZValidateUnconfirmedTxResp bhs txs)
+                                    Right (txs) -> do
+                                        return $ successResp mid (ZValidateUnconfirmedTxResp txs)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
                             ZPruneBlockTxOutputs blockHashes
                                 -- liftIO $ print $ "ZPruneBlockTxOutputs - REQUEST " ++ (show blockHashes)

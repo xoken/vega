@@ -198,7 +198,7 @@ coalesceUnconfTransaction dag txhash hashes sats = do
     unconfHashes <- filterM (isNotConfirmed) hashes
     DAG.coalesce dag txhash unconfHashes sats (+)
 
-processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([BlockHash], [TxHash])
+processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([TxHash])
 processUnconfTransaction tx = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
@@ -240,15 +240,15 @@ processUnconfTransaction tx = do
                          let sval = fromIntegral $ computeSubsidy net $ (fromIntegral (snd bb) :: Word32) -- TODO: replace with correct  block height
                          return (sval, (shortHash, [], opHash, opindx))
                      else do
-                         debug lg $ LG.msg ("[dag] processUnconfTransaction: inputValsOutpoint (inputs): " ++ (show $ (b,indx)))
-                         zz <-
-                             LE.try $
-                             zRPCDispatchGetOutpoint (prevOutput b) (Nothing) -- bhash
+                         debug lg $
+                             LG.msg
+                                 ("[dag] processUnconfTransaction: inputValsOutpoint (inputs): " ++ (show $ (b, indx)))
+                         zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) (Nothing) -- bhash
                          -- validateOutpoint timeout value should be zero, and TimeOut not to be considered an error 
                          -- even if parent tx is missing, lets proceed hoping it will become available soon. 
                          -- this assumption is crucial for async ZTXI logic.    
                          case zz of
-                             Right (val,bsh) -> do
+                             Right (val, bsh) -> do
                                  debug lg $ LG.msg $ "[dag] processUnconfTransaction: zz: " ++ (show $ zz)
                                  return (val, (shortHash, bsh, opHash, opindx))
                              Left (e :: SomeException) -> do
@@ -285,20 +285,30 @@ processUnconfTransaction tx = do
                          err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf') ++ ": " ++ show e
                          throw KeyValueDBInsertException)
             outputs
-    debug lg $ LG.msg $ "[dag] BEFORE COALESCE for txid" ++ show (txHash tx)
-    let coalesceInp = catMaybes $ fmap (\(val,(_,bh,txh,_)) -> case bh of
-                                                        [] -> Just (txh,val)
-                                                        (x:_) -> Nothing) inputValsOutpoints
-        txhs = fmap fst coalesceInp
-        vs = sum $ fmap snd coalesceInp
-    liftIO $ TSH.mapM_ (\(bsh,dag) -> do
-                                        print $ "TXHASH: " ++ show (txHash tx) ++ "; EDGES: " ++ show txhs
-                                        LA.async $ DAG.coalesce dag (txHash tx) txhs vs (+)
-                                        putStrLn "BEFORE getTopologicalSortedForest DAG: "
-                                        dagT <- DAG.getTopologicalSortedForest dag
-                                        debug lg $ LG.msg $ "DAG: " ++ show (dagT)
-                                        return ()) (candidateBlocks bp2pEnv)
-    debug lg $ LG.msg $ "[dag] AFTER COALESCE for txid" ++ show (txHash tx)
+    -- TODO : cleanup this!!
+    --
+    -- debug lg $ LG.msg $ "[dag] BEFORE COALESCE for txid" ++ show (txHash tx)
+    -- let coalesceInp =
+    --         catMaybes $
+    --         fmap
+    --             (\(val, (_, bh, txh, _)) ->
+    --                  case bh of
+    --                      [] -> Just (txh, val)
+    --                      (x:_) -> Nothing)
+    --             inputValsOutpoints
+    --     txhs = fmap fst coalesceInp
+    --     vs = sum $ fmap snd coalesceInp
+    -- liftIO $
+    --     TSH.mapM_
+    --         (\(bsh, dag) -> do
+    --              print $ "TXHASH: " ++ show (txHash tx) ++ "; EDGES: " ++ show txhs
+    --              LA.async $ DAG.coalesce dag (txHash tx) txhs vs (+)
+    --              putStrLn "BEFORE getTopologicalSortedForest DAG: "
+    --              dagT <- DAG.getTopologicalSortedForest dag
+    --              debug lg $ LG.msg $ "DAG: " ++ show (dagT)
+    --              return ())
+    --         (candidateBlocks bp2pEnv)
+    -- debug lg $ LG.msg $ "[dag] AFTER COALESCE for txid" ++ show (txHash tx)
  --
  --
  -- mapM_
@@ -330,7 +340,8 @@ processUnconfTransaction tx = do
         Just ev -> liftIO $ EV.signal ev
         Nothing -> return ()
     -- let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
-    return ([], []) -- TODO: proper response to be set
+    let parentTxns = map (\x -> outPointHash $ prevOutput x) (txIn tx)
+    return (parentTxns)
 
 getSatsValueFromEpochOutpoint ::
        R.DB

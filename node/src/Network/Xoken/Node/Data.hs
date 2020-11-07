@@ -190,8 +190,7 @@ data ZRPCResponseBody
           }
     | ZPruneBlockTxOutputsResp
     | ZValidateUnconfirmedTxResp
-          { utCandidateParentBlock :: ![BlockHash]
-          , utDependentTransaction :: ![TxHash]
+          { utDependentTransaction :: ![TxHash] -- utCandidateParentBlock :: ![BlockHash]
           }
     | ZOk
     | ZPong

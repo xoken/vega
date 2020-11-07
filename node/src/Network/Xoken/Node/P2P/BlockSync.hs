@@ -254,7 +254,6 @@ checkBlocksFullySynced net = do
     bestSynced <- fetchBestSyncedBlock rkdb net
     return $ bestBlock == bestSynced
 
-
 checkBlocksFullySynced_ :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Int -> Network -> m Bool
 checkBlocksFullySynced_ n net = do
     rkdb <- rocksDB <$> getDB
@@ -315,20 +314,19 @@ runBlockCacheQueue =
                             (\k -> do
                                  x <- getDB' rkdb k -- Maybe (Text, BlockHeader)
                                  return $
-                                     case x :: Maybe (Text,BlockHeader) of
+                                     case x :: Maybe (Text, BlockHeader) of
                                          Nothing -> Nothing
-                                         Just (x',_) -> Just (k,x')
-                                     )
+                                         Just (x', _) -> Just (k, x'))
                             (bks)
                     case res of
                         Left (e :: SomeException) -> do
                             err lg $ LG.msg ("Error: runBlockCacheQueue: " ++ show e)
                             throw e
-                        Right (op' :: [Maybe (Int32,Text)]) -> do
+                        Right (op' :: [Maybe (Int32, Text)]) -> do
                             let op = catMaybes $ op'
                             if L.length op == 0
                                 then do
-                                    debug lg $ LG.msg $ val "Synced fully!"
+                                    trace lg $ LG.msg $ val "Synced fully!"
                                     return (Nothing)
                                 else if L.length op == (fromIntegral $ last cacheInd)
                                          then do
@@ -546,7 +544,7 @@ processConfTransaction tx bhash blkht txind = do
                      else do
                          zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ Just bhash
                          case zz of
-                             Right (val,_) -> do
+                             Right (val, _) -> do
                                  return (val, (shortHash, opindx))
                              Left (e :: SomeException) -> do
                                  err lg $
@@ -845,7 +843,6 @@ newCandidateBlock hash = do
     bp2pEnv <- getBitcoinP2P
     tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
-    
 
 newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 newCandidateBlockChainTip = do
@@ -854,8 +851,8 @@ newCandidateBlockChainTip = do
     dbe' <- getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         conn = rocksDB dbe'
-    (hash,_) <- fetchBestBlock conn net
+    (hash, _) <- fetchBestBlock conn net
     tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
-    
+
 defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"

@@ -67,8 +67,8 @@ import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
-import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
+import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.BlockSync
@@ -550,7 +550,8 @@ readNextMessage net sock ingss = do
                                                 return (hdr `BSL.append` b)
                                     case runGetLazy (getMessage net) byts of
                                         Left e -> do
-                                            debug lg $ msg ("Message parse error' : " ++ (show e) ++ "; cmd: " ++ (show cmd))
+                                            debug lg $
+                                                msg ("Message parse error' : " ++ (show e) ++ "; cmd: " ++ (show cmd))
                                             throw MessageParsingException
                                         Right mg -> do
                                             debug lg $ msg ("Message recv' : " ++ (show $ msgType mg))
@@ -608,8 +609,9 @@ messageHandler peer (mm, ingss) = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     case mm of
-        Just msg -> do
+        Just msg
             --liftIO $ print $ "MSG: " ++ (show $ msgType msg)
+         -> do
             case (msg) of
                 MHeaders hdrs -> do
                     liftIO $ takeMVar (headersWriteLock bp2pEnv)
@@ -641,8 +643,9 @@ messageHandler peer (mm, ingss) = do
                     return $ msgType msg
                 MInv inv -> do
                     mapM_
-                        (\x -> do
+                        (\x
                              --liftIO $ print $ "INVTYPE: " ++ (show $ invType x)
+                          -> do
                              case (invType x) of
                                  InvBlock -> do
                                      let bhash = invHash x
@@ -655,10 +658,16 @@ messageHandler peer (mm, ingss) = do
                                      debug lg $ LG.msg ("INV - new Tx: " ++ (show $ TxHash $ invHash x))
                                      if indexUnconfirmedTx == True
                                          then do
-                                             debug lg $ LG.msg ("[dag] InvTx (indexUnconfirmedTx True): " ++ (show $ TxHash $ invHash x))
+                                             debug lg $
+                                                 LG.msg
+                                                     ("[dag] InvTx (indexUnconfirmedTx True): " ++
+                                                      (show $ TxHash $ invHash x))
                                              processTxGetData peer $ invHash x
                                          else do
-                                             debug lg $ LG.msg ("[dag] InvTx (indexUnconfirmedTx False): " ++ (show $ TxHash $ invHash x))
+                                             debug lg $
+                                                 LG.msg
+                                                     ("[dag] InvTx (indexUnconfirmedTx False): " ++
+                                                      (show $ TxHash $ invHash x))
                                              return ()
                                  InvCompactBlock -> do
                                      let bhash = invHash x
@@ -690,7 +699,8 @@ messageHandler peer (mm, ingss) = do
                     debug lg $ LG.msg $ "[dag] Processing Unconf Tx (MTx)" ++ show (txHash tx)
                     res <- LE.try $ zRPCDispatchUnconfirmedTxValidate processUnconfTransaction tx
                     case res of
-                        Right ((candBlkHashes, depTxHashes)) -> do
+                        Right (depTxHashes) -> do
+                            let candBlkHashes = [] -- TODO : set this correctly!
                             addTxCandidateBlocks (txHash tx) candBlkHashes depTxHashes
                         Left TxIDNotFoundException -> do
                             return ()

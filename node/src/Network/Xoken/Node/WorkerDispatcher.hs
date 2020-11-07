@@ -133,9 +133,10 @@ zRPCDispatchGetOutpoint outPoint bhash = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let opIndex = outPointIndex $ outPoint
         lexKey = getTxShortHash (outPointHash outPoint) 8
-        bhash' = case bhash of
-                    Nothing -> DS.empty
-                    Just bh -> DS.singleton bh
+        bhash' =
+            case bhash of
+                Nothing -> DS.empty
+                Just bh -> DS.singleton bh
     worker <- getRemoteWorker lexKey GetOutpoint
     case worker of
         Nothing
@@ -161,7 +162,7 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     case spl of
                         Just pl ->
                             case pl of
-                                ZGetOutpointResp val scr bsh -> return (val,bsh)
+                                ZGetOutpointResp val scr bsh -> return (val, bsh)
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
@@ -250,8 +251,7 @@ zRPCDispatchNotifyNewBlockHeader headers = do
         (wrkrs)
 
 --
-zRPCDispatchUnconfirmedTxValidate ::
-       (HasXokenNodeEnv env m, MonadIO m) => (Tx -> m (([BlockHash], [TxHash]))) -> Tx -> m (([BlockHash], [TxHash]))
+zRPCDispatchUnconfirmedTxValidate :: (HasXokenNodeEnv env m, MonadIO m) => (Tx -> m ([TxHash])) -> Tx -> m ([TxHash])
 zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
@@ -282,7 +282,7 @@ zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
                     case spl of
                         Just pl ->
                             case pl of
-                                ZValidateUnconfirmedTxResp prntBlk dpTx -> return (prntBlk, dpTx)
+                                ZValidateUnconfirmedTxResp dpTx -> return (dpTx)
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
                     err lg $ LG.msg $ "decoding Unconfirmed Tx validation error resp : " ++ show er
@@ -417,14 +417,22 @@ predecessorOf x y = do
     return $ (M.lookup x ch) < (M.lookup y ch)
 
 validateOutpoint ::
-       (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => OutPoint -> DS.Set BlockHash -> Maybe BlockHash -> Int -> m (Word64, [BlockHash])
+       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+    => OutPoint
+    -> DS.Set BlockHash
+    -> Maybe BlockHash
+    -> Int
+    -> m (Word64, [BlockHash])
 validateOutpoint outPoint predecessors curBlkHash wait = do
     dbe <- getDB
     let rkdb = rocksDB dbe
         cfs = rocksCF dbe
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
-    debug lg $ LG.msg $ "[dag] validateOutpoint called for (Outpoint,Set BlkHash, Maybe BlkHash, Int) " ++ (show (outPoint, predecessors, curBlkHash, wait))
+    debug lg $
+        LG.msg $
+        "[dag] validateOutpoint called for (Outpoint,Set BlkHash, Maybe BlkHash, Int) " ++
+        (show (outPoint, predecessors, curBlkHash, wait))
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         txSync = txSynchronizer bp2pEnv
         opindx = fromIntegral $ outPointIndex outPoint
@@ -452,7 +460,8 @@ validateOutpoint outPoint predecessors curBlkHash wait = do
                         "Tx not found: " ++ (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
                     debug lg $
                         LG.msg $
-                        "[dag] validateOutpoint: Tx not found: " ++ (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
+                        "[dag] validateOutpoint: Tx not found: " ++
+                        (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
                     valx <- liftIO $ TSH.lookup txSync (outPointHash outPoint)
                     event <-
                         case valx of
@@ -462,14 +471,19 @@ validateOutpoint outPoint predecessors curBlkHash wait = do
                     tofl <- liftIO $ waitTimeout (event) (fromIntegral (wait * 1000000))
                     if tofl == False
                         then do
-                            err lg $ LG.msg $ "[dag] validateOutpoint: Error: tofl False for outPoint: " ++ (show $ outPointHash outPoint)
+                            err lg $
+                                LG.msg $
+                                "[dag] validateOutpoint: Error: tofl False for outPoint: " ++
+                                (show $ outPointHash outPoint)
                             liftIO $ TSH.delete txSync (outPointHash outPoint)
                             throw TxIDNotFoundException
                         else do
                             debug lg $
                                 LG.msg $ "event received _available_: " ++ (show $ txHashToHex $ outPointHash outPoint)
                             debug lg $
-                                LG.msg $ "[dag] validateOutpoint: event received _available_: " ++ (show $ txHashToHex $ outPointHash outPoint)
+                                LG.msg $
+                                "[dag] validateOutpoint: event received _available_: " ++
+                                (show $ txHashToHex $ outPointHash outPoint)
                             validateOutpoint outPoint predecessors curBlkHash 0
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
