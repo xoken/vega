@@ -513,7 +513,7 @@ insertTxIdOutputs conn cf (txid, outputIndex) txOut = do
     case res of
         Right _ -> return ()
         Left (e :: SomeException) -> do
-            err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
+            err lg $ LG.msg $ "[dag] Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
             throw KeyValueDBInsertException
 
 processConfTransaction ::
@@ -527,6 +527,7 @@ processConfTransaction tx bhash blkht txind = do
     let conn = rocksDB $ dbe'
         cf = rocksCF dbe'
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
+    debug lg $ LG.msg $ "[dag] processing Tx " ++ show (txHash tx)
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
     --
@@ -543,9 +544,9 @@ processConfTransaction tx bhash blkht txind = do
                          let sval = fromIntegral $ computeSubsidy net $ (fromIntegral blkht :: Word32)
                          return (sval, (shortHash, opindx))
                      else do
-                         zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) bhash
+                         zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ Just bhash
                          case zz of
-                             Right val -> do
+                             Right (val,_) -> do
                                  return (val, (shortHash, opindx))
                              Left (e :: SomeException) -> do
                                  err lg $

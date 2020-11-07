@@ -223,8 +223,9 @@ runSyncStatusChecker = do
     bp2pEnv <- getBitcoinP2P
     rkdb <- rocksDB <$> getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    newCandidateBlockChainTip
     -- wait 300 seconds before first check
-    liftIO $ threadDelay (300 * 1000000)
+    liftIO $ threadDelay (30 * 1000000)
     forever $ do
         isSynced <- checkBlocksFullySynced net
         LG.debug lg $

@@ -105,6 +105,7 @@ data BlockSyncException
     | OutputAlreadySpentException
     | InvalidTxSatsValueException
     | InvalidDAGEdgeException
+    | ZUnknownHandler
     deriving (Show, Read)
 
 instance Exception BlockSyncException

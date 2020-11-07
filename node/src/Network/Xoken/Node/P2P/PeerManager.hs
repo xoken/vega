@@ -194,7 +194,7 @@ setupSeedPeerConnection =
                                                                           (bitcoinPeers bp2pEnv)
                                                                           (M.insert (addrAddress y) bp)
                                                                   liftIO $ print "Sending sendcmpt.."
-                                                                  sendcmpt bp
+                                                                  -- sendcmpt bp
                                                                   handleIncomingMessages bp
                                                               Nothing -> return ()
                                                       Left (SocketConnectException addr) ->
@@ -652,10 +652,14 @@ messageHandler peer (mm, ingss) = do
                                      --liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
                                      indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
-                                     debug lg $ LG.msg ("INV - new Tx: " ++ (show $ invHash x))
+                                     debug lg $ LG.msg ("INV - new Tx: " ++ (show $ TxHash $ invHash x))
                                      if indexUnconfirmedTx == True
-                                         then processTxGetData peer $ invHash x
-                                         else return ()
+                                         then do
+                                             debug lg $ LG.msg ("[dag] InvTx (indexUnconfirmedTx True): " ++ (show $ TxHash $ invHash x))
+                                             processTxGetData peer $ invHash x
+                                         else do
+                                             debug lg $ LG.msg ("[dag] InvTx (indexUnconfirmedTx False): " ++ (show $ TxHash $ invHash x))
+                                             return ()
                                  InvCompactBlock -> do
                                      let bhash = invHash x
                                      debug lg $ LG.msg ("INV - Compact Block: " ++ (show bhash))
@@ -683,13 +687,14 @@ messageHandler peer (mm, ingss) = do
                             err lg $ LG.msg $ val ("[???] Unconfirmed Tx ")
                     return $ msgType msg
                 MTx tx -> do
-                    debug lg $ LG.msg $ val "Processing Unconf Tx"
+                    debug lg $ LG.msg $ "[dag] Processing Unconf Tx (MTx)" ++ show (txHash tx)
                     res <- LE.try $ zRPCDispatchUnconfirmedTxValidate processUnconfTransaction tx
                     case res of
                         Right ((candBlkHashes, depTxHashes)) -> do
                             addTxCandidateBlocks (txHash tx) candBlkHashes depTxHashes
                         Left TxIDNotFoundException -> do
-                            throw TxIDNotFoundException
+                            return ()
+                            --throw TxIDNotFoundException
                         Left KeyValueDBInsertException -> do
                             err lg $ LG.msg $ val "[ERROR] KeyValueDBInsertException"
                             throw KeyValueDBInsertException
