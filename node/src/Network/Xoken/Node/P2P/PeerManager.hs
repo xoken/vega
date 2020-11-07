@@ -700,7 +700,8 @@ messageHandler peer (mm, ingss) = do
                     res <- LE.try $ zRPCDispatchUnconfirmedTxValidate processUnconfTransaction tx
                     case res of
                         Right (depTxHashes) -> do
-                            let candBlkHashes = [] -- TODO : set this correctly!
+                            candBlks <- liftIO $ TSH.toList (candidateBlocks bp2pEnv)
+                            let candBlkHashes = fmap fst candBlks
                             addTxCandidateBlocks (txHash tx) candBlkHashes depTxHashes
                         Left TxIDNotFoundException -> do
                             return ()
