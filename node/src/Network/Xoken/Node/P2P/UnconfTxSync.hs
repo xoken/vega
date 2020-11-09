@@ -398,16 +398,16 @@ addTxCandidateBlocks txHash candBlockHashes depTxHashes = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let conn = rocksDB $ dbe'
         cfs = rocksCF dbe'
-    debug lg $ LG.msg $ "Appending Tx to candidate block: " ++ show (txHash)
+    debug lg $ LG.msg $ "Appending to candidate blocks Tx " ++ show (txHash) ++ " with parent Tx's: " ++ show txHash
     mapM_
-        (\bhash -> addTxCandidateBlock txHash bhash depTxHashess)
+        (\bhash -> addTxCandidateBlock txHash bhash depTxHashes)
         candBlockHashes
 
 addTxCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TxHash -> BlockHash -> [TxHash] -> m ()
 addTxCandidateBlock txHash candBlockHash depTxHashes = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    q <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
+    q <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) candBlockHash
     debug lg $ LG.msg $ "Appending Tx " ++ show txHash ++ "to candidate block: " ++ show candBlockHash
     case q of
         Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show candBlockHash)
