@@ -340,7 +340,9 @@ processUnconfTransaction tx = do
         Just ev -> liftIO $ EV.signal ev
         Nothing -> return ()
     -- let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
-    let parentTxns = map (\x -> outPointHash $ prevOutput x) (txIn tx)
+    let parentTxns = catMaybes $ map (\(_,(_,bsh,ophs,_)) -> case bsh of
+                                                    [] -> Just ophs
+                                                    _ -> Nothing) inputValsOutpoints
     return (parentTxns)
 
 getSatsValueFromEpochOutpoint ::
@@ -398,7 +400,7 @@ addTxCandidateBlocks txHash candBlockHashes depTxHashes = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let conn = rocksDB $ dbe'
         cfs = rocksCF dbe'
-    debug lg $ LG.msg $ "Appending to candidate blocks Tx " ++ show (txHash) ++ " with parent Tx's: " ++ show txHash
+    debug lg $ LG.msg $ "Appending to candidate blocks Tx " ++ show (txHash) ++ " with parent Tx's: " ++ show depTxHashes
     mapM_
         (\bhash -> addTxCandidateBlock txHash bhash depTxHashes)
         candBlockHashes
@@ -413,5 +415,8 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
         Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show candBlockHash)
         Just dag -> do
             liftIO $ DAG.coalesce dag txHash depTxHashes 0 (+)
+            dagT <- liftIO $ (DAG.getTopologicalSortedForest dag)
+            dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)
+            liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP
             return ()
 
