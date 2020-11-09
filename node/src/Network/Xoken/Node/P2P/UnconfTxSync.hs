@@ -394,17 +394,24 @@ addTxCandidateBlocks txHash candBlockHashes depTxHashes = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
-    epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
+    --epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let conn = rocksDB $ dbe'
         cfs = rocksCF dbe'
     debug lg $ LG.msg $ "Appending Tx to candidate block: " ++ show (txHash)
     mapM_
-        (\bhash -> do
-             q <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
-             case q of
-                 Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show bhash)
-                 Just dag -> do
-                     liftIO $ DAG.coalesce dag txHash depTxHashes 0 (+)
-                     return ())
+        (\bhash -> addTxCandidateBlock txHash bhash depTxHashess)
         candBlockHashes
+
+addTxCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TxHash -> BlockHash -> [TxHash] -> m ()
+addTxCandidateBlock txHash candBlockHash depTxHashes = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    q <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
+    debug lg $ LG.msg $ "Appending Tx " ++ show txHash ++ "to candidate block: " ++ show candBlockHash
+    case q of
+        Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show candBlockHash)
+        Just dag -> do
+            liftIO $ DAG.coalesce dag txHash depTxHashes 0 (+)
+            return ()
+
