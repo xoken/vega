@@ -194,7 +194,7 @@ setupSeedPeerConnection =
                                                                           (bitcoinPeers bp2pEnv)
                                                                           (M.insert (addrAddress y) bp)
                                                                   liftIO $ print "Sending sendcmpt.."
-                                                                  -- sendcmpt bp
+                                                                  sendcmpt bp
                                                                   handleIncomingMessages bp
                                                               Nothing -> return ()
                                                       Left (SocketConnectException addr) ->
@@ -608,6 +608,7 @@ messageHandler ::
 messageHandler peer (mm, ingss) = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     case mm of
         Just msg
             --liftIO $ print $ "MSG: " ++ (show $ msgType msg)
@@ -650,9 +651,13 @@ messageHandler peer (mm, ingss) = do
                                  InvBlock -> do
                                      let bhash = invHash x
                                      debug lg $ LG.msg ("INV - new Block: " ++ (show bhash))
-                                     newCandidateBlock $ BlockHash bhash
-                                     processCompactBlockGetData peer $ invHash x
-                                     --liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
+                                     unsynced <- checkBlocksFullySynced_ net
+                                     if unsynced <= (3 :: Int32)
+                                        then do
+                                            newCandidateBlock $ BlockHash bhash
+                                            processCompactBlockGetData peer $ invHash x
+                                        else
+                                            liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
                                      indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
                                      debug lg $ LG.msg ("INV - new Tx: " ++ (show $ TxHash $ invHash x))
