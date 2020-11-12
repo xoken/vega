@@ -16,6 +16,7 @@ module Network.Xoken.Node.P2P.BlockSync
     , processConfTransaction
     , peerBlockSync
     , checkBlocksFullySynced
+    , checkBlocksFullySynced_
     , runPeerSync
     , runBlockCacheQueue
     , sendRequestMessages
@@ -254,12 +255,12 @@ checkBlocksFullySynced net = do
     bestSynced <- fetchBestSyncedBlock rkdb net
     return $ bestBlock == bestSynced
 
-checkBlocksFullySynced_ :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Int -> Network -> m Bool
-checkBlocksFullySynced_ n net = do
+checkBlocksFullySynced_ :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Int32
+checkBlocksFullySynced_ net = do
     rkdb <- rocksDB <$> getDB
     bestBlock <- fetchBestBlock rkdb net
     bestSynced <- fetchBestSyncedBlock rkdb net
-    return $ (snd bestBlock) - (snd bestSynced) <= 3
+    return $ (snd bestBlock) - (snd bestSynced)
 
 getBatchSizeMainnet :: Int32 -> Int32 -> [Int32]
 getBatchSizeMainnet peerCount n
