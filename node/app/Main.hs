@@ -286,8 +286,8 @@ defBitcoinP2P nodeCnf = do
     ptxq <- TSH.new 1
     cand <- TSH.new 1
     cmpct <- TSH.new 1
-    -- mptx <- TSH.new 1
-    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc blktr wrkc bsb ptxq cand cmpct
+    pftx <- TSH.new 10
+    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc blktr wrkc bsb ptxq cand cmpct pftx
 
 initVega :: IO ()
 initVega = do

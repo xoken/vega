@@ -304,16 +304,15 @@ runBlockCacheQueue =
                             (\k -> do
                                  x <- getDB' rkdb k -- Maybe (Text, BlockHeader)
                                  return $
-                                     case x :: Maybe (Text,BlockHeader) of
+                                     case x :: Maybe (Text, BlockHeader) of
                                          Nothing -> Nothing
-                                         Just (x',_) -> Just (k,x')
-                                     )
+                                         Just (x', _) -> Just (k, x'))
                             (bks)
                     case res of
                         Left (e :: SomeException) -> do
                             err lg $ LG.msg ("Error: runBlockCacheQueue: " ++ show e)
                             throw e
-                        Right (op' :: [Maybe (Int32,Text)]) -> do
+                        Right (op' :: [Maybe (Int32, Text)]) -> do
                             let op = catMaybes $ op'
                             if L.length op == 0
                                 then do
@@ -745,8 +744,8 @@ processCompactBlock cmpct peer = do
                              -- TODO: lock the previous dag and insert into a NEW dag!!
                           -> do
                              case rt of
-                                 Just p -> liftIO $ DAG.coalesce dag txid [p]
-                                 Nothing -> liftIO $ DAG.coalesce dag txid [])
+                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+)
+                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+))
                 mpShortTxIDList
             lastIndex <- liftIO $ newIORef 0
             mtxIndexes <-
@@ -758,6 +757,18 @@ processCompactBlock cmpct peer = do
                     missingTxns
             let gbtxn = GetBlockTxns bhash (fromIntegral $ L.length mtxIndexes) mtxIndexes
             sendRequestMessages peer $ MGetBlockTxns gbtxn
+            --
+            debug lg $ LG.msg ("processing prefilled txns in compact block! " ++ show bhash)
+            S.drain $
+                aheadly $
+                S.fromList (cbPrefilledTxns cmpct) & S.mapM (\ptx -> processDeltaTx bhash $ pfTx ptx) &
+                S.maxBuffer (maxTxProcessingBuffer $ nodeConfig bp2pEnv) &
+                S.maxThreads (maxTxProcessingThreads $ nodeConfig bp2pEnv)
+            --
+            let scb = SQ.fromList $ cbShortIDs cmpct
+            liftIO $ TSH.insert (prefilledShortIDsProcessing bp2pEnv) bhash (scb, cbPrefilledTxns cmpct, mpShortTxIDMap)
+            --
+            -- 
             return ()
 
 --
@@ -772,6 +783,55 @@ processBlockTransactions blockTxns = do
         S.fromList (btTransactions blockTxns) & S.mapM (processDeltaTx bhash) &
         S.maxBuffer (maxTxProcessingBuffer $ nodeConfig bp2pEnv) &
         S.maxThreads (maxTxProcessingThreads $ nodeConfig bp2pEnv)
+    --
+    cb <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
+    case cb of
+        Nothing -> err lg $ LG.msg $ ("Candidate block not found!: " ++ show bhash)
+        Just dag -> do
+            res <- liftIO $ TSH.lookup (prefilledShortIDsProcessing bp2pEnv) bhash
+            case res of
+                Just (sids, cbpftxns, lkmap)
+                    -- TODO: first insert blockTxns into `lkmap` we can find it subsequently
+                 -> do
+                    pair <- liftIO $ newIORef sids
+                    validator <- liftIO $ TSH.new 10
+                    mapM_
+                        (\ptx -> do
+                             edges <- liftIO $ DAG.getOrigEdges dag (txHash $ pfTx ptx)
+                             case edges of
+                                 Just edgs -> do
+                                     mapM_
+                                         (\ed -> do
+                                              fd <- liftIO $ TSH.lookup validator ed
+                                              case fd of
+                                                  Just _ -> return ()
+                                                  Nothing -> throw KeyValueDBInsertException -- stop not topologically sorted
+                                          )
+                                         edgs
+                             liftIO $ TSH.insert validator (txHash $ pfTx ptx) ()
+                             cur <- liftIO $ readIORef pair
+                             let (frag, rem) = SQ.splitAt (fromIntegral $ pfIndex ptx) cur
+                             liftIO $ writeIORef pair rem
+                             mapM_
+                                 (\fx -> do
+                                      let idx = HM.lookup fx lkmap
+                                      case idx of
+                                          Just (x, _) -> do
+                                              edges <- liftIO $ DAG.getOrigEdges dag x
+                                              case edges of
+                                                  Just edgs -> do
+                                                      mapM_
+                                                          (\ed -> do
+                                                               fd <- liftIO $ TSH.lookup validator ed
+                                                               case fd of
+                                                                   Just _ -> return ()
+                                                                   Nothing -> throw KeyValueDBInsertException -- stop not topologically sorted
+                                                           )
+                                                          edgs
+                                              return ()
+                                          Nothing -> return ())
+                                 frag)
+                        (cbpftxns)
 
 processDeltaTx :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> Tx -> m ()
 processDeltaTx bhash tx = do
