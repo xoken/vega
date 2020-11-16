@@ -729,9 +729,7 @@ processCompactBlock cmpct peer = do
     cb <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
     case cb of
         Nothing -> do
-            err lg $ LG.msg $ ("Candidate block not found!: " ++ show bhash)
-            debug lg $ LG.msg $ ("Creating New Candidate Block over: " ++ show bhash)
-            newCandidateBlock bhash
+            return ()
         Just dag -> do
             debug lg $ LG.msg $ ("New Candidate Block Found over: " ++ show bhash)
             mpTxLst <- liftIO $ DAG.getTopologicalSortedForest dag
@@ -780,7 +778,19 @@ processBlockTransactions :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => B
 processBlockTransactions blockTxns = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    let bhash = btBlockhash blockTxns
+    dbe <- getDB
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        bhash = btBlockhash blockTxns
+        txhashes = txHash <$> (btTransactions blockTxns)
+        conn = rocksDB dbe
+    (bhash_,_) <- fetchBestBlock conn net
+    mdag_ <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash_
+    case mdag_ of
+        Just dag_ -> do
+            dag <- liftIO $ DAG.rollOver dag_ txhashes defTxHash 0 16 16
+            liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash dag
+        Nothing -> do
+            newCandidateBlock bhash
     debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
     S.drain $
         aheadly $
