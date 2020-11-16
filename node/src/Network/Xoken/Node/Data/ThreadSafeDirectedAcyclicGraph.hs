@@ -16,6 +16,8 @@ module Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
     , consolidate
     , getTopologicalSortedForest
     , getPrimaryTopologicalSorted
+    , getOrigEdges
+    , rollOver
     ) where
 
 import Control.Concurrent (threadDelay)
@@ -55,6 +57,7 @@ data TSDirectedAcyclicGraph v a =
         , dependents :: !(TSH.TSHashTable v (MVar ())) -- 
         , baseVertex :: !(v)
         , lock :: !(MVar ())
+        , origEdges :: !(TSH.TSHashTable v ([v], a))
         }
 
 new :: (Eq v, Hashable v, Ord v, Show v, Num a) => v -> a -> Int16 -> Int16 -> IO (TSDirectedAcyclicGraph v a)
@@ -65,7 +68,8 @@ new def initval vertexParts topSortParts = do
     lock <- newMVar ()
     topSort <- TSH.new topSortParts
     TSH.insert topSort def (SQ.empty, initval)
-    return $ TSDirectedAcyclicGraph vertices topSort dep def lock
+    oedg <- TSH.new vertexParts
+    return $ TSDirectedAcyclicGraph vertices topSort dep def lock oedg
 
 getTopologicalSortedForest :: (Eq v, Hashable v, Ord v, Show v) => TSDirectedAcyclicGraph v a -> IO ([(v, Maybe v)])
 getTopologicalSortedForest dag = do
@@ -127,6 +131,29 @@ consolidate dag cumulate = do
         keys
     return ()
 
+getOrigEdges ::
+       (Eq v, Hashable v, Ord v, Show v, Show a, Num a) => TSDirectedAcyclicGraph v a -> v -> IO (Maybe ([v], a))
+getOrigEdges dag vt = TSH.lookup (origEdges dag) (vt)
+
+rollOver ::
+       (Eq v, Hashable v, Ord v, Show v, Show a, Num a)
+    => TSDirectedAcyclicGraph v a
+    -> [v]
+    -> v
+    -> a
+    -> Int16
+    -> Int16
+    -> IO (TSDirectedAcyclicGraph v a)
+rollOver olddag filterList def initval vertexParts topSortParts
+    -- filterMap <- TSH.fromList 10 filterList
+    -- forest <- TSH.toList $ topologicalSorted olddag
+    -- let univPre = Prelude.foldl (|>) SQ.empty forest
+ = do
+    newdag <- new def initval vertexParts topSortParts
+    mapM_ (\x -> do TSH.delete (origEdges olddag) x) filterList
+    TSH.mapM_ (\(vt, (ed, va)) -> do coalesce newdag vt ed va (+)) (origEdges olddag)
+    return newdag
+
 coalesce ::
        (Eq v, Hashable v, Ord v, Show v, Show a, Num a)
     => TSDirectedAcyclicGraph v a
@@ -136,6 +163,13 @@ coalesce ::
     -> (a -> a -> a)
     -> IO ()
 coalesce dag vt edges aval cumulate = do
+    TSH.mutateIO
+        (origEdges dag)
+        vt
+        (\x ->
+             case x of
+                 Just _ -> return (x, ())
+                 Nothing -> return (Just (edges, aval), ()))
     takeMVar (lock dag)
     vals <-
         mapM
@@ -180,7 +214,9 @@ coalesce dag vt edges aval cumulate = do
                                                                    print
                                                                        (za, fa, v2, "<=>", cumulate (cumulate za fa) v2)
                                                                    return
-                                                                       ( Just (z <> (n <| fg), cumulate (cumulate za fa) v2)
+                                                                       ( Just
+                                                                             ( z <> (n <| fg)
+                                                                             , cumulate (cumulate za fa) v2)
                                                                        , ())
                                                                Nothing -> do
                                                                    if present
