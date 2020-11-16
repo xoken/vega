@@ -67,6 +67,7 @@ import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
+import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
@@ -192,12 +193,17 @@ setupSeedPeerConnection =
                                                                       modifyTVar'
                                                                           (bitcoinPeers bp2pEnv)
                                                                           (M.insert (addrAddress y) bp)
+                                                                  liftIO $ print "Sending sendcmpt.."
+                                                                  sendcmpt bp
                                                                   handleIncomingMessages bp
                                                               Nothing -> return ()
                                                       Left (SocketConnectException addr) ->
                                                           warn lg $ msg ("SocketConnectException: " ++ show addr)))
             (addrs)
         liftIO $ threadDelay (30 * 1000000)
+
+sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
+sendcmpt bp = sendRequestMessages bp $ MSendCompact $ SendCompact 0 1
 
 setupPeerConnection :: (HasXokenNodeEnv env m, MonadIO m) => SockAddr -> m (Maybe BitcoinPeer)
 setupPeerConnection saddr = do
@@ -543,7 +549,10 @@ readNextMessage net sock ingss = do
                                                 b <- recvAll sock (fromIntegral len)
                                                 return (hdr `BSL.append` b)
                                     case runGetLazy (getMessage net) byts of
-                                        Left e -> throw MessageParsingException
+                                        Left e -> do
+                                            debug lg $
+                                                msg ("Message parse error' : " ++ (show e) ++ "; cmd: " ++ (show cmd))
+                                            throw MessageParsingException
                                         Right mg -> do
                                             debug lg $ msg ("Message recv' : " ++ (show $ msgType mg))
                                             return (Just mg, Nothing)
@@ -599,8 +608,11 @@ messageHandler ::
 messageHandler peer (mm, ingss) = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     case mm of
-        Just msg -> do
+        Just msg
+            --liftIO $ print $ "MSG: " ++ (show $ msgType msg)
+         -> do
             case (msg) of
                 MHeaders hdrs -> do
                     liftIO $ takeMVar (headersWriteLock bp2pEnv)
@@ -632,19 +644,40 @@ messageHandler peer (mm, ingss) = do
                     return $ msgType msg
                 MInv inv -> do
                     mapM_
-                        (\x ->
+                        (\x
+                             --liftIO $ print $ "INVTYPE: " ++ (show $ invType x)
+                          -> do
                              case (invType x) of
                                  InvBlock -> do
-                                     trace lg $ LG.msg ("INV - new Block: " ++ (show $ invHash x))
-                                     liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
+                                     let bhash = invHash x
+                                     debug lg $ LG.msg ("INV - new Block: " ++ (show bhash))
+                                     unsynced <- checkBlocksFullySynced_ net
+                                     if unsynced <= (3 :: Int32)
+                                        then do
+                                            newCandidateBlock $ BlockHash bhash
+                                            processCompactBlockGetData peer $ invHash x
+                                        else
+                                            liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
                                      indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
-                                     trace lg $ LG.msg ("INV - new Tx: " ++ (show $ invHash x))
+                                     debug lg $ LG.msg ("INV - new Tx: " ++ (show $ TxHash $ invHash x))
                                      if indexUnconfirmedTx == True
-                                         then processTxGetData peer $ invHash x
-                                         else return ()
+                                         then do
+                                             debug lg $
+                                                 LG.msg
+                                                     ("[dag] InvTx (indexUnconfirmedTx True): " ++
+                                                      (show $ TxHash $ invHash x))
+                                             processTxGetData peer $ invHash x
+                                         else do
+                                             debug lg $
+                                                 LG.msg
+                                                     ("[dag] InvTx (indexUnconfirmedTx False): " ++
+                                                      (show $ TxHash $ invHash x))
+                                             return ()
                                  InvCompactBlock -> do
-                                     trace lg $ LG.msg ("INV - Compact Block: " ++ (show $ invHash x))
+                                     let bhash = invHash x
+                                     debug lg $ LG.msg ("INV - Compact Block: " ++ (show bhash))
+                                     newCandidateBlock $ BlockHash bhash
                                      processCompactBlockGetData peer $ invHash x
                                  otherwise -> return ())
                         (invList inv)
@@ -668,12 +701,16 @@ messageHandler peer (mm, ingss) = do
                             err lg $ LG.msg $ val ("[???] Unconfirmed Tx ")
                     return $ msgType msg
                 MTx tx -> do
+                    debug lg $ LG.msg $ "[dag] Processing Unconf Tx (MTx)" ++ show (txHash tx)
                     res <- LE.try $ zRPCDispatchUnconfirmedTxValidate processUnconfTransaction tx
                     case res of
-                        Right ((candBlkHashes, depTxHashes)) -> do
+                        Right (depTxHashes) -> do
+                            candBlks <- liftIO $ TSH.toList (candidateBlocks bp2pEnv)
+                            let candBlkHashes = fmap fst candBlks
                             addTxCandidateBlocks (txHash tx) candBlkHashes depTxHashes
                         Left TxIDNotFoundException -> do
-                            throw TxIDNotFoundException
+                            return ()
+                            --throw TxIDNotFoundException
                         Left KeyValueDBInsertException -> do
                             err lg $ LG.msg $ val "[ERROR] KeyValueDBInsertException"
                             throw KeyValueDBInsertException

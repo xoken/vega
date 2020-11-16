@@ -92,7 +92,7 @@ data ZRPCRequestParam
     | ZGetOutpoint -- C =>> C | C =>> M  | M =>> C 
           { goTxID :: !TxHash
           , goIndex :: !Word32
-          , goBlockHash :: !BlockHash
+          , goBlockHash :: !(Maybe BlockHash)
           , goPredecessors :: !(DS.Set BlockHash)
           }
     | ZUnspendOutpoint -- C =>> C | C =>> M |  M =>> C 
@@ -174,6 +174,7 @@ data ZRPCResponseBody
     | ZGetOutpointResp
           { zOutValue :: !Word64
           , zScriptOutput :: !ByteString
+          , zBlockHash :: ![BlockHash]
           }
     | ZUnspendOutpointResp
           {
@@ -189,8 +190,7 @@ data ZRPCResponseBody
           }
     | ZPruneBlockTxOutputsResp
     | ZValidateUnconfirmedTxResp
-          { utCandidateParentBlock :: ![BlockHash]
-          , utDependentTransaction :: ![TxHash]
+          { utDependentTransaction :: ![TxHash] -- utCandidateParentBlock :: ![BlockHash]
           }
     | ZOk
     | ZPong

@@ -105,6 +105,7 @@ data BlockSyncException
     | OutputAlreadySpentException
     | InvalidTxSatsValueException
     | InvalidDAGEdgeException
+    | ZUnknownHandler
     deriving (Show, Read)
 
 instance Exception BlockSyncException
@@ -289,6 +290,17 @@ getDBCF rkdb cf k = do
     case DS.decode <$> res of
         Just (Left e) -> do
             liftIO $ print $ "getDBCF ERROR" ++ show e
+            throw KeyValueDBLookupException
+        Just (Right m) -> return $ Just m
+        Nothing -> return Nothing
+
+
+getDBCF_ :: (Store a, Store b) => R.DB -> R.ColumnFamily -> a -> IO (Maybe b)
+getDBCF_ rkdb cf k = do
+    res <- R.getCF rkdb cf (DS.encode k)
+    case DS.decode <$> res of
+        Just (Left e) -> do
+            print $ "getDBCF_ ERROR" ++ show e
             throw KeyValueDBLookupException
         Just (Right m) -> return $ Just m
         Nothing -> return Nothing
