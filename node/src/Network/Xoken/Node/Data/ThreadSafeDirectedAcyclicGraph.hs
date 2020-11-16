@@ -14,6 +14,7 @@ module Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
     , new
     , coalesce
     , consolidate
+    , getOrigEdges
     , getTopologicalSortedForest
     , getPrimaryTopologicalSorted
     , getOrigEdges

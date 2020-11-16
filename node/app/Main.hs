@@ -281,15 +281,14 @@ defBitcoinP2P nodeCnf = do
     tbt <- MS.new $ maxTMTBuilderThreads nodeCnf
     iut <- newTVarIO False
     udc <- H.new
-    ci <- getChainIndex
-    tci <- newTVarIO ci
+    blktr <- TSH.new 1
     wrkc <- newTVarIO []
     bsb <- newTVarIO Nothing
     ptxq <- TSH.new 1
     cand <- TSH.new 1
     cmpct <- TSH.new 1
-    -- mptx <- TSH.new 1
-    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc tci wrkc bsb ptxq cand cmpct
+    pftx <- TSH.new 10
+    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc blktr wrkc bsb ptxq cand cmpct pftx
 
 initVega :: IO ()
 initVega = do

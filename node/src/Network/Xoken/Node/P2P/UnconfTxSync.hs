@@ -414,7 +414,7 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
     case q of
         Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show candBlockHash)
         Just dag -> do
-            liftIO $ DAG.coalesce dag txHash depTxHashes 0 (+)
+            liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+)
             dagT <- liftIO $ (DAG.getTopologicalSortedForest dag)
             dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)
             liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP
