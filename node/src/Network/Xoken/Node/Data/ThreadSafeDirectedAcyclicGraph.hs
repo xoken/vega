@@ -17,7 +17,6 @@ module Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
     , getOrigEdges
     , getTopologicalSortedForest
     , getPrimaryTopologicalSorted
-    , getOrigEdges
     , rollOver
     ) where
 

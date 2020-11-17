@@ -825,7 +825,7 @@ processBlockTransactions blockTxns = do
                         (\ptx -> do
                              edges <- liftIO $ DAG.getOrigEdges dag (txHash $ pfTx ptx)
                              case edges of
-                                 Just edgs -> do
+                                 Just (edgs,_) -> do
                                      mapM_
                                          (\ed -> do
                                               fd <- liftIO $ TSH.lookup validator ed
@@ -845,7 +845,7 @@ processBlockTransactions blockTxns = do
                                           Just (x, _) -> do
                                               edges <- liftIO $ DAG.getOrigEdges dag x
                                               case edges of
-                                                  Just edgs -> do
+                                                  Just (edgs,_) -> do
                                                       mapM_
                                                           (\ed -> do
                                                                fd <- liftIO $ TSH.lookup validator ed
