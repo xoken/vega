@@ -69,6 +69,7 @@ data BitcoinPeer =
         , bpNonce :: !Word64 -- random nonce sent during handshake
         , statsTracker :: !PeerTracker -- track sync stats
         , blockFetchQueue :: !(MVar (BlockInfo))
+        , bpSendcmpt :: !(IORef Bool) -- does the peer ask for CompactBlocks
         }
 
 data PeerTracker =

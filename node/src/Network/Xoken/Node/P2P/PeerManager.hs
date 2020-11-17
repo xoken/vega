@@ -173,6 +173,7 @@ setupSeedPeerConnection =
                                                   res <- LE.try $ liftIO $ createSocket y
                                                   trk <- liftIO $ getNewTracker
                                                   bfq <- liftIO $ newEmptyMVar
+                                                  sc <- liftIO $ newIORef False
                                                   case res of
                                                       Right (sock) -> do
                                                           case sock of
@@ -188,6 +189,7 @@ setupSeedPeerConnection =
                                                                               99999
                                                                               trk
                                                                               bfq
+                                                                              sc
                                                                   liftIO $
                                                                       atomically $
                                                                       modifyTVar'
@@ -251,11 +253,12 @@ setupPeerConnection saddr = do
                                      fw <- liftIO $ newTVarIO 0
                                      trk <- liftIO $ getNewTracker
                                      bfq <- liftIO $ newEmptyMVar
+                                     sc <- liftIO $ newIORef False
                                      case sock of
                                          Just sx -> do
                                              debug lg $ LG.msg ("Discovered Net-Address: " ++ (show $ saddr))
                                              fl <- doVersionHandshake net sx $ saddr
-                                             let bp = BitcoinPeer (saddr) sock wl fl Nothing 99999 trk bfq
+                                             let bp = BitcoinPeer (saddr) sock wl fl Nothing 99999 trk bfq sc
                                              liftIO $
                                                  atomically $ modifyTVar' (bitcoinPeers bp2pEnv) (M.insert (saddr) bp)
                                              return $ Just bp
@@ -759,6 +762,9 @@ messageHandler peer (mm, ingss) = do
                             liftIO $ sendEncMessage (bpWriteMsgLock peer) sock (BSL.fromStrict em)
                             return $ msgType msg
                         Nothing -> return $ msgType msg
+                MSendCompact _ -> do
+                    liftIO $ writeIORef (bpSendcmpt peer) True
+                    return $ msgType msg
                 _ -> do
                     return $ msgType msg
         Nothing -> do
