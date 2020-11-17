@@ -780,7 +780,7 @@ processCompactBlock cmpct peer = do
                 S.maxThreads (maxTxProcessingThreads $ nodeConfig bp2pEnv)
             --
             let scb = SQ.fromList $ cbShortIDs cmpct
-            liftIO $ TSH.insert (prefilledShortIDsProcessing bp2pEnv) bhash (scb, cbPrefilledTxns cmpct, mpShortTxIDMap)
+            liftIO $ TSH.insert (prefilledShortIDsProcessing bp2pEnv) bhash (skey, scb, cbPrefilledTxns cmpct, mpShortTxIDMap)
             --
             -- 
             return ()
@@ -795,14 +795,7 @@ processBlockTransactions blockTxns = do
         bhash = btBlockhash blockTxns
         txhashes = txHash <$> (btTransactions blockTxns)
         conn = rocksDB dbe
-    (bhash_,_) <- fetchBestBlock conn net
-    mdag_ <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash_
-    case mdag_ of
-        Just dag_ -> do
-            dag <- liftIO $ DAG.rollOver dag_ txhashes defTxHash 0 16 16
-            liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash dag
-        Nothing -> do
-            newCandidateBlock bhash
+    (bhash',_) <- fetchBestBlock conn net
     debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
     S.drain $
         aheadly $
@@ -816,9 +809,11 @@ processBlockTransactions blockTxns = do
         Just dag -> do
             res <- liftIO $ TSH.lookup (prefilledShortIDsProcessing bp2pEnv) bhash
             case res of
-                Just (sids, cbpftxns, lkmap)
+                Just (skey, sids, cbpftxns, lkmap')
                     -- TODO: first insert blockTxns into `lkmap` we can find it subsequently
                  -> do
+                    let lkmap = HM.union lkmap' (HM.fromList $ fmap (\txh -> let (SipHash val) = hashWith 2 4 skey $ S.encode txh   
+                                                                                        in (val,(txh,Nothing))) txhashes) 
                     pair <- liftIO $ newIORef sids
                     validator <- liftIO $ TSH.new 10
                     mapM_
@@ -858,6 +853,13 @@ processBlockTransactions blockTxns = do
                                           Nothing -> return ())
                                  frag)
                         (cbpftxns)
+    olddag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash'
+    case olddag of
+        Just dag -> do
+            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 16 16
+            liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash newdag
+        Nothing -> do
+            newCandidateBlock bhash
 
 processDeltaTx :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> Tx -> m ()
 processDeltaTx bhash tx = do
