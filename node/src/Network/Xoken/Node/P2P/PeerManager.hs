@@ -204,9 +204,6 @@ setupSeedPeerConnection =
             (addrs)
         liftIO $ threadDelay (30 * 1000000)
 
-sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
-sendcmpt bp = sendRequestMessages bp $ MSendCompact $ SendCompact 0 1
-
 setupPeerConnection :: (HasXokenNodeEnv env m, MonadIO m) => SockAddr -> m (Maybe BitcoinPeer)
 setupPeerConnection saddr = do
     bp2pEnv <- getBitcoinP2P
@@ -762,6 +759,14 @@ messageHandler peer (mm, ingss) = do
                             liftIO $ sendEncMessage (bpWriteMsgLock peer) sock (BSL.fromStrict em)
                             return $ msgType msg
                         Nothing -> return $ msgType msg
+                MGetData gd -> do
+                    mapM_ (\(InvVector invt invh) -> do
+                                case invt of
+                                    InvBlock -> do
+                                        -- TODO: cmptblk: get cmptblk
+                                        sendCmptBlock cmptblk peer
+                                    InvTx -> do
+                                        return ()) gd
                 MSendCompact _ -> do
                     liftIO $ writeIORef (bpSendcmpt peer) True
                     return $ msgType msg
@@ -937,3 +942,46 @@ logMessage peer mg = do
     -- liftIO $ atomically $ modifyTVar' (bpIngressMsgCount peer) (\z -> z + 1)
     debug lg $ LG.msg $ "DONE! processed: " ++ show mg
     return (True)
+
+--
+--
+sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
+sendcmpt bp = sendRequestMessages bp $ MSendCompact $ SendCompact 0 1
+
+sendCmptBlock :: (HasXokenNodeEnv env m, MonadIO m) => CompactBlock -> BitcoinPeer -> m ()
+sendCmptBlock cmpt bp = sendRequestMessages bp $ MCompactBlock cmpt
+
+sendBlockTxn :: (HasXokenNodeEnv env m, MonadIO m) => BlockTxns -> BitcoinPeer -> m ()
+sendBlockTxn blktxn bp = sendRequestMessages bp $ MBlockTxns blktxn
+
+sendInv :: (HasXokenNodeEnv env m, MonadIO m) => Inv -> BitcoinPeer -> m ()
+sendInv inv bp = sendRequestMessages bp $ MInv inv
+
+mineDag :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe CompactBlock)
+mineDag = do
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    (bhash,_) <- fetchBestBlock
+    dag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
+    case dag of
+        Nothing -> return Nothing
+        Just dag' -> do
+            top <- DAG.getPrimarySortedDag dag'
+            let bh = BlockHeader () bhash () () () () -- BlockHeader
+                nn = -- nonce
+                sidl = fromIntegral $ length top -- shortIds length
+                keyhash = sha256 $ S.encode bhash `C.append` S.encode nn
+                bs = S.encode keyhash
+                k0 =
+                    case runGet getWord64le bs of
+                        Left e -> Prelude.error e
+                        Right a -> a
+                k1 =
+                    case runGet getWord64le $ B.drop 8 bs of
+                        Left e -> Prelude.error e
+                        Right a -> a
+                skey = SipKey k0 k1
+                sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ S.encode txid in val) top -- shortIds
+                pfl = 0
+                pftx = []
+            return $ Just $ CompactBlock bh nn sidl sids pfl pftx
