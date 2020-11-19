@@ -760,7 +760,7 @@ messageHandler peer (mm, ingss) = do
                             liftIO $ sendEncMessage (bpWriteMsgLock peer) sock (BSL.fromStrict em)
                             return $ msgType msg
                         Nothing -> return $ msgType msg
-                MGetData gd -> do
+                MGetData (GetData gd) -> do
                     mapM_ (\(InvVector invt invh) -> do
                                 case invt of
                                     InvBlock -> do
@@ -771,6 +771,7 @@ messageHandler peer (mm, ingss) = do
                                             Nothing -> return ()
                                     InvTx -> do
                                         return ()) gd
+                    return $ msgType msg
                 MSendCompact _ -> do
                     liftIO $ writeIORef (bpSendcmpt peer) True
                     return $ msgType msg
@@ -965,15 +966,19 @@ mineBlockFromCandidate :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe Compact
 mineBlockFromCandidate = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
-    (bhash,_) <- fetchBestBlock
+    dbe <- getDB
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        conn = rocksDB dbe
+    (bhash,_) <- fetchBestBlock conn net
     dag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
     case dag of
         Nothing -> return Nothing
         Just dag' -> do
-            top <- DAG.getPrimaryTopologicalSorted dag'
-            ct <- getPOSIXTime
-            let nn = 1 -- nonce
-                bh = BlockHeader 0x20000000 bhash (fromIntegral $ floor ct) () 0x207fffff nn -- BlockHeader
+            top <-liftIO $ DAG.getPrimaryTopologicalSorted dag'
+            ct <- liftIO getPOSIXTime
+            let nn = 1 :: Word64 -- nonce
+                TxHash hh = head top
+                bh = BlockHeader 0x20000000 bhash hh (fromIntegral $ floor ct) 0x207fffff (fromIntegral nn) -- BlockHeader
                 bhsh = headerHash bh
                 sidl = fromIntegral $ L.length top -- shortIds length
                 keyhash = sha256 $ DS.encode bhash `C.append` DS.encode nn
