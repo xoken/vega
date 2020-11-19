@@ -967,8 +967,9 @@ mineDag = do
         Nothing -> return Nothing
         Just dag' -> do
             top <- DAG.getPrimarySortedDag dag'
-            let bh = BlockHeader () bhash () () () () -- BlockHeader
-                nn = -- nonce
+            ct <- getPOSIXTime
+            let nn = 1 -- nonce
+                bh = BlockHeader 0x20000000 bhash (fromIntegral $ floor ct) () 0x207fffff nn -- BlockHeader
                 sidl = fromIntegral $ length top -- shortIds length
                 keyhash = sha256 $ S.encode bhash `C.append` S.encode nn
                 bs = S.encode keyhash
@@ -985,3 +986,4 @@ mineDag = do
                 pfl = 0
                 pftx = []
             return $ Just $ CompactBlock bh nn sidl sids pfl pftx
+
