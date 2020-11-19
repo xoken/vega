@@ -950,6 +950,12 @@ logMessage peer mg = do
 
 --
 --
+broadcastToPeers :: (HasXokenNodeEnv env m, MonadIO m) => Message -> m ()
+broadcastToPeers msg = do
+    bp2pEnv <- getBitcoinP2P
+    peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
+    mapM_ (\bp -> sendRequestMessages bp msg) peerMap
+
 sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
 sendcmpt bp = sendRequestMessages bp $ MSendCompact $ SendCompact 0 1
 
@@ -979,7 +985,7 @@ mineBlockFromCandidate = do
             let nn = 1 :: Word64 -- nonce
                 TxHash hh = head top
                 bh = BlockHeader 0x20000000 bhash hh (fromIntegral $ floor ct) 0x207fffff (fromIntegral nn) -- BlockHeader
-                bhsh = headerHash bh
+                bhsh@(BlockHash bhsh') = headerHash bh
                 sidl = fromIntegral $ L.length top -- shortIds length
                 keyhash = sha256 $ DS.encode bhash `C.append` DS.encode nn
                 bs = DS.encode keyhash
@@ -995,5 +1001,5 @@ mineBlockFromCandidate = do
                 sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ DS.encode txid in val) top -- shortIds
                 pfl = 0
                 pftx = []
+            broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
             return $ Just $ CompactBlock bh nn sidl sids pfl pftx
-
