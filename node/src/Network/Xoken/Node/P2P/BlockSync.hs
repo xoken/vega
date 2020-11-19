@@ -15,6 +15,8 @@ module Network.Xoken.Node.P2P.BlockSync
     , processBlockTransactions
     , processConfTransaction
     , peerBlockSync
+    , fetchBestSyncedBlock
+    , markBestSyncedBlock
     , checkBlocksFullySynced
     , runPeerSync
     , runBlockCacheQueue
@@ -304,16 +306,15 @@ runBlockCacheQueue =
                             (\k -> do
                                  x <- getDB' rkdb k -- Maybe (Text, BlockHeader)
                                  return $
-                                     case x :: Maybe (Text,BlockHeader) of
+                                     case x :: Maybe (Text, BlockHeader) of
                                          Nothing -> Nothing
-                                         Just (x',_) -> Just (k,x')
-                                     )
+                                         Just (x', _) -> Just (k, x'))
                             (bks)
                     case res of
                         Left (e :: SomeException) -> do
                             err lg $ LG.msg ("Error: runBlockCacheQueue: " ++ show e)
                             throw e
-                        Right (op' :: [Maybe (Int32,Text)]) -> do
+                        Right (op' :: [Maybe (Int32, Text)]) -> do
                             let op = catMaybes $ op'
                             if L.length op == 0
                                 then do

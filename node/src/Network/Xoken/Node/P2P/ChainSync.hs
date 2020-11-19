@@ -60,6 +60,7 @@ import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
+import qualified Network.Xoken.Node.P2P.BlockSync as NXB (fetchBestSyncedBlock, markBestSyncedBlock)
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Service.Chain
@@ -173,7 +174,7 @@ getBlockLocator rkdb net = do
             liftIO $ mapM CA.wait v
     case res of
         Right vs' -> do
-            let vs :: [(Text,BlockHeader)]
+            let vs :: [(Text, BlockHeader)]
                 vs = catMaybes vs'
             if L.null vs
                 then return [headerHash $ getGenesisHeader net]
@@ -237,8 +238,21 @@ processHeaders hdrs = do
                                                          debug lg $
                                                              LG.msg $
                                                              LG.val
-                                                                 ("Does not match best-block, potential block re-org ")
-                                                         return $ zip [(matchBHt + 1) ..] (headersList hdrs) -- potential re-org
+                                                                 "Does not match best-block, potential block re-org..."
+                                                         let reOrgDiff = zip [(matchBHt + 1) ..] (headersList hdrs)
+                                                         bestSynced <- NXB.fetchBestSyncedBlock rkdb net
+                                                         if snd bestSynced >= matchBHt
+                                                             then do
+                                                                 debug lg $
+                                                                     LG.msg $
+                                                                     "Have synced blocks beyond point of re-org: synced @ " <>
+                                                                     (show bestSynced) <>
+                                                                     " versus point of re-org: " <>
+                                                                     (show $ (matchBHash, matchBHt)) <>
+                                                                     ", re-syncing from thereon"
+                                                                 NXB.markBestSyncedBlock matchBHash matchBHt
+                                                                 return reOrgDiff
+                                                             else return reOrgDiff
                                              Nothing -> throw BlockHashNotFoundException
             let lenIndexed = L.length indexed
             debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)

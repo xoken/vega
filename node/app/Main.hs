@@ -101,6 +101,7 @@ import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Service.Chain
+import Network.Xoken.Node.TLSServer
 import Network.Xoken.Node.WorkerListener
 import Options.Applicative
 import Paths_vega as P
@@ -183,7 +184,9 @@ runThreads config nodeConf bp2p lg certPaths = do
         let allegoryEnv = AllegoryEnv $ allegoryVendorSecretKey nodeConf
         let xknEnv = XokenNodeEnv bp2p dbh lg allegoryEnv
         let serviceEnv = ServiceEnv xknEnv
-        --
+        -- start TLS endpoint
+        epHandler <- newTLSEndpointServiceHandler
+        LA.async $ startTLSEndpoint epHandler (endPointTLSListenIP nodeConf) (endPointTLSListenPort nodeConf) certPaths
         -- start HTTP endpoint
         let snapConfig =
                 Snap.defaultConfig & Snap.setSSLBind (DTE.encodeUtf8 $ DT.pack $ endPointHTTPSListenIP nodeConf) &
@@ -209,10 +212,11 @@ runThreads config nodeConf bp2p lg certPaths = do
                                 withAsync setupSeedPeerConnection $ \_ -> do
                                     withAsync runEgressChainSync $ \_ -> do
                                         withAsync runBlockCacheQueue $ \_ -> do
-                                            withAsync runPeerSync $ \_ -> do
-                                                withAsync runSyncStatusChecker $ \z -> do
-                                                    _ <- LA.wait z
-                                                    return ()
+                                            withAsync (handleNewConnectionRequest epHandler) $ \_ -> do
+                                                withAsync runPeerSync $ \_ -> do
+                                                    withAsync runSyncStatusChecker $ \z -> do
+                                                        _ <- LA.wait z
+                                                        return ()
                         else LA.wait y)
         liftIO $ putStrLn $ "node recovering from fatal DB connection failure!"
     return ()
