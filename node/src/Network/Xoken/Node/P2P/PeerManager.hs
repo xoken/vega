@@ -34,6 +34,7 @@ import Control.Monad.Reader
 import Control.Monad.STM
 import Control.Monad.State.Strict
 import Control.Monad.Trans.Control
+import Crypto.MAC.SipHash as SH
 import qualified Data.Aeson as A (decode, encode)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
@@ -764,7 +765,10 @@ messageHandler peer (mm, ingss) = do
                                 case invt of
                                     InvBlock -> do
                                         -- TODO: cmptblk: get cmptblk
-                                        sendCmptBlock cmptblk peer
+                                        cmptblkm <- mineBlockFromCandidate
+                                        case cmptblkm of
+                                            Just cmptblk -> sendCmptBlock cmptblk peer
+                                            Nothing -> return ()
                                     InvTx -> do
                                         return ()) gd
                 MSendCompact _ -> do
@@ -957,8 +961,8 @@ sendBlockTxn blktxn bp = sendRequestMessages bp $ MBlockTxns blktxn
 sendInv :: (HasXokenNodeEnv env m, MonadIO m) => Inv -> BitcoinPeer -> m ()
 sendInv inv bp = sendRequestMessages bp $ MInv inv
 
-mineDag :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe CompactBlock)
-mineDag = do
+mineBlockFromCandidate :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe CompactBlock)
+mineBlockFromCandidate = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     (bhash,_) <- fetchBestBlock
@@ -966,13 +970,14 @@ mineDag = do
     case dag of
         Nothing -> return Nothing
         Just dag' -> do
-            top <- DAG.getPrimarySortedDag dag'
+            top <- DAG.getPrimaryTopologicalSorted dag'
             ct <- getPOSIXTime
             let nn = 1 -- nonce
                 bh = BlockHeader 0x20000000 bhash (fromIntegral $ floor ct) () 0x207fffff nn -- BlockHeader
-                sidl = fromIntegral $ length top -- shortIds length
-                keyhash = sha256 $ S.encode bhash `C.append` S.encode nn
-                bs = S.encode keyhash
+                bhsh = headerHash bh
+                sidl = fromIntegral $ L.length top -- shortIds length
+                keyhash = sha256 $ DS.encode bhash `C.append` DS.encode nn
+                bs = DS.encode keyhash
                 k0 =
                     case runGet getWord64le bs of
                         Left e -> Prelude.error e
@@ -982,7 +987,7 @@ mineDag = do
                         Left e -> Prelude.error e
                         Right a -> a
                 skey = SipKey k0 k1
-                sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ S.encode txid in val) top -- shortIds
+                sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ DS.encode txid in val) top -- shortIds
                 pfl = 0
                 pftx = []
             return $ Just $ CompactBlock bh nn sidl sids pfl pftx
