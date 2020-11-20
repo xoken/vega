@@ -227,8 +227,9 @@ runSyncStatusChecker = do
     bp2pEnv <- getBitcoinP2P
     rkdb <- rocksDB <$> getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    newCandidateBlockChainTip
     -- wait 300 seconds before first check
-    liftIO $ threadDelay (300 * 1000000)
+    liftIO $ threadDelay (30 * 1000000)
     forever $ do
         isSynced <- checkBlocksFullySynced net
         LG.debug lg $
@@ -239,6 +240,8 @@ runSyncStatusChecker = do
             if isSynced
                 then "Yes"
                 else "No"
+        mn <- if isSynced then mineBlockFromCandidate else return Nothing
+        liftIO $ print $ "Sync status: " ++ show mn
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced
         liftIO $ threadDelay (60 * 1000000)
 
@@ -289,9 +292,10 @@ defBitcoinP2P nodeCnf = do
     bsb <- newTVarIO Nothing
     ptxq <- TSH.new 1
     cand <- TSH.new 1
+    cblk <- TSH.new 1
     cmpct <- TSH.new 1
     pftx <- TSH.new 10
-    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc blktr wrkc bsb ptxq cand cmpct pftx
+    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc blktr wrkc bsb ptxq cand cblk cmpct pftx
 
 initVega :: IO ()
 initVega = do

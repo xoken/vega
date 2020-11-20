@@ -19,6 +19,7 @@ import Control.Monad.Catch
 import Control.Monad.Reader
 import Control.Monad.Trans.Control
 import Crypto.Secp256k1
+import Crypto.MAC.SipHash as SH
 import qualified Data.ByteString.Char8 as C
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashMap.Strict as HM
@@ -93,8 +94,10 @@ data BitcoinP2P =
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
         , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64))
+        , compactBlocks :: !(TSH.TSHashTable BlockHash CompactBlock)
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
-        , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( Seq Word64
+        , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( SipKey 
+                                                                     , Seq Word64
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())

@@ -58,6 +58,7 @@ import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Node.P2P.UnconfTxSync
 import Network.Xoken.Node.Service.Chain
 import Network.Xoken.Node.WorkerDispatcher
 import Network.Xoken.Transaction.Common
@@ -116,19 +117,23 @@ requestHandler sock writeLock msg = do
                                 -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
                              -> do
                                 zz <-
-                                    LE.try $
-                                    validateOutpoint
-                                        (OutPoint txId index)
-                                        (DS.singleton bhash) -- TODO: needs to contains more predecessors
-                                        bhash
-                                        (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
+                                    do let bhash' =
+                                               case bhash of
+                                                   Nothing -> DS.empty
+                                                   Just bh -> (DS.singleton bh) -- TODO: needs to contains more predecessors
+                                       LE.try $
+                                           validateOutpoint
+                                               (OutPoint txId index)
+                                               bhash'
+                                               bhash
+                                               (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                 case zz of
-                                    Right val
+                                    Right (val, bhs)
                                         -- liftIO $
                                         --     print $
                                         --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
                                      -> do
-                                        return $ successResp mid $ ZGetOutpointResp val B.empty
+                                        return $ successResp mid $ ZGetOutpointResp val B.empty bhs
                                     Left (e :: SomeException) -> do
                                         return $ errorResp mid (show e)
                             -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
@@ -137,7 +142,7 @@ requestHandler sock writeLock msg = do
                             ZValidateTx bhash blkht txind tx
                                 -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
                              -> do
-                                debug lg $ LG.msg $ "decoded ZValidateTx : " ++ (show $ txHash tx)
+                                debug lg $ LG.msg $ "decoded ZValidateTx (Conf) : " ++ (show $ txHash tx)
                                 res <-
                                     LE.try $ processConfTransaction tx bhash (fromIntegral blkht) (fromIntegral txind)
                                 case res of
@@ -158,6 +163,15 @@ requestHandler sock writeLock msg = do
                                                          liftIO $ TSH.insert (pruneUtxoQueue bp2pEnv) bhash opq)
                                             outpts
                                         return $ successResp mid (ZValidateTxResp True)
+                                    Left (e :: SomeException) -> return $ errorResp mid (show e)
+                            ZValidateUnconfirmedTx tx
+                                -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
+                             -> do
+                                debug lg $ LG.msg $ "decoded ZValidateTx (Unconf) : " ++ (show $ txHash tx)
+                                res <- LE.try $ processUnconfTransaction tx
+                                case res of
+                                    Right (txs) -> do
+                                        return $ successResp mid (ZValidateUnconfirmedTxResp txs)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
                             ZPruneBlockTxOutputs blockHashes
                                 -- liftIO $ print $ "ZPruneBlockTxOutputs - REQUEST " ++ (show blockHashes)
@@ -198,6 +212,9 @@ requestHandler sock writeLock msg = do
                                             "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show $ P.head headers)
                                         return $ successResp mid (ZNotifyNewBlockHeaderResp)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
+                            otherwise -> do
+                                err lg $ LG.msg $ "requestHandler unknown handler: " ++ (show param)
+                                return $ errorResp mid (show ZUnknownHandler)
             Left e -> do
                 err lg $ LG.msg $ "Error: deserialise Failed (requestHandler) : " ++ (show e)
                 return $ errorResp (0) "Deserialise failed"
