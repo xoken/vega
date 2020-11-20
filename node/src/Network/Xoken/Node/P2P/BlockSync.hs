@@ -930,3 +930,4 @@ newCandidateBlockChainTip = do
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 
 defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"
+

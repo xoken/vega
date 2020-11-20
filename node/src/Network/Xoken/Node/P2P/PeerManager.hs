@@ -785,12 +785,24 @@ messageHandler peer (mm, ingss) = do
                 MSendCompact _ -> do
                     liftIO $ writeIORef (bpSendcmpt peer) True
                     return $ msgType msg
+                MGetBlockTxns (GetBlockTxns bh ln bi) -> do
+                    cmptblkm <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bh
+                    (btl,bt) <- case cmptblkm of
+                                    Just cmptblk -> do
+                                        top <- liftIO $ DAG.getPrimaryTopologicalSorted cmptblk
+                                        return (ln, fmap (\i -> top !! (fromIntegral i)) bi)
+                                    Nothing -> return (0,[])
+                    let txs = txFromHash <$> bt
+                    sendBlockTxn (BlockTxns bh btl txs) peer
+                    return $ msgType msg
                 _ -> do
                     liftIO $ print $ "Got message: " ++ show msg
                     return $ msgType msg
         Nothing -> do
             err lg $ LG.msg $ val "Error, invalid message"
             throw InvalidMessageTypeException
+
+txFromHash txh = Tx 1 [] [] 1
 
 processTxBatch :: (HasXokenNodeEnv env m, MonadIO m) => [Tx] -> IngressStreamState -> m ()
 processTxBatch txns iss = do
