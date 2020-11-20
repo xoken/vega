@@ -189,33 +189,32 @@ zRPCDispatchBlocksTxsOutputs blockHashes = do
                              throw mex)
         (wrkrs)
 
-zRPCDispatchTraceOutputs :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Bool -> Int -> m (Bool)
-zRPCDispatchTraceOutputs outPoint bhash isPrevFresh htt = do
-    dbe' <- getDB
-    bp2pEnv <- getBitcoinP2P
-    lg <- getLogger
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-        opIndex = outPointIndex outPoint
-        lexKey = getTxShortHash (outPointHash outPoint) 8
-    worker <- getRemoteWorker lexKey TraceOutputs
-    case worker of
-        Nothing -> do
-            pruneSpentOutputs (outPointHash outPoint, opIndex) bhash isPrevFresh htt
-        Just wrk -> do
-            let mparam = ZTraceOutputs (outPointHash outPoint) (outPointIndex outPoint) bhash isPrevFresh htt
-            resp <- zRPCRequestDispatcher mparam wrk
-            case zrsPayload resp of
-                Right spl -> do
-                    case spl of
-                        Just pl ->
-                            case pl of
-                                ZTraceOutputsResp flag -> return (flag)
-                        Nothing -> throw InvalidMessageTypeException
-                Left er -> do
-                    err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
-                    let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
-                    throw mex
-
+-- zRPCDispatchTraceOutputs :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Bool -> Int -> m (Bool)
+-- zRPCDispatchTraceOutputs outPoint bhash isPrevFresh htt = do
+--     dbe' <- getDB
+--     bp2pEnv <- getBitcoinP2P
+--     lg <- getLogger
+--     let net = bitcoinNetwork $ nodeConfig bp2pEnv
+--         opIndex = outPointIndex outPoint
+--         lexKey = getTxShortHash (outPointHash outPoint) 8
+--     worker <- getRemoteWorker lexKey TraceOutputs
+--     case worker of
+--         Nothing -> do
+--             pruneSpentOutputs (outPointHash outPoint, opIndex) bhash isPrevFresh htt
+--         Just wrk -> do
+--             let mparam = ZTraceOutputs (outPointHash outPoint) (outPointIndex outPoint) bhash isPrevFresh htt
+--             resp <- zRPCRequestDispatcher mparam wrk
+--             case zrsPayload resp of
+--                 Right spl -> do
+--                     case spl of
+--                         Just pl ->
+--                             case pl of
+--                                 ZTraceOutputsResp flag -> return (flag)
+--                         Nothing -> throw InvalidMessageTypeException
+--                 Left er -> do
+--                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
+--                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
+--                     throw mex
 zRPCDispatchNotifyNewBlockHeader :: (HasXokenNodeEnv env m, MonadIO m) => [ZBlockHeader] -> m ()
 zRPCDispatchNotifyNewBlockHeader headers = do
     dbe' <- getDB
@@ -335,79 +334,77 @@ getRemoteWorker shardingLex role = do
          -> do
             return $ Just wrk
 
-pruneSpentOutputs :: (HasXokenNodeEnv env m, MonadIO m) => (TxHash, Word32) -> BlockHash -> Bool -> Int -> m (Bool)
-pruneSpentOutputs (txId, opIndex) staleMarker __ htt = do
-    bp2pEnv <- getBitcoinP2P
-    dbe <- getDB
-    let rkdb = rocksDB dbe
-        cfs = rocksCF dbe
-    lg <- getLogger
-    cf <- liftIO $ TSH.lookup cfs ("outputs")
-    res <- liftIO $ try $ getDBCF rkdb (fromJust cf) (txId, opIndex)
-    case res of
-        Right op -> do
-            case op of
-                Just zu -> do
-                    rst <- P.mapM (\bhash -> bhash `predecessorOf` staleMarker) (zuBlockHash zu)
-                    let noneStale = P.null $ P.filter (\x -> x == True) rst
-                    isLast <- liftIO $ newIORef False
-                    P.mapM_
-                        (\opt -> do
-                             if noneStale
-                                 then do
-                                     debug lg $
-                                         LG.msg $
-                                         "recur pvFrsh=TRUE: " ++ show (txId, opIndex) ++ " htt: " ++ (show htt)
-                                     _ <-
-                                         zRPCDispatchTraceOutputs
-                                             (OutPoint (fst opt) (snd opt))
-                                             staleMarker
-                                             True
-                                             (htt + 1)
-                                     return ()
-                                 else do
-                                     debug lg $
-                                         LG.msg $
-                                         "recur pvFrsh=FALSE: " ++ show (txId, opIndex) ++ " htt: " ++ (show htt)
-                                     res <-
-                                         zRPCDispatchTraceOutputs
-                                             (OutPoint (fst opt) (snd opt))
-                                             staleMarker
-                                             False
-                                             (htt + 1)
-                                     if res
-                                         then liftIO $ writeIORef isLast True
-                                         else return ())
-                        (zuInputs zu)
-                    if not noneStale -- if current ZUT is stale
-                        then do
-                            debug lg $ LG.msg $ "Deleting finalized spent-TXO : " ++ show (txId, opIndex)
-                            res <- liftIO $ try $ deleteDBCF rkdb (fromJust cf) (txId, opIndex)
-                            case res of
-                                Right _ -> return ()
-                                Left (e :: SomeException) -> do
-                                    err lg $ LG.msg $ "Error: Deleting from " ++ (show cf) ++ ": " ++ show e
-                                    throw KeyValueDBInsertException
-                        else return ()
-                    debug lg $ LG.msg $ "rtrn FALSE : " ++ show (txId, opIndex)
-                    return (False)
-                Nothing -> do
-                    debug lg $ LG.msg $ "rtrn TRUE : " ++ show (txId, opIndex) ++ " htt: " ++ (show htt)
-                    return (True)
-        Left (e :: SomeException) -> do
-            err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
-            throw KeyValueDBInsertException
-
---
---
--- given two block hashes x & y , check if 'x' is predecessorOf 'y' 
-predecessorOf :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> BlockHash -> m Bool
-predecessorOf x y = do
-    bp2pEnv <- getBitcoinP2P
-    ci <- liftIO $ readTVarIO (confChainIndex bp2pEnv)
-    let ch = hashIndex ci
-    return $ (M.lookup x ch) < (M.lookup y ch)
-
+-- pruneSpentOutputs :: (HasXokenNodeEnv env m, MonadIO m) => (TxHash, Word32) -> BlockHash -> Bool -> Int -> m (Bool)
+-- pruneSpentOutputs (txId, opIndex) staleMarker __ htt = do
+--     bp2pEnv <- getBitcoinP2P
+--     dbe <- getDB
+--     let rkdb = rocksDB dbe
+--         cfs = rocksCF dbe
+--     lg <- getLogger
+--     cf <- liftIO $ TSH.lookup cfs ("outputs")
+--     res <- liftIO $ try $ getDBCF rkdb (fromJust cf) (txId, opIndex)
+--     case res of
+--         Right op -> do
+--             case op of
+--                 Just zu -> do
+--                     rst <- P.mapM (\bhash -> bhash `predecessorOf` staleMarker) (zuBlockHash zu)
+--                     let noneStale = P.null $ P.filter (\x -> x == True) rst
+--                     isLast <- liftIO $ newIORef False
+--                     P.mapM_
+--                         (\opt -> do
+--                              if noneStale
+--                                  then do
+--                                      debug lg $
+--                                          LG.msg $
+--                                          "recur pvFrsh=TRUE: " ++ show (txId, opIndex) ++ " htt: " ++ (show htt)
+--                                      _ <-
+--                                          zRPCDispatchTraceOutputs
+--                                              (OutPoint (fst opt) (snd opt))
+--                                              staleMarker
+--                                              True
+--                                              (htt + 1)
+--                                      return ()
+--                                  else do
+--                                      debug lg $
+--                                          LG.msg $
+--                                          "recur pvFrsh=FALSE: " ++ show (txId, opIndex) ++ " htt: " ++ (show htt)
+--                                      res <-
+--                                          zRPCDispatchTraceOutputs
+--                                              (OutPoint (fst opt) (snd opt))
+--                                              staleMarker
+--                                              False
+--                                              (htt + 1)
+--                                      if res
+--                                          then liftIO $ writeIORef isLast True
+--                                          else return ())
+--                         (zuInputs zu)
+--                     if not noneStale -- if current ZUT is stale
+--                         then do
+--                             debug lg $ LG.msg $ "Deleting finalized spent-TXO : " ++ show (txId, opIndex)
+--                             res <- liftIO $ try $ deleteDBCF rkdb (fromJust cf) (txId, opIndex)
+--                             case res of
+--                                 Right _ -> return ()
+--                                 Left (e :: SomeException) -> do
+--                                     err lg $ LG.msg $ "Error: Deleting from " ++ (show cf) ++ ": " ++ show e
+--                                     throw KeyValueDBInsertException
+--                         else return ()
+--                     debug lg $ LG.msg $ "rtrn FALSE : " ++ show (txId, opIndex)
+--                     return (False)
+--                 Nothing -> do
+--                     debug lg $ LG.msg $ "rtrn TRUE : " ++ show (txId, opIndex) ++ " htt: " ++ (show htt)
+--                     return (True)
+--         Left (e :: SomeException) -> do
+--             err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
+--             throw KeyValueDBInsertException
+-- --
+-- --
+-- -- given two block hashes x & y , check if 'x' is predecessorOf 'y' 
+-- predecessorOf :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> BlockHash -> m Bool
+-- predecessorOf x y = do
+--     bp2pEnv <- getBitcoinP2P
+--     ci <- liftIO $ readTVarIO (confChainIndex bp2pEnv)
+--     let ch = hashIndex ci
+--     return $ (M.lookup x ch) < (M.lookup y ch)
 validateOutpoint ::
        (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => OutPoint -> DS.Set BlockHash -> BlockHash -> Int -> m (Word64)
 validateOutpoint outPoint predecessors curBlkHash wait = do

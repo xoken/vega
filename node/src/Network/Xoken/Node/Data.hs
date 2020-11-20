@@ -765,12 +765,6 @@ instance Show RPCErrors where
             SERVER_ERROR -> "Error: Something went wrong"
             INVALID_REQUEST -> "Error: Invalid request"
 
-data ChainIndex =
-    ChainIndex
-        { hashIndex :: M.Map BlockHash BlockHeight
-        , heightIndex :: M.Map BlockHeight BlockHash
-        }
-
 --getOptPointKey :: TxShortHash -> Int16 -> B.ByteString
 --getOptPointKey txh ind = C.toStrict . C.pack . show $ txh + (fromIntegral ind) 
 -- can be replaced with Enum instance but in future other RPC methods might be handled then we might have to give different codes

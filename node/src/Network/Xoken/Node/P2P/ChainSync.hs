@@ -58,6 +58,7 @@ import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common -- (GetData(..), MessageCommand(..), NetworkAddress(..))
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
+import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import qualified Network.Xoken.Node.P2P.BlockSync as NXB (fetchBestSyncedBlock, markBestSyncedBlock)
@@ -272,7 +273,7 @@ processHeaders hdrs = do
                              liftIO $ do
                                  err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
                                  throw KeyValueDBInsertException
-                     addBlockToChainIndex (headerHash header) (fromIntegral blkht))
+                     liftIO $ TSH.insert (blockTree bp2pEnv) (headerHash header) (fromIntegral blkht, header))
                 indexed
             unless (L.null indexed) $ do
                 let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ fst z)) indexed

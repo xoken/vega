@@ -21,6 +21,7 @@ import Control.Monad.Trans.Control
 import Crypto.Secp256k1
 import qualified Data.ByteString.Char8 as C
 import qualified Data.HashMap.Strict as HM
+import qualified Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
 import Data.Hashable
 import Data.Int
@@ -33,6 +34,7 @@ import qualified Database.RocksDB as R
 import GHC.Generics
 import Network.Socket hiding (send)
 import Network.Xoken.Block.Common
+import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
@@ -86,12 +88,15 @@ data BitcoinP2P =
         , maxTMTBuilderThreadLock :: !(MSem Int)
         , indexUnconfirmedTx :: !(TVar Bool)
         , userDataCache :: !(HashTable Text (Text, Int32, Int32, UTCTime, [Text])) -- (name, quota, used, expiry time, roles)
-        , confChainIndex :: !(TVar (ChainIndex))
+        , blockTree :: !(TSH.TSHashTable BlockHash (BlockHeight, BlockHeader))
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
-        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash))
+        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64))
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
+        , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( Seq Word64
+                                                                     , [PrefilledTx]
+                                                                     , HM.HashMap Word64 (TxHash, Maybe TxHash)))
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
 
