@@ -94,6 +94,7 @@ data BitcoinP2P =
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
         , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64))
+        , compactBlocks :: !(TSH.TSHashTable BlockHash CompactBlock)
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
         , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( SipKey 
                                                                      , Seq Word64

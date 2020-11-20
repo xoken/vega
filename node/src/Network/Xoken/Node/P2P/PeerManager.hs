@@ -11,6 +11,7 @@
 module Network.Xoken.Node.P2P.PeerManager
     ( createSocket
     , setupSeedPeerConnection
+    , mineBlockFromCandidate
     ) where
 
 import qualified Codec.Serialise as CBOR
@@ -612,8 +613,8 @@ messageHandler peer (mm, ingss) = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     case mm of
         Just msg
-            --liftIO $ print $ "MSG: " ++ (show $ msgType msg)
-         -> do
+          -> do
+            liftIO $ print $ "MSG: " ++ (show $ msgType msg)
             case (msg) of
                 MHeaders hdrs -> do
                     liftIO $ takeMVar (headersWriteLock bp2pEnv)
@@ -765,7 +766,8 @@ messageHandler peer (mm, ingss) = do
                                 case invt of
                                     InvBlock -> do
                                         -- TODO: cmptblk: get cmptblk
-                                        cmptblkm <- mineBlockFromCandidate
+                                        --cmptblkm <- mineBlockFromCandidate
+                                        cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
                                         case cmptblkm of
                                             Just cmptblk -> sendCmptBlock cmptblk peer
                                             Nothing -> return ()
@@ -981,25 +983,33 @@ mineBlockFromCandidate = do
         Nothing -> return Nothing
         Just dag' -> do
             top <-liftIO $ DAG.getPrimaryTopologicalSorted dag'
-            ct <- liftIO getPOSIXTime
-            let nn = 1 :: Word64 -- nonce
-                TxHash hh = head top
-                bh = BlockHeader 0x20000000 bhash hh (fromIntegral $ floor ct) 0x207fffff (fromIntegral nn) -- BlockHeader
-                bhsh@(BlockHash bhsh') = headerHash bh
-                sidl = fromIntegral $ L.length top -- shortIds length
-                keyhash = sha256 $ DS.encode bhash `C.append` DS.encode nn
-                bs = DS.encode keyhash
-                k0 =
-                    case runGet getWord64le bs of
-                        Left e -> Prelude.error e
-                        Right a -> a
-                k1 =
-                    case runGet getWord64le $ B.drop 8 bs of
-                        Left e -> Prelude.error e
-                        Right a -> a
-                skey = SipKey k0 k1
-                sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ DS.encode txid in val) top -- shortIds
-                pfl = 0
-                pftx = []
-            broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
-            return $ Just $ CompactBlock bh nn sidl sids pfl pftx
+            if L.null top
+                then do
+                    liftIO $ print $ "Mined cmptblk (dag empty over): " ++ show bhash
+                    return Nothing
+                else do
+                    ct <- liftIO getPOSIXTime
+                    let nn = 1 :: Word64 -- nonce
+                        TxHash hh = head top
+                        bh = BlockHeader 0x20000000 bhash hh (fromIntegral $ floor ct) 0x207fffff (fromIntegral nn) -- BlockHeader
+                        bhsh@(BlockHash bhsh') = headerHash bh
+                        sidl = fromIntegral $ L.length top -- shortIds length
+                        keyhash = sha256 $ DS.encode bhash `C.append` DS.encode nn
+                        bs = DS.encode keyhash
+                        k0 =
+                            case runGet getWord64le bs of
+                                Left e -> Prelude.error e
+                                Right a -> a
+                        k1 =
+                            case runGet getWord64le $ B.drop 8 bs of
+                                Left e -> Prelude.error e
+                                Right a -> a
+                        skey = SipKey k0 k1
+                        sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ DS.encode txid in val) top -- shortIds
+                        pfl = 0
+                        pftx = []
+                        cb = CompactBlock bh nn sidl sids pfl pftx
+                    liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh cb
+                    liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash
+                    broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
+                    return $ Just $ cb
