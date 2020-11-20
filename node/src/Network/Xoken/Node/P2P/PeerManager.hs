@@ -774,10 +774,19 @@ messageHandler peer (mm, ingss) = do
                                     InvTx -> do
                                         return ()) gd
                     return $ msgType msg
+                MGetHeaders (GetHeaders ver bl bh) -> do
+                    -- TODO: use blocklocator to send more than one header
+                    cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) bh
+                    let ret = case cmptblkm of
+                                    Just cmptblk -> [(cbHeader cmptblk, VarInt $ fromIntegral $ cbShortIDsLength cmptblk)]
+                                    Nothing -> []
+                    sendRequestMessages peer $ MHeaders $ Headers ret
+                    return $ msgType msg
                 MSendCompact _ -> do
                     liftIO $ writeIORef (bpSendcmpt peer) True
                     return $ msgType msg
                 _ -> do
+                    liftIO $ print $ "Got message: " ++ show msg
                     return $ msgType msg
         Nothing -> do
             err lg $ LG.msg $ val "Error, invalid message"
@@ -954,9 +963,11 @@ logMessage peer mg = do
 --
 broadcastToPeers :: (HasXokenNodeEnv env m, MonadIO m) => Message -> m ()
 broadcastToPeers msg = do
+    liftIO $ putStrLn $ "Broadcasting " ++ show (msgType msg) ++ " to peers"
     bp2pEnv <- getBitcoinP2P
     peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
-    mapM_ (\bp -> sendRequestMessages bp msg) peerMap
+    mapM_ (\bp -> if bpConnected bp then sendRequestMessages bp msg else return ()) peerMap
+    liftIO $ putStrLn $ "Broadcasted " ++ show (msgType msg) ++ " to peers"
 
 sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
 sendcmpt bp = sendRequestMessages bp $ MSendCompact $ SendCompact 0 1
