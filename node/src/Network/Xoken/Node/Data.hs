@@ -277,16 +277,47 @@ instance ToJSON ErrorResponse where
     toJSON (ErrorResponse c m d) = object ["code" .= c, "message" .= m, "data" .= d]
 
 data RPCReqParams =
-    DummyRequest
+    SubmitMiningSolutionRequest
+        { smsrId :: String
+        , smsrNonce :: Int32
+        , smsrCoinbase :: Maybe String
+        , smsrTime :: Maybe Int32
+        , smsrVersion :: Maybe Int32
+        }
     deriving (Generic, Show, Hashable, Eq, Serialise, ToJSON)
 
-instance FromJSON RPCReqParams
+instance FromJSON RPCReqParams where
+    parseJSON (Object o) =
+        (SubmitMiningSolutionRequest <$> o .: "id" <*> o .: "nonce" <*> o .:? "coinbase" <*> o .:? "time" <*>
+         o .:? "version")
 
 data RPCResponseBody =
-    DummyResponse
+    GetMiningCandidateResp
+        { rgmcId :: String
+        , rgmcPrevHash :: String
+        , rgmcCoinbase :: Maybe String
+        , rgmcVersion :: Int32
+        , rgmcCoinbaseValue :: Int64
+        , rgmcnBits :: String
+        , rgmcTime :: Int32
+        , rgmcHeight :: Int32
+        , rgmcMerkelProof :: [String]
+        }
     deriving (Generic, Show, Hashable, Eq, Serialise)
 
-instance ToJSON RPCResponseBody
+instance ToJSON RPCResponseBody where
+    toJSON (GetMiningCandidateResp id ph cb vr cv nb tm ht mp) =
+        object
+            [ "id" .= id
+            , "prevHash" .= ph
+            , "coinbase" .= cb
+            , "version" .= vr
+            , "coinbaseValue" .= cv
+            , "nBits" .= nb
+            , "time" .= tm
+            , "height" .= ht
+            , "merkleProof" .= mp
+            ]
 
 data UpdateUserByUsername' =
     UpdateUserByUsername'
