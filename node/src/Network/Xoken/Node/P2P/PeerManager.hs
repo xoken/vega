@@ -1012,10 +1012,9 @@ mineBlockFromCandidate = do
                     return Nothing
                 else do
                     ct <- liftIO getPOSIXTime
-                    let nn = 1 :: Word64 -- nonce
-                        TxHash hh = head top
-                        bh = BlockHeader 0x20000000 bhash hh (fromIntegral $ floor ct) 0x207fffff (fromIntegral nn) -- BlockHeader
-                        bhsh@(BlockHash bhsh') = headerHash bh
+                    let TxHash hh = head top
+                        bh = BlockHeader 0x20000000 bhash hh (fromIntegral $ floor ct) 0x207fffff (1) -- BlockHeader
+                        (bhsh@(BlockHash bhsh'), nn) = generateHeaderHash net bh
                         sidl = fromIntegral $ L.length top -- shortIds length
                         keyhash = sha256 $ DS.encode bhash `C.append` DS.encode nn
                         bs = DS.encode keyhash
@@ -1031,8 +1030,13 @@ mineBlockFromCandidate = do
                         sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ DS.encode txid in val) top -- shortIds
                         pfl = 0
                         pftx = []
-                        cb = CompactBlock bh nn sidl sids pfl pftx
+                        cb = CompactBlock bh (fromIntegral nn) sidl sids pfl pftx
                     liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh cb
-                    liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash
+                    liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash ++ " with work" ++ (show $ headerWork bh)
                     broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
                     return $ Just $ cb
+
+generateHeaderHash :: Network -> BlockHeader -> (BlockHash, Word32)
+generateHeaderHash net hdr = if isValidPOW net hdr
+                                then (headerHash hdr, bhNonce hdr)
+                                else generateHeaderHash net (hdr {bhNonce = (bhNonce hdr + 1)})
