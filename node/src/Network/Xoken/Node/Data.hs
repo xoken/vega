@@ -18,7 +18,6 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Trans.Maybe
 import Data.Aeson as A
-import qualified Data.Aeson.Encode.Pretty as AP
 import qualified Data.Aeson.Encoding as A
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -277,7 +276,10 @@ instance ToJSON ErrorResponse where
     toJSON (ErrorResponse c m d) = object ["code" .= c, "message" .= m, "data" .= d]
 
 data RPCReqParams =
-    SubmitMiningSolutionRequest
+    GetMiningCandidateRequest
+        { gmcrProvideCoinbaseTx :: Maybe Bool
+        }
+    | SubmitMiningSolutionRequest
         { smsrId :: String
         , smsrNonce :: Int32
         , smsrCoinbase :: Maybe String
@@ -288,6 +290,7 @@ data RPCReqParams =
 
 instance FromJSON RPCReqParams where
     parseJSON (Object o) =
+        (GetMiningCandidateRequest <$> o .:? "provide_coinbase_tx") <|>
         (SubmitMiningSolutionRequest <$> o .: "id" <*> o .: "nonce" <*> o .:? "coinbase" <*> o .:? "time" <*>
          o .:? "version")
 
@@ -317,84 +320,6 @@ instance ToJSON RPCResponseBody where
             , "time" .= tm
             , "height" .= ht
             , "merkleProof" .= mp
-            ]
-
-data UpdateUserByUsername' =
-    UpdateUserByUsername'
-        { uuPassword :: Maybe String
-        , uuFirstName :: Maybe String
-        , uuLastName :: Maybe String
-        , uuEmail :: Maybe String
-        , uuApiQuota :: Maybe Int32
-        , uuRoles :: Maybe [String]
-        , uuApiExpiryTime :: Maybe UTCTime
-        }
-    deriving (Generic, Show, Hashable, Eq, Serialise, ToJSON)
-
-instance FromJSON UpdateUserByUsername' where
-    parseJSON (Object o) =
-        (UpdateUserByUsername' <$> o .:? "password" <*> o .:? "firstName" <*> o .:? "lastName" <*> o .:? "email" <*>
-         o .:? "apiQuota" <*>
-         o .:? "roles" <*>
-         o .:? "apiExpiryTime")
-
-data AuthResp =
-    AuthResp
-        { sessionKey :: Maybe String
-        , callsUsed :: Int
-        , callsRemaining :: Int
-        }
-    deriving (Generic, Show, Hashable, Eq, Serialise, ToJSON)
-
-data AddUserResp =
-    AddUserResp
-        { aurUser :: User
-        , aurPassword :: String
-        }
-    deriving (Generic, Show, Hashable, Eq, Serialise)
-
-instance ToJSON AddUserResp where
-    toJSON (AddUserResp (User uname _ fname lname email roles apiQuota _ apiExpTime _ _) pwd) =
-        object
-            [ "username" .= uname
-            , "password" .= pwd
-            , "firstName" .= fname
-            , "lastName" .= lname
-            , "email" .= email
-            , "roles" .= roles
-            , "apiQuota" .= apiQuota
-            , "apiExpiryTime" .= apiExpTime
-            ]
-
-data User =
-    User
-        { uUsername :: String
-        , uHashedPassword :: String
-        , uFirstName :: String
-        , uLastName :: String
-        , uEmail :: String
-        , uRoles :: [String]
-        , uApiQuota :: Int
-        , uApiUsed :: Int
-        , uApiExpiryTime :: UTCTime
-        , uSessionKey :: String
-        , uSessionKeyExpiry :: UTCTime
-        }
-    deriving (Generic, Show, Hashable, Eq, Serialise)
-
-instance ToJSON User where
-    toJSON (User uname _ fname lname email roles apiQuota apiUsed apiExpTime sKey sKeyExp) =
-        object
-            [ "username" .= uname
-            , "firstName" .= fname
-            , "lastName" .= lname
-            , "email" .= email
-            , "roles" .= roles
-            , "callsRemaining" .= (apiQuota - apiUsed)
-            , "callsUsed" .= apiUsed
-            , "apiExpiryTime" .= apiExpTime
-            , "sessionKey" .= sKey
-            , "sessionKeyExpiry" .= sKeyExp
             ]
 
 data ChainInfo =
@@ -836,16 +761,6 @@ txOutputDataToOutput :: TxOutputData -> TxOutput
 txOutputDataToOutput (TxOutputData {..}) = TxOutput txind (T.unpack address) spendInfo value ""
 
 -}
-fromResultWithCursor :: ResultWithCursor r c -> r
-fromResultWithCursor = (\(ResultWithCursor res cur) -> res)
-
 reverse2 :: String -> String
 reverse2 (x:y:xs) = reverse2 xs ++ [x, y]
 reverse2 x = x
-
-maxBoundOutput :: (T.Text, Int32)
-maxBoundOutput = (T.pack "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", maxBound)
-
-encodeResp :: ToJSON a => Bool -> a -> C.ByteString
-encodeResp True = AP.encodePretty
-encodeResp False = A.encode
