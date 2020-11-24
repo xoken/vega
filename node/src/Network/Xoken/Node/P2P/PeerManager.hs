@@ -769,7 +769,7 @@ messageHandler peer (mm, ingss) = do
                                         --cmptblkm <- mineBlockFromCandidate
                                         cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
                                         case cmptblkm of
-                                            Just cmptblk -> sendCmptBlock cmptblk peer
+                                            Just (cmptblk,_) -> sendCmptBlock cmptblk peer
                                             Nothing -> return ()
                                     InvTx -> do
                                         return ()) gd
@@ -778,20 +778,22 @@ messageHandler peer (mm, ingss) = do
                     -- TODO: use blocklocator to send more than one header
                     cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) bh
                     let ret = case cmptblkm of
-                                    Just cmptblk -> [(cbHeader cmptblk, VarInt $ fromIntegral $ cbShortIDsLength cmptblk)]
+                                    Just (cmptblk,_) -> [(cbHeader cmptblk, VarInt $ fromIntegral $ cbShortIDsLength cmptblk)]
                                     Nothing -> []
                     sendRequestMessages peer $ MHeaders $ Headers ret
                     return $ msgType msg
                 MSendCompact _ -> do
                     liftIO $ writeIORef (bpSendcmpt peer) True
                     return $ msgType msg
-                MGetBlockTxns (GetBlockTxns bh ln bi) -> do
-                    cmptblkm <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bh
+                MGetBlockTxns gbt@(GetBlockTxns bh ln bi) -> do
+                    cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) bh
                     (btl,bt) <- case cmptblkm of
-                                    Just cmptblk -> do
-                                        top <- liftIO $ DAG.getPrimaryTopologicalSorted cmptblk
-                                        return (ln, fmap (\i -> top !! (fromIntegral i)) bi)
-                                    Nothing -> return (0,[])
+                                    Just (cmptblk,txhs) -> do
+                                        liftIO $ print $ "MGetBlockTxns: txs:" ++ show txhs ++ " GetBlockTxns:" ++ show gbt
+                                        return (ln, fmap (\i -> txhs !! (fromIntegral i)) bi)
+                                    Nothing -> do
+                                        liftIO $ print $ "MGetBlockTxns: candidateBlock doesn't exist; GetBlockTxns:" ++ show gbt
+                                        return (0,[])
                     let txs = txFromHash <$> bt
                     sendBlockTxn (BlockTxns bh btl txs) peer
                     return $ msgType msg
@@ -1030,8 +1032,8 @@ mineBlockFromCandidate = do
                         sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ DS.encode txid in val) top -- shortIds
                         pfl = 0
                         pftx = []
-                        cb = CompactBlock bh (fromIntegral nn) sidl sids pfl pftx
-                    liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh cb
+                        cb = CompactBlock (bh {bhNonce = nn}) (fromIntegral nn) sidl sids pfl pftx
+                    liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb,top)
                     liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash ++ " with work" ++ (show $ headerWork bh)
                     broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
                     return $ Just $ cb
