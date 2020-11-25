@@ -766,8 +766,11 @@ messageHandler peer (mm, ingss) = do
                                 debug lg $ LG.msg $ "recieved getdata: " ++ show (invt,invh)
                                 case invt of
                                     InvBlock -> do
-                                        -- TODO: cmptblk: get cmptblk
-                                        --cmptblkm <- mineBlockFromCandidate
+                                        cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
+                                        case cmptblkm of
+                                            Just (cmptblk,_) -> sendCmptBlock cmptblk peer
+                                            Nothing -> return ()
+                                    InvCompactBlock -> do
                                         cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
                                         case cmptblkm of
                                             Just (cmptblk,_) -> sendCmptBlock cmptblk peer
