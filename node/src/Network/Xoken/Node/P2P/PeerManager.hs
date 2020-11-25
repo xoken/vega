@@ -763,6 +763,7 @@ messageHandler peer (mm, ingss) = do
                         Nothing -> return $ msgType msg
                 MGetData (GetData gd) -> do
                     mapM_ (\(InvVector invt invh) -> do
+                                debug lg $ LG.msg $ "recieved getdata: " ++ show (invt,invh)
                                 case invt of
                                     InvBlock -> do
                                         -- TODO: cmptblk: get cmptblk
@@ -795,7 +796,9 @@ messageHandler peer (mm, ingss) = do
                                         liftIO $ print $ "MGetBlockTxns: candidateBlock doesn't exist; GetBlockTxns:" ++ show gbt
                                         return (0,[])
                     let txs = txFromHash <$> bt
+                    liftIO $ threadDelay (5 * 1000000)
                     sendBlockTxn (BlockTxns bh btl txs) peer
+                    liftIO $ threadDelay (5 * 1000000)
                     return $ msgType msg
                 _ -> do
                     liftIO $ print $ "Got message: " ++ show msg
@@ -1015,7 +1018,7 @@ mineBlockFromCandidate = do
                 else do
                     ct <- liftIO getPOSIXTime
                     let TxHash hh = head top
-                        bh = BlockHeader 0x20000000 bhash hh (fromIntegral $ floor ct) 0x207fffff (1) -- BlockHeader
+                        bh = BlockHeader 0x20000000 bhash (hashPair hh hh) (fromIntegral $ floor ct) 0x207fffff (1) -- BlockHeader
                         (bhsh@(BlockHash bhsh'), nn) = generateHeaderHash net bh
                         sidl = fromIntegral $ L.length top -- shortIds length
                         keyhash = sha256 $ DS.encode bhash `C.append` DS.encode nn
