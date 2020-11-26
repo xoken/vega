@@ -1047,7 +1047,10 @@ mineBlockFromCandidate = do
                         pftx = [PrefilledTx 0 cbase]
                         cb = CompactBlock (bh {bhNonce = nn}) (fromIntegral nn) sidl sids pfl pftx
                     liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb,top)
-                    liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash ++ " with work" ++ (show $ headerWork bh)
+                    liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash
+                                                                   ++ " with work " ++ (show $ headerWork bh)
+                                                                   ++ " and coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase)
+                                                                   ++ " and prev coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase')
                     broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
                     return $ Just $ cb
 
