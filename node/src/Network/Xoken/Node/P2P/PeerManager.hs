@@ -768,12 +768,18 @@ messageHandler peer (mm, ingss) = do
                                     InvBlock -> do
                                         cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
                                         case cmptblkm of
-                                            Just (cmptblk,_) -> sendCmptBlock cmptblk peer
+                                            Just (cmptblk,_) -> do
+                                                liftIO $ threadDelay (1000000 * 5)
+                                                debug lg $ LG.msg $ "sent CompactBlock: " ++ (show $ BlockHash invh)
+                                                sendCmptBlock cmptblk peer
                                             Nothing -> return ()
                                     InvCompactBlock -> do
                                         cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
                                         case cmptblkm of
-                                            Just (cmptblk,_) -> sendCmptBlock cmptblk peer
+                                            Just (cmptblk,_) -> do
+                                                liftIO $ threadDelay (1000000 * 5)
+                                                debug lg $ LG.msg $ "sent CompactBlock: " ++ (show $ BlockHash invh)
+                                                sendCmptBlock cmptblk peer
                                             Nothing -> return ()
                                     InvTx -> do
                                         return ()) gd
@@ -799,9 +805,7 @@ messageHandler peer (mm, ingss) = do
                                         liftIO $ print $ "MGetBlockTxns: candidateBlock doesn't exist; GetBlockTxns:" ++ show gbt
                                         return (0,[])
                     let txs = txFromHash <$> bt
-                    liftIO $ threadDelay (5 * 1000000)
                     sendBlockTxn (BlockTxns bh btl txs) peer
-                    liftIO $ threadDelay (5 * 1000000)
                     return $ msgType msg
                 _ -> do
                     liftIO $ print $ "Got message: " ++ show msg
@@ -1008,20 +1012,23 @@ mineBlockFromCandidate = do
     dbe <- getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         conn = rocksDB dbe
-    (bhash,_) <- fetchBestBlock conn net
+    (bhash,ht) <- fetchBestBlock conn net
     dag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
     case dag of
         Nothing -> return Nothing
         Just dag' -> do
             top <-liftIO $ DAG.getPrimaryTopologicalSorted dag'
-            if L.null top
+            ct <- liftIO getPOSIXTime
+            cbase' <- liftIO $ readIORef (coinbasetx bp2pEnv)
+            if L.null top || cbase' == Nothing
                 then do
                     liftIO $ print $ "Mined cmptblk (dag empty over): " ++ show bhash
                     return Nothing
                 else do
-                    ct <- liftIO getPOSIXTime
-                    let TxHash hh = head top
-                        bh = BlockHeader 0x20000000 bhash (hashPair hh hh) (fromIntegral $ floor ct) 0x207fffff (1) -- BlockHeader
+                    let cbase = makeCoinbaseTx $ fromIntegral $ ht + 1
+                        TxHash hh = txHash $ cbase
+                    let TxHash hh' = head top
+                        bh = BlockHeader 0x20000000 bhash (hashPair hh hh') (fromIntegral $ floor ct) 0x207fffff (1) -- BlockHeader
                         (bhsh@(BlockHash bhsh'), nn) = generateHeaderHash net bh
                         sidl = fromIntegral $ L.length top -- shortIds length
                         keyhash = sha256 $ DS.encode bhash `C.append` DS.encode nn
@@ -1036,8 +1043,8 @@ mineBlockFromCandidate = do
                                 Right a -> a
                         skey = SipKey k0 k1
                         sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ DS.encode txid in val) top -- shortIds
-                        pfl = 0
-                        pftx = []
+                        pfl = 1
+                        pftx = [PrefilledTx 0 cbase]
                         cb = CompactBlock (bh {bhNonce = nn}) (fromIntegral nn) sidl sids pfl pftx
                     liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb,top)
                     liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash ++ " with work" ++ (show $ headerWork bh)
@@ -1048,3 +1055,4 @@ generateHeaderHash :: Network -> BlockHeader -> (BlockHash, Word32)
 generateHeaderHash net hdr = if isValidPOW net hdr
                                 then (headerHash hdr, bhNonce hdr)
                                 else generateHeaderHash net (hdr {bhNonce = (bhNonce hdr + 1)})
+    

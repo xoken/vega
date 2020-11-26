@@ -25,6 +25,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
 import Data.Hashable
+import Data.IORef
 import Data.Int
 import qualified Data.Map.Strict as M
 import Data.Sequence
@@ -101,6 +102,7 @@ data BitcoinP2P =
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
+        , coinbasetx :: !(IORef (Maybe Tx))
         }
 
 class HasBitcoinP2P m where

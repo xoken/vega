@@ -713,6 +713,12 @@ processCompactBlock cmpct peer = do
     bp2pEnv <- getBitcoinP2P
     let bhash = headerHash $ cbHeader cmpct
     debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    if cbPrefilledTxnLength cmpct > 0 
+        then do
+            let cb = pfTx $ head $ cbPrefilledTxns cmpct
+            liftIO $ writeIORef (coinbasetx bp2pEnv) $ Just cb
+        else
+            return ()
     --
     let keyhash = sha256 $ S.encode bhash `C.append` S.encode (cbNonce cmpct)
         bs = S.encode keyhash
