@@ -25,6 +25,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
 import Data.Hashable
+import Data.IORef
 import Data.Int
 import qualified Data.Map.Strict as M
 import Data.Sequence
@@ -94,13 +95,14 @@ data BitcoinP2P =
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
         , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64))
-        , compactBlocks :: !(TSH.TSHashTable BlockHash CompactBlock)
+        , compactBlocks :: !(TSH.TSHashTable BlockHash (CompactBlock, [TxHash]))
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
         , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( SipKey 
                                                                      , Seq Word64
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
+        , coinbasetx :: !(IORef (Maybe Tx))
         }
 
 class HasBitcoinP2P m where

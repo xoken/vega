@@ -715,6 +715,12 @@ processCompactBlock cmpct peer = do
     bp2pEnv <- getBitcoinP2P
     let bhash = headerHash $ cbHeader cmpct
     debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    if cbPrefilledTxnLength cmpct > 0 
+        then do
+            let cb = pfTx $ head $ cbPrefilledTxns cmpct
+            liftIO $ writeIORef (coinbasetx bp2pEnv) $ Just cb
+        else
+            return ()
     --
     let keyhash = sha256 $ S.encode bhash `C.append` S.encode (cbNonce cmpct)
         bs = S.encode keyhash
@@ -763,14 +769,15 @@ processCompactBlock cmpct peer = do
                                  Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+)
                                  Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+))
                 mpShortTxIDList
-            lastIndex <- liftIO $ newIORef 0
-            mtxIndexes <-
-                mapM
-                    (\(__, indx) -> do
-                         prev <- liftIO $ readIORef lastIndex
-                         liftIO $ writeIORef lastIndex indx
-                         return $ indx - prev)
-                    missingTxns
+            --    lastIndex <- liftIO $ newIORef 0
+            --    mtxIndexes <-
+            --        mapM
+            --            (\(__, indx) -> do
+            --                prev <- liftIO $ readIORef lastIndex
+            --                liftIO $ writeIORef lastIndex indx
+            --                return $ indx - prev)
+            --            missingTxns
+            let mtxIndexes = map snd missingTxns
             let gbtxn = GetBlockTxns bhash (fromIntegral $ L.length mtxIndexes) mtxIndexes
             sendRequestMessages peer $ MGetBlockTxns gbtxn
             --
@@ -798,7 +805,8 @@ processBlockTransactions blockTxns = do
         txhashes = txHash <$> (btTransactions blockTxns)
         conn = rocksDB dbe
     (bhash',_) <- fetchBestBlock conn net
-    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    debug lg $ LG.msg ("processing Block Transactions! " ++ show bhash)
+    debug lg $ LG.msg ("processing Block Transactions! " ++ show blockTxns)
     S.drain $
         aheadly $
         S.fromList (btTransactions blockTxns) & S.mapM (processDeltaTx bhash) &
@@ -831,6 +839,7 @@ processBlockTransactions blockTxns = do
                                                   Nothing -> throw KeyValueDBInsertException -- stop not topologically sorted
                                           )
                                          edgs
+                                 Nothing -> return ()
                              liftIO $ TSH.insert validator (txHash $ pfTx ptx) ()
                              cur <- liftIO $ readIORef pair
                              let (frag, rem) = SQ.splitAt (fromIntegral $ pfIndex ptx) cur
@@ -855,6 +864,7 @@ processBlockTransactions blockTxns = do
                                           Nothing -> return ())
                                  frag)
                         (cbpftxns)
+                Nothing -> return ()
     olddag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash'
     case olddag of
         Just dag -> do
@@ -932,3 +942,4 @@ newCandidateBlockChainTip = do
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 
 defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"
+
