@@ -86,6 +86,7 @@ import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Util (bsToInteger, integerToBS)
 import Numeric (showHex)
 import System.Logger as LG
@@ -112,5 +113,13 @@ goGetResource ::
 goGetResource msg net = do
     dbe <- getDB
     lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
     case rqMethod msg of
+        "GET_MINING_CANDIDATE" -> do
+            case rqParams msg of
+                GetMiningCandidateRequest provideCoinbaseTx -> do
+                    let cb = TSH.toList $ candidateBlocks $ bp2pEnv
+                    --              
+                    return $ RPCResponse 200 $ Right $ Just $ (GetMiningCandidateResp "" "" (Just "") 0 0 "" 0 0 [])
+                _ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_PARAMS Nothing
         _____ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_METHOD Nothing
