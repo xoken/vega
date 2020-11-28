@@ -310,47 +310,6 @@ pushHash (stateMap, res) nhash left right ht ind final =
             Just i -> snd $ M.elemAt i stateMap
             Nothing -> emptyMerkleNode
 
-updateMerkleSubTrees ::
-       DatabaseHandles
-    -> HashCompute
-    -> Hash256
-    -> Maybe Hash256
-    -> Maybe Hash256
-    -> Int8
-    -> Int8
-    -> Bool
-    -> IO (HashCompute)
-updateMerkleSubTrees dbe hashComp newhash left right ht ind final = do
-    eres <- try $ return $ pushHash hashComp newhash left right ht ind final
-    case eres of
-        Left MerkleTreeInvalidException -> do
-            print (" PushHash Invalid Merkle Leaves exception")
-            throw MerkleSubTreeDBInsertException
-        Right (state, res) -- = pushHash hashComp newhash left right ht ind final
-         -> do
-            if not $ L.null res
-                then do
-                    let (create, match) =
-                            L.partition
-                                (\x ->
-                                     case x of
-                                         (MerkleNode sib lft rht _) ->
-                                             if isJust sib && isJust lft && isJust rht
-                                                 then False
-                                                 else if isJust sib
-                                                          then True
-                                                          else throw MerkleTreeComputeException)
-                                (res)
-                    let finMatch =
-                            L.sortBy
-                                (\x y ->
-                                     if (leftChild x == node y) || (rightChild x == node y)
-                                         then GT
-                                         else LT)
-                                match
-                    return (state, [])
-                else return (state, res)
-
 resilientRead ::
        (HasLogger m, MonadBaseControl IO m, MonadIO m) => Socket -> BlockIngestState -> m (([Tx], LC.ByteString), Int64)
 resilientRead sock !blin = do
@@ -394,8 +353,6 @@ merkleTreeBuilder tque blockHash treeHt = do
     lg <- getLogger
     dbe <- getDB
     continue <- liftIO $ newIORef True
-    txPage <- liftIO $ newIORef []
-    txPageNum <- liftIO $ newIORef 1
     tv <- liftIO $ newIORef (M.empty, [])
     whileM_ (liftIO $ readIORef continue) $ do
         hcstate <- liftIO $ readIORef tv
@@ -408,17 +365,8 @@ merkleTreeBuilder tque blockHash treeHt = do
                 liftIO $ writeIORef continue False
                 liftIO $ MS.signal (maxTMTBuilderThreadLock p2pEnv)
             Right (txh, isLast) -> do
-                pg <- liftIO $ readIORef txPage
-                if (fromIntegral $ L.length pg) == 100
-                    then do
-                        pgn <- liftIO $ readIORef txPageNum
-                        --LA.async $ commitTxPage pg blockHash pgn
-                        liftIO $ writeIORef txPage [txh]
-                        liftIO $ writeIORef txPageNum (pgn + 1)
-                    else do
-                        liftIO $ modifyIORef' txPage (\x -> x ++ [txh])
                 res <-
-                    LE.try $ liftIO $ updateMerkleSubTrees dbe hcstate (getTxHash txh) Nothing Nothing treeHt 0 isLast
+                    LE.try $ return $ pushHash hcstate (getTxHash txh) Nothing Nothing treeHt 0 isLast
                 case res of
                     Right (hcs) -> do
                         liftIO $ writeIORef tv hcs
@@ -431,17 +379,6 @@ merkleTreeBuilder tque blockHash treeHt = do
                         liftIO $ MS.signal (maxTMTBuilderThreadLock p2pEnv)
                         -- do NOT delete queue here, merely end this thread
                         throw ee
-                when isLast $ do
-                    pg <- liftIO $ readIORef txPage
-                    if L.null pg
-                        then return ()
-                        else do
-                            pgn <- liftIO $ readIORef txPageNum
-                            --LA.async $ commitTxPage pg blockHash pgn
-                            return ()
-                    liftIO $ writeIORef continue False
-                    liftIO $ TSH.delete (merkleQueueMap p2pEnv) blockHash
-                    liftIO $ MS.signal (maxTMTBuilderThreadLock p2pEnv)
 
 readNextMessage ::
        (HasBitcoinP2P m, HasLogger m, HasDatabaseHandles m, MonadBaseControl IO m, MonadIO m)
