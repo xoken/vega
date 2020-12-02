@@ -12,9 +12,6 @@ module Network.Xoken.Node.P2P.PeerManager
     ( createSocket
     , setupSeedPeerConnection
     , mineBlockFromCandidate
-    , hashPair
-    , pushHash
-    , updateMerkleSubTrees
     , merkleBuilder
     ) where
 
@@ -383,88 +380,72 @@ merkleTreeBuilder tque blockHash treeHt = do
                         -- do NOT delete queue here, merely end this thread
                         throw ee
 
-merkleBuilder :: [Hash256] -> IO [Hash256]
-merkleBuilder [] = return []
-merkleBuilder txns = do
-    let th = computeTreeHeight $ L.length txns
+merkleBuilder :: [Hash256] -> [Hash256]
+merkleBuilder [] = []
+merkleBuilder txns =
+    let treeHeight = computeTreeHeight $ L.length txns
         firstTxn = (MerkleNode (Just $ head txns) Nothing Nothing True)
-        txnList = zip [1 ..] $ (\l -> (((\e -> (e, False)) <$> Prelude.init l) ++ [(Prelude.last l, True)])) txns
-        powList = (\n -> 2 ^ n) <$> [0 .. (L.length txns)]
-        emptyHcState = (M.empty, [])
-        runner hcState [] cmnode mbranch = return mbranch :: IO [MerkleNode]
-        runner hcState (t:ts) cmnode mbranch = do
-            res <- updateMerkleSubTrees hcState (fst $ snd t) Nothing Nothing th 0 (snd $ snd t)
-            let par = case snd res of
+        getBranch hcState [] currentNode merkleBranch = merkleBranch
+        getBranch hcState (t:ts) currentNode merkleBranch = do
+            let res =
+                    updateMerkleSubTrees
+                        hcState
+                        t
+                        Nothing
+                        Nothing
+                        treeHeight
+                        0
+                        (if ts == []
+                             then True
+                             else False)
+                parentNodes =
+                    case snd res of
                         Nothing -> []
-                        Just res' -> crawlUp' cmnode (snd res') []
-            let nextTn = if L.null par
-                            then cmnode
-                            else head par
-            runner (fst res) ts nextTn (par ++ mbranch)
-    finalHcState <- reverse <$> ((\m -> fromJust $ node m) <$>) <$> runner emptyHcState txnList firstTxn []
-    return $ if L.length txns > 1
-                then (head $ tail txns):(init finalHcState)
-                else finalHcState
+                        Just res' ->
+                            let getParents child merkleNodes parents =
+                                    let parent = searchParent child merkleNodes
+                                     in if parent == child
+                                            then parents
+                                            else getParents parent merkleNodes (parent : parents)
+                                  where
+                                    searchParent c li =
+                                        case L.find (\(MerkleNode _ l r _) -> (node c == l) || (node c == r)) li of
+                                            Just p -> p
+                                            Nothing -> c
+                             in getParents currentNode res' []
+                nextNode =
+                    if L.null parentNodes
+                        then currentNode
+                        else head parentNodes
+             in getBranch (fst res) ts nextNode (parentNodes ++ merkleBranch)
+        finalHcState = reverse $ (\m -> fromJust $ node m) <$> getBranch (M.empty, []) txns firstTxn []
+     in if L.length txns > 1
+            then (head $ tail txns) : (init finalHcState)
+            else finalHcState
 
-searchParent c li =
-    case L.find
-             (\parent@(MerkleNode p l r _) ->
-                  if (((node c) == l) || ((node c) == r))
-                      then True
-                      else False)
-             li of
-        Just p -> p
-        Nothing -> c
-
-crawlUp :: MerkleNode -> [MerkleNode] -> [MerkleNode] -> [MerkleNode]
-crawlUp child mnodes path =
-    if searchParent child mnodes == child
-        then path
-        else let parent = searchParent child mnodes
-              in crawlUp parent mnodes (parent : path)
-
-crawlUp' child mnodes path =
-    if searchPar child mnodes == child
-        then path
-        else crawlUp' parent mnodes (parent : path)
-  where
-    searchPar c li =
-        case L.find
-                 (\(MerkleNode p l r _) ->
-                      if (node c == l) || (node c == r)
-                          then True
-                          else False)
-                 li of
-            Just p -> p
-            Nothing -> c
-    parent = searchParent child mnodes
-
-updateMerkleSubTrees hashComp newHash left right treeHeight txIndex final = do
-    (state, res) <- return $ pushHash hashComp newHash left right treeHeight txIndex final
-    if not $ L.null res
-        then do
-            let (create, match) =
-                    L.partition
-                        (\x ->
-                             case x of
-                                 (MerkleNode sib lft rht _) ->
-                                     if isJust sib && isJust lft && isJust rht
-                                         then False
-                                         else if isJust sib
-                                                  then True
-                                                  else throw MerkleTreeComputeException)
-                        res
-            let finMatch =
-                    L.sortBy
-                        (\x y ->
-                             if (leftChild x == node y) || (rightChild x == node y)
-                                 then GT
-                                 else LT)
-                        match
-            if L.length create == 1 && L.null finMatch
-                then return ((state, []), Nothing)
-                else return ((state, []), Just (create, finMatch))
-        else return ((state, res), Nothing)
+updateMerkleSubTrees ::
+       HashCompute
+    -> Hash256
+    -> Maybe Hash256
+    -> Maybe Hash256
+    -> Int8
+    -> Int8
+    -> Bool
+    -> ((M.Map Int8 MerkleNode, [MerkleNode]), Maybe [MerkleNode])
+updateMerkleSubTrees hashComp newHash left right treeHeight txIndex final =
+    let (state, res) = pushHash hashComp newHash left right treeHeight txIndex final
+     in if not $ L.null res
+            then let finMatch =
+                         L.sortBy
+                             (\x y ->
+                                  if (leftChild x == node y) || (rightChild x == node y)
+                                      then GT
+                                      else LT)
+                             (L.filter (\(MerkleNode h l r _) -> isJust h && isJust l && isJust r) res)
+                  in if L.null finMatch
+                         then ((state, []), Nothing)
+                         else ((state, []), Just finMatch)
+            else ((state, res), Nothing)
 
 readNextMessage ::
        (HasBitcoinP2P m, HasLogger m, HasDatabaseHandles m, MonadBaseControl IO m, MonadIO m)
