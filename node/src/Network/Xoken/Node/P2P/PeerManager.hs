@@ -447,25 +447,13 @@ updateMerkleSubTrees hashComp newHash left right treeHeight txIndex final =
                          else ((state, []), Just finMatch)
             else ((state, res), Nothing)
 
-nextMerkleNodes :: HashCompute -> [Hash256] -> [MerkleNode] -> Int8 -> [MerkleNode]
-nextMerkleNodes hcState [] merkleBranch treeHeight = merkleBranch
-nextMerkleNodes hcState (t:ts) merkleBranch treeHeight = do
+nextMerkleNodes :: HashCompute -> [MerkleNode] -> Int8 -> [MerkleNode]
+nextMerkleNodes hashCompute merkleBranch treeHeight = do
     let currentNode = head $ merkleBranch
-        res =
-            updateMerkleSubTrees
-                hcState
-                t
-                Nothing
-                Nothing
-                treeHeight
-                0
-                (if ts == []
-                     then True
-                     else False)
         parentNodes =
-            case snd res of
-                Nothing -> []
-                Just res' ->
+            case (snd hashCompute) of
+                [] -> []
+                res' ->
                     let getParents child merkleNodes parents =
                             let parent = searchParent child merkleNodes
                              in if parent == child
@@ -477,10 +465,12 @@ nextMerkleNodes hcState (t:ts) merkleBranch treeHeight = do
                                     Just p -> p
                                     Nothing -> c
                      in getParents currentNode res' []
-     in nextMerkleNodes (fst res) ts (parentNodes ++ merkleBranch) treeHeight
+     in parentNodes ++ merkleBranch
 
-nextHcState :: HashCompute -> Hash256 -> Int8 -> Bool -> (M.Map Int8 MerkleNode, [MerkleNode])
-nextHcState hashComp newHash treeHeight final = pushHash hashComp newHash Nothing Nothing treeHeight 0 final
+updateHcState :: HashCompute -> [Hash256] -> Int8 -> [Bool] -> HashCompute
+updateHcState hashComp [] treeHeight _ = hashComp
+updateHcState hashComp (h:hs) treeHeight (f:fs) =
+    updateHcState (pushHash hashComp h Nothing Nothing treeHeight 0 f) hs treeHeight fs
 
 readNextMessage ::
        (HasBitcoinP2P m, HasLogger m, HasDatabaseHandles m, MonadBaseControl IO m, MonadIO m)
