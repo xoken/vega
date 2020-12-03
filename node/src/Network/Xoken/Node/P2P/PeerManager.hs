@@ -1028,29 +1028,34 @@ mineBlockFromCandidate = do
                     let cbase = makeCoinbaseTx $ fromIntegral $ ht + 1
                         TxHash hh = txHash $ cbase
                     let TxHash hh' = head top
-                        bh = BlockHeader 0x20000000 bhash (hashPair hh hh') (fromIntegral $ floor ct) 0x207fffff (1) -- BlockHeader
+                    --tx' <- liftIO $ TSH.lookup (unconfTxCache bp2pEnv) (TxHash hh')
+                    --case tx' of
+                    --    Nothing -> do
+                    --        liftIO $ print $ "Mined cmptblk (tx not in cache): " ++ show (TxHash hh')
+                    --        return Nothing
+                    --    Just tx -> do
+                    let bh = BlockHeader 0x20000000 bhash (hashPair hh hh') (fromIntegral $ floor ct) 0x207fffff (1) -- BlockHeader
                         (bhsh@(BlockHash bhsh'), nn) = generateHeaderHash net bh
-                        sidl = fromIntegral $ L.length top -- shortIds length
-                        keyhash = sha256 $ DS.encode bhash `C.append` DS.encode nn
-                        bs = DS.encode keyhash
-                        k0 =
-                            case runGet getWord64le bs of
-                                Left e -> Prelude.error e
-                                Right a -> a
-                        k1 =
-                            case runGet getWord64le $ B.drop 8 bs of
-                                Left e -> Prelude.error e
-                                Right a -> a
-                        skey = SipKey k0 k1
-                        sids = map (\txid -> let (SipHash val) = hashWith 2 4 skey $ DS.encode txid in val) top -- shortIds
+                        sidl = fromIntegral $ L.length $ top -- shortIds length
+                        skey = getCompactBlockSipKey bhash $ fromIntegral nn
                         pfl = 1
-                        pftx = [PrefilledTx 0 cbase]
+                        cbase'' = fromJust cbase'
+                        ourtxin = head $ txIn cbase
+                        newtxin' = fmap (\ti -> ti {scriptInput = scriptInput ourtxin}) $ txIn cbase''
+                        newcb = cbase'' {txIn = newtxin'}
+                        pftx = [PrefilledTx 0 $ newcb]
+                        (cbsid:sids) = map (\txid -> txHashToShortId' txid skey) $ (txHash newcb:top) -- shortIds
                         cb = CompactBlock (bh {bhNonce = nn}) (fromIntegral nn) sidl sids pfl pftx
                     liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb,top)
                     liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash
-                                                                   ++ " with work " ++ (show $ headerWork bh)
-                                                                   ++ " and coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase)
-                                                                   ++ " and prev coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase')
+                                                                ++ " with work " ++ (show $ headerWork bh)
+                                                                ++ " and coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase)
+                                                                ++ " and prev coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase')
+                                                                ++ " hash: " ++ (show $ txHash newcb)
+                                                                ++ " sid: " ++ (show $ cbsid)
+                    
+                    --peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
+                    --mapM_ (\bp -> if bpConnected bp then processCompactBlock cb bp else return ()) peerMap
                     broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
                     return $ Just $ cb
 

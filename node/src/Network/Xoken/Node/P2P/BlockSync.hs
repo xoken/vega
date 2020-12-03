@@ -712,7 +712,7 @@ processCompactBlock cmpct peer = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     let bhash = headerHash $ cbHeader cmpct
-    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash ++ "  " ++ show cmpct)
     if cbPrefilledTxnLength cmpct > 0 
         then do
             let cb = pfTx $ head $ cbPrefilledTxns cmpct
@@ -720,17 +720,7 @@ processCompactBlock cmpct peer = do
         else
             return ()
     --
-    let keyhash = sha256 $ S.encode bhash `C.append` S.encode (cbNonce cmpct)
-        bs = S.encode keyhash
-        k0 =
-            case runGet getWord64le bs of
-                Left e -> Prelude.error e
-                Right a -> a
-        k1 =
-            case runGet getWord64le $ B.drop 8 bs of
-                Left e -> Prelude.error e
-                Right a -> a
-        skey = SipKey k0 k1
+    let skey = getCompactBlockSipKey bhash (cbNonce cmpct)
     let cmpctTxLst = zip (cbShortIDs cmpct) [1 ..]
     cb <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
     case cb of
@@ -742,8 +732,7 @@ processCompactBlock cmpct peer = do
             let mpShortTxIDList =
                     map
                         (\(txid, rt) -> do
-                             let (SipHash val) = hashWith 2 4 skey $ S.encode txid
-                             (val, (txid, rt)))
+                             (txHashToShortId' txid skey, (txid, rt)))
                         mpTxLst
             let mpShortTxIDMap = HM.fromList mpShortTxIDList
             let (usedTxns, missingTxns) =
@@ -820,8 +809,7 @@ processBlockTransactions blockTxns = do
                 Just (skey, sids, cbpftxns, lkmap')
                     -- TODO: first insert blockTxns into `lkmap` we can find it subsequently
                  -> do
-                    let lkmap = HM.union lkmap' (HM.fromList $ fmap (\txh -> let (SipHash val) = hashWith 2 4 skey $ S.encode txh   
-                                                                                        in (val,(txh,Nothing))) txhashes) 
+                    let lkmap = HM.union lkmap' (HM.fromList $ fmap (\txh -> (txHashToShortId' txh skey,(txh,Nothing))) txhashes) 
                     pair <- liftIO $ newIORef sids
                     validator <- liftIO $ TSH.new 10
                     mapM_
