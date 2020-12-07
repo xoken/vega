@@ -102,7 +102,6 @@ data BitcoinP2P =
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
-        , coinbasetx :: !(IORef (Maybe Tx))
         }
 
 class HasBitcoinP2P m where

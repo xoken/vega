@@ -711,16 +711,11 @@ processCompactBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Compac
 processCompactBlock cmpct peer = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    let bhash = headerHash $ cbHeader cmpct
+    let bhdr = cbHeader cmpct
+        bhash = headerHash bhdr
     debug lg $ LG.msg ("processing Compact Block! " ++ show bhash ++ "  " ++ show cmpct)
-    if cbPrefilledTxnLength cmpct > 0 
-        then do
-            let cb = pfTx $ head $ cbPrefilledTxns cmpct
-            liftIO $ writeIORef (coinbasetx bp2pEnv) $ Just cb
-        else
-            return ()
     --
-    let skey = getCompactBlockSipKey bhash (cbNonce cmpct)
+    let skey = getCompactBlockSipKey bhdr (cbNonce cmpct)
     let cmpctTxLst = zip (cbShortIDs cmpct) [1 ..]
     cb <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
     case cb of
