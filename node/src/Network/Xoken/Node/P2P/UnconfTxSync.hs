@@ -209,6 +209,14 @@ processUnconfTransaction tx = do
         cf = rocksCF dbe'
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processUnconfTransaction: processing Unconf Tx " ++ show (txHash tx)
+    cftx <- liftIO $ TSH.lookup cf ("tx")
+    case cftx of
+        Just cftx' -> do
+            debug lg $ LG.msg $ "inserting tx " ++ show (txHash tx)
+            putDBCF conn cftx' (txHash tx) tx
+        Nothing -> do
+            debug lg $ LG.msg $ val "[dag] insert tx: Error: cf Nothing"
+            return () -- ideally should be unreachable
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
  --
@@ -263,7 +271,6 @@ processUnconfTransaction tx = do
             (inputs)
     -- insert UTXO/s
     cf' <- liftIO $ TSH.lookup cf ("outputs")
-    liftIO $ print $ "cf: " ++ show cf'
     ovs <-
         mapM
             (\(opt, oindex) -> do
