@@ -471,10 +471,11 @@ nextMerkleNodes hashCompute merkleBranch = do
                      in getParents currentNode res' []
      in parentNodes ++ merkleBranch
 
-updateHcState :: (HashCompute, Int8) -> [Hash256] -> (HashCompute, Int8)
-updateHcState (hashComp, txCount) [] = (hashComp, txCount)
-updateHcState (hashComp, txCount) (h:hs) =
-    updateHcState (pushHash hashComp h Nothing Nothing (computeTreeHeight $ fromIntegral txCount) 0 False, txCount) hs
+updateHcState :: (HashCompute, [MerkleNode], Int8) -> [Hash256] -> Bool -> (HashCompute, [MerkleNode], Int8)
+updateHcState (hashComp, sofar, txCount) [] isLast = (hashComp, sofar, txCount)
+updateHcState (hashComp, sofar, txCount) (h:hs) isLast =
+    let nextHcState = pushHash hashComp h Nothing Nothing (computeTreeHeight $ fromIntegral txCount) 0 isLast
+     in updateHcState (nextHcState, L.nub $ sofar ++ (snd nextHcState), txCount) hs isLast
 
 importTxHash :: String -> Hash256
 importTxHash = getTxHash . fromJust . hexToTxHash . T.pack
