@@ -13,6 +13,9 @@ module Network.Xoken.Node.P2P.PeerManager
     , setupSeedPeerConnection
     , mineBlockFromCandidate
     , merkleBuilder
+    , nextMerkleNodes
+    , updateHcState
+    , importTxHash
     ) where
 
 import qualified Codec.Serialise as CBOR
@@ -384,16 +387,17 @@ merkleBuilder :: [Hash256] -> [Hash256]
 merkleBuilder [] = []
 merkleBuilder txns =
     let treeHeight = computeTreeHeight $ L.length txns
+        txns' = zip [1 ..] txns
         firstTxn = (MerkleNode (Just $ head txns) Nothing Nothing True)
         getBranch hcState [] currentNode merkleBranch = merkleBranch
         getBranch hcState (t:ts) currentNode merkleBranch = do
             let res =
                     updateMerkleSubTrees
                         hcState
-                        t
+                        (snd t)
                         Nothing
                         Nothing
-                        treeHeight
+                        (computeTreeHeight $ fst t)
                         0
                         (if ts == []
                              then True
@@ -418,7 +422,7 @@ merkleBuilder txns =
                         then currentNode
                         else head parentNodes
              in getBranch (fst res) ts nextNode (parentNodes ++ merkleBranch)
-        finalHcState = reverse $ (\m -> fromJust $ node m) <$> getBranch (M.empty, []) txns firstTxn []
+        finalHcState = reverse $ (\m -> fromJust $ node m) <$> getBranch (M.empty, []) txns' firstTxn []
      in if L.length txns > 1
             then (head $ tail txns) : (init finalHcState)
             else finalHcState
@@ -447,8 +451,8 @@ updateMerkleSubTrees hashComp newHash left right treeHeight txIndex final =
                          else ((state, []), Just finMatch)
             else ((state, res), Nothing)
 
-nextMerkleNodes :: HashCompute -> [MerkleNode] -> Int8 -> [MerkleNode]
-nextMerkleNodes hashCompute merkleBranch treeHeight = do
+nextMerkleNodes :: HashCompute -> [MerkleNode] -> [MerkleNode]
+nextMerkleNodes hashCompute merkleBranch = do
     let currentNode = head $ merkleBranch
         parentNodes =
             case (snd hashCompute) of
@@ -467,10 +471,13 @@ nextMerkleNodes hashCompute merkleBranch treeHeight = do
                      in getParents currentNode res' []
      in parentNodes ++ merkleBranch
 
-updateHcState :: HashCompute -> [Hash256] -> Int8 -> [Bool] -> HashCompute
-updateHcState hashComp [] treeHeight _ = hashComp
-updateHcState hashComp (h:hs) treeHeight (f:fs) =
-    updateHcState (pushHash hashComp h Nothing Nothing treeHeight 0 f) hs treeHeight fs
+updateHcState :: (HashCompute, Int8) -> [Hash256] -> (HashCompute, Int8)
+updateHcState (hashComp, txCount) [] = (hashComp, txCount)
+updateHcState (hashComp, txCount) (h:hs) =
+    updateHcState (pushHash hashComp h Nothing Nothing (computeTreeHeight $ fromIntegral txCount) 0 False, txCount) hs
+
+importTxHash :: String -> Hash256
+importTxHash = getTxHash . fromJust . hexToTxHash . T.pack
 
 readNextMessage ::
        (HasBitcoinP2P m, HasLogger m, HasDatabaseHandles m, MonadBaseControl IO m, MonadIO m)
@@ -820,9 +827,13 @@ messageHandler peer (mm, ingss) = do
                     -- TODO: use blocklocator to send more than one header
                  -> do
                     cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) bh
-                    let ret = case cmptblkm of
-                                    Just (cmptblk,_) -> [(cbHeader cmptblk, VarInt $ fromIntegral $ cbShortIDsLength cmptblk + cbPrefilledTxnLength cmptblk)]
-                                    Nothing -> []
+                    let ret =
+                            case cmptblkm of
+                                Just (cmptblk, _) ->
+                                    [ ( cbHeader cmptblk
+                                      , VarInt $ fromIntegral $ cbShortIDsLength cmptblk + cbPrefilledTxnLength cmptblk)
+                                    ]
+                                Nothing -> []
                     sendRequestMessages peer $ MHeaders $ Headers ret
                     return $ msgType msg
                 MSendCompact _ -> do
@@ -830,13 +841,15 @@ messageHandler peer (mm, ingss) = do
                     return $ msgType msg
                 MGetBlockTxns gbt@(GetBlockTxns bh ln bi) -> do
                     cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) bh
-                    (btl,bt) <- case cmptblkm of
-                                    Just (cmptblk,txhs) -> do
-                                        liftIO $ print $ "MGetBlockTxns: txs:" ++ show txhs ++ " GetBlockTxns:" ++ show gbt
-                                        return (ln, fmap (\i -> txhs !! (fromIntegral $ i - 1)) bi)
-                                    Nothing -> do
-                                        liftIO $ print $ "MGetBlockTxns: candidateBlock doesn't exist; GetBlockTxns:" ++ show gbt
-                                        return (0,[])
+                    (btl, bt) <-
+                        case cmptblkm of
+                            Just (cmptblk, txhs) -> do
+                                liftIO $ print $ "MGetBlockTxns: txs:" ++ show txhs ++ " GetBlockTxns:" ++ show gbt
+                                return (ln, fmap (\i -> txhs !! (fromIntegral $ i - 1)) bi)
+                            Nothing -> do
+                                liftIO $
+                                    print $ "MGetBlockTxns: candidateBlock doesn't exist; GetBlockTxns:" ++ show gbt
+                                return (0, [])
                     txs' <- mapM (txFromHash conn cf) bt
                     let txs = catMaybes txs'
                         btls = fromIntegral $ L.length txs
@@ -1071,8 +1084,12 @@ mineBlockFromCandidate = do
                     liftIO $ print $ "Couldn't mine cmptblk (dag empty over): " ++ show bhash
                     return Nothing
                 else do
-                    let cbase = makeCoinbaseTx (fromIntegral $ ht + 1) (fromJust $ stringToAddr net "msedZ3WsLDsd97f2cPo26J5xU5ZjBgTExz") 1250000000
-                        txhashes = (txHash cbase:top)
+                    let cbase =
+                            makeCoinbaseTx
+                                (fromIntegral $ ht + 1)
+                                (fromJust $ stringToAddr net "msedZ3WsLDsd97f2cPo26J5xU5ZjBgTExz")
+                                1250000000
+                        txhashes = (txHash cbase : top)
                     --    TxHash hh = txHash $ cbase
                     --let TxHash hh' = head top
                     --tx' <- liftIO $ TSH.lookup (unconfTxCache bp2pEnv) (TxHash hh')
@@ -1081,7 +1098,14 @@ mineBlockFromCandidate = do
                     --        liftIO $ print $ "Mined cmptblk (tx not in cache): " ++ show (TxHash hh')
                     --        return Nothing
                     --    Just tx -> do
-                    let bh = BlockHeader 0x20000000 bhash (buildMerkleRoot txhashes) (fromIntegral $ floor ct) 0x207fffff (1) -- BlockHeader
+                    let bh =
+                            BlockHeader
+                                0x20000000
+                                bhash
+                                (buildMerkleRoot txhashes)
+                                (fromIntegral $ floor ct)
+                                0x207fffff
+                                (1) -- BlockHeader
                         (bhsh@(BlockHash bhsh'), nn) = generateHeaderHash net bh
                         sidl = fromIntegral $ L.length $ top -- shortIds length
                         skey = getCompactBlockSipKey bh $ fromIntegral nn
@@ -1093,13 +1117,20 @@ mineBlockFromCandidate = do
                         pftx = [PrefilledTx 0 $ cbase]
                         (cbsid:sids) = map (\txid -> txHashToShortId' txid skey) $ txhashes -- shortIds
                         cb = CompactBlock (bh {bhNonce = nn}) (fromIntegral nn) sidl sids pfl pftx
-                    liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb,top)
-                    liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash
-                                                                ++ " with work " ++ (show $ headerWork bh)
-                                                                ++ " and coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase)
+                    liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb, top)
+                    liftIO $
+                        print $
+                        "Mined cmptblk " ++
+                        show bhsh ++
+                        " over " ++
+                        show bhash ++
+                        " with work " ++
+                        (show $ headerWork bh) ++
+                        " and coinbase tx: " ++
+                        (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase)
                                                                 -- ++ " and prev coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase')
-                                                                ++ " hash: " ++ (show $ head $ txhashes)
-                                                                ++ " sid: " ++ (show $ cbsid)
+                         ++
+                        " hash: " ++ (show $ head $ txhashes) ++ " sid: " ++ (show $ cbsid)
                     --peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
                     --mapM_ (\bp -> if bpConnected bp then processCompactBlock cb bp else return ()) peerMap
                     broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
