@@ -348,3 +348,15 @@ sendMessage sock writeLock payload = do
             (\x -> do
                  LB.sendAll sock prefix
                  LB.sendAll sock payload)
+
+mkProvisionalBlockHash :: BlockHash -> BlockHash
+mkProvisionalBlockHash b = let bh = S.runGet S.get $ B.append (B.take 16 $ S.runPut $ S.put b) "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255"  :: Either String BlockHash
+                           in either (const b) (Prelude.id) bh
+
+isProvisionalBlockHash :: BlockHash -> Bool
+isProvisionalBlockHash = (== "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255") . (B.drop 16 . S.runPut . S.put)
+
+replaceProvisionals :: BlockHash -> [BlockHash] -> [BlockHash]
+replaceProvisionals bh [] = [bh]
+replaceProvisionals bh (pbh:bhs) | isProvisionalBlockHash pbh = (bh:filter (not . isProvisionalBlockHash) bhs)
+                                 | otherwise = pbh:(replaceProvisionals bh bhs)

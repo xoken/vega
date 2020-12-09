@@ -559,6 +559,7 @@ processConfTransaction tx bhash blkht txind = do
             (inputs)
     -- insert UTXO/s
     cf' <- liftIO $ TSH.lookup cf ("outputs")
+    let opCount = fromIntegral $ L.length outputs
     ovs <-
         mapM
             (\(opt, oindex) -> do
@@ -572,6 +573,7 @@ processConfTransaction tx bhash blkht txind = do
                              outpoints
                              []
                              (fromIntegral $ outValue opt)
+                             opCount
                  res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
                  case res of
                      Right _ -> return (zut)

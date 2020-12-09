@@ -272,6 +272,7 @@ processUnconfTransaction tx = do
             (inputs)
     -- insert UTXO/s
     cf' <- liftIO $ TSH.lookup cf ("outputs")
+    let opCount = fromIntegral $ L.length outputs
     ovs <-
         mapM
             (\(opt, oindex) -> do
@@ -286,6 +287,7 @@ processUnconfTransaction tx = do
                              outpoints
                              []
                              (fromIntegral $ outValue opt)
+                             opCount
                  res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
                  case res of
                      Right _ -> return (zut)
@@ -427,8 +429,3 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
             dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)
             liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP
             return ()
-
-mkProvisionalBlockHash :: BlockHash -> BlockHash
--- TODO: Replace first 16 bytes with F
-mkProvisionalBlockHash b = let bh = S.runGet S.get $ B.append (B.take 16 $ S.runPut $ S.put b) "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255"  :: Either String BlockHash
-                           in either (const b) (Prelude.id) bh

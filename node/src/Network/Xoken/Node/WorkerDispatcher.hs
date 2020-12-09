@@ -554,7 +554,7 @@ updateOutpoint outPoint bhash bht = do
             case op of
                 Just zu -> do
                     debug lg $ LG.msg $ " ZUT entry found : " ++ (show zu)
-                    let bhashes = (bhash:zuBlockHash zu)
+                    let bhashes = replaceProvisionals bhash $ zuBlockHash zu
                         zu' = zu {zuBlockHash = bhashes, zuBlockHeight = bht}
                     liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) zu'
                     return $ True
@@ -615,6 +615,7 @@ spendZtxiUtxo mbh tsh ind zu =
                 , zuInputs = zuInputs zu
                 , zuSpending = (zuSpending zu) ++ [Spending bh tsh ind]
                 , zuSatoshiValue = zuSatoshiValue zu
+                , zuOpCount = zuOpCount zu
                 }
 
 unSpendZtxiUtxo :: BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
@@ -627,4 +628,5 @@ unSpendZtxiUtxo bh tsh ind zu =
         , zuInputs = zuInputs zu
         , zuSpending = L.delete (Spending bh tsh ind) (zuSpending zu)
         , zuSatoshiValue = zuSatoshiValue zu
+        , zuOpCount = zuOpCount zu
         }

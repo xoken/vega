@@ -1076,10 +1076,6 @@ generateHeaderHash net hdr = if isValidPOW net hdr
                                 then (headerHash hdr, bhNonce hdr)
                                 else generateHeaderHash net (hdr {bhNonce = (bhNonce hdr + 1)})
 
-mkProvisionalBlockHash :: BlockHash -> BlockHash
--- TODO: Replace first 16 bytes with F
-mkProvisionalBlockHash = id
-
 updateZtxiUtxo :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> BlockHash -> Word32 -> m ()
 updateZtxiUtxo txh bh ht = updateZtxiUtxoOutpoints (OutPoint txh 0) bh ht
 
@@ -1087,5 +1083,7 @@ updateZtxiUtxoOutpoints :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> Blo
 updateZtxiUtxoOutpoints op@(OutPoint txh ind) bh ht = do
     upd <- zRPCDispatchUpdateOutpoint op bh ht
     case upd of
-        True -> updateZtxiUtxoOutpoints (op {outPointIndex = ind + 1}) bh ht
+        True -> do
+            liftIO $ print $ "updateZtxiUtxoOutpoints: " ++ show (op,bh,ht)
+            updateZtxiUtxoOutpoints (op {outPointIndex = ind + 1}) bh ht
         False -> return ()
