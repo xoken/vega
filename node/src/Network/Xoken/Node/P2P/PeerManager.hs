@@ -12,9 +12,8 @@ module Network.Xoken.Node.P2P.PeerManager
     ( createSocket
     , setupSeedPeerConnection
     , mineBlockFromCandidate
-    , merkleBuilder
-    , nextMerkleNodes
-    , updateHcState
+    , computeMerkleBranch
+    , nextBcState
     , importTxHash
     ) where
 
@@ -346,116 +345,14 @@ resilientRead sock !blin = do
                     return (res, LC.length txbyt2)
         Right res -> return (res, LC.length txbyt)
 
-merkleTreeBuilder ::
-       (HasBitcoinP2P m, HasLogger m, HasDatabaseHandles m, MonadBaseControl IO m, MonadIO m)
-    => TQueue (TxHash, Bool)
-    -> BlockHash
-    -> Int8
-    -> m ()
-merkleTreeBuilder tque blockHash treeHt = do
-    p2pEnv <- getBitcoinP2P
-    lg <- getLogger
-    dbe <- getDB
-    continue <- liftIO $ newIORef True
-    tv <- liftIO $ newIORef (M.empty, [])
-    whileM_ (liftIO $ readIORef continue) $ do
-        hcstate <- liftIO $ readIORef tv
-        ores <- LA.race (liftIO $ threadDelay (1000000 * 60)) (liftIO $ atomically $ readTQueue tque)
-        case ores of
-            Left ()
-                -- likely the peer conn terminated, just end this thread
-                -- do NOT delete queue as another peer connection could have establised meanwhile
-             -> do
-                liftIO $ writeIORef continue False
-                liftIO $ MS.signal (maxTMTBuilderThreadLock p2pEnv)
-            Right (txh, isLast) -> do
-                res <- LE.try $ return $ pushHash hcstate (getTxHash txh) Nothing Nothing treeHt 0 isLast
-                case res of
-                    Right (hcs) -> do
-                        liftIO $ writeIORef tv hcs
-                    Left (ee :: SomeException) -> do
-                        err lg $
-                            LG.msg
-                                ("[ERROR] Quit building TMT. FATAL Bug! (1) " ++
-                                 show ee ++ " | " ++ show (getTxHash txh))
-                        liftIO $ writeIORef continue False
-                        liftIO $ MS.signal (maxTMTBuilderThreadLock p2pEnv)
-                        -- do NOT delete queue here, merely end this thread
-                        throw ee
-
-merkleBuilder :: [Hash256] -> [Hash256]
-merkleBuilder [] = []
-merkleBuilder txns =
-    let treeHeight = computeTreeHeight $ L.length txns
-        txns' = zip [1 ..] txns
-        firstTxn = (MerkleNode (Just $ head txns) Nothing Nothing True)
-        getBranch hcState [] currentNode merkleBranch = merkleBranch
-        getBranch hcState (t:ts) currentNode merkleBranch = do
-            let res =
-                    updateMerkleSubTrees
-                        hcState
-                        (snd t)
-                        Nothing
-                        Nothing
-                        (computeTreeHeight $ fst t)
-                        0
-                        (if ts == []
-                             then True
-                             else False)
-                parentNodes =
-                    case snd res of
-                        Nothing -> []
-                        Just res' ->
-                            let getParents child merkleNodes parents =
-                                    let parent = searchParent child merkleNodes
-                                     in if parent == child
-                                            then parents
-                                            else getParents parent merkleNodes (parent : parents)
-                                  where
-                                    searchParent c li =
-                                        case L.find (\(MerkleNode _ l r _) -> (node c == l) || (node c == r)) li of
-                                            Just p -> p
-                                            Nothing -> c
-                             in getParents currentNode res' []
-                nextNode =
-                    if L.null parentNodes
-                        then currentNode
-                        else head parentNodes
-             in getBranch (fst res) ts nextNode (parentNodes ++ merkleBranch)
-        finalHcState = reverse $ (\m -> fromJust $ node m) <$> getBranch (M.empty, []) txns' firstTxn []
-     in if L.length txns > 1
-            then (head $ tail txns) : (init finalHcState)
-            else finalHcState
-
-updateMerkleSubTrees ::
-       HashCompute
-    -> Hash256
-    -> Maybe Hash256
-    -> Maybe Hash256
-    -> Int8
-    -> Int8
-    -> Bool
-    -> ((M.Map Int8 MerkleNode, [MerkleNode]), Maybe [MerkleNode])
-updateMerkleSubTrees hashComp newHash left right treeHeight txIndex final =
-    let (state, res) = pushHash hashComp newHash left right treeHeight txIndex final
-     in if not $ L.null res
-            then let finMatch =
-                         L.sortBy
-                             (\x y ->
-                                  if (leftChild x == node y) || (rightChild x == node y)
-                                      then GT
-                                      else LT)
-                             (L.filter (\(MerkleNode h l r _) -> isJust h && isJust l && isJust r) res)
-                  in if L.null finMatch
-                         then ((state, []), Nothing)
-                         else ((state, []), Just finMatch)
-            else ((state, res), Nothing)
-
-nextMerkleNodes :: HashCompute -> [MerkleNode] -> [MerkleNode]
-nextMerkleNodes hashCompute merkleBranch = do
-    let currentNode = head $ merkleBranch
+computeMerkleBranch :: BranchComputeState -> MerkleNode -> [MerkleNode]
+computeMerkleBranch (BranchComputeState hcState _ Nothing) _ = []
+computeMerkleBranch (BranchComputeState hcState txCount (Just finalTxHash)) merkleBranch = do
+    let finalHcState =
+            pushHash hcState finalTxHash Nothing Nothing (computeTreeHeight $ (fromIntegral txCount) + 1) 0 True
+        currentNode = merkleBranch
         parentNodes =
-            case (snd hashCompute) of
+            case (snd finalHcState) of
                 [] -> []
                 res' ->
                     let getParents child merkleNodes parents =
@@ -469,13 +366,21 @@ nextMerkleNodes hashCompute merkleBranch = do
                                     Just p -> p
                                     Nothing -> c
                      in getParents currentNode res' []
-     in parentNodes ++ merkleBranch
+     in parentNodes ++ [merkleBranch]
 
-updateHcState :: (HashCompute, [MerkleNode], Int8) -> [Hash256] -> Bool -> (HashCompute, [MerkleNode], Int8)
-updateHcState (hashComp, sofar, txCount) [] isLast = (hashComp, sofar, txCount)
-updateHcState (hashComp, sofar, txCount) (h:hs) isLast =
-    let nextHcState = pushHash hashComp h Nothing Nothing (computeTreeHeight $ fromIntegral txCount) 0 isLast
-     in updateHcState (nextHcState, L.nub $ sofar ++ (snd nextHcState), txCount) hs isLast
+nextBcState :: BranchComputeState -> [Hash256] -> BranchComputeState
+nextBcState bcState [] = bcState
+nextBcState bcState txHashes =
+    let (hashesToProcess, finalHash) =
+            ( case lastTxn bcState of
+                  Just l -> l : (L.init txHashes)
+                  Nothing -> L.init txHashes
+            , Just $ L.last txHashes)
+        newTxCount = (txCount bcState) + (fromIntegral $ L.length hashesToProcess)
+        treeHeight = computeTreeHeight $ fromIntegral newTxCount
+        runPush hashComp [] = hashComp
+        runPush hashComp (h:hs) = runPush (pushHash hashComp h Nothing Nothing treeHeight 0 False) hs
+     in BranchComputeState (runPush (hashCompute bcState) hashesToProcess) newTxCount finalHash
 
 importTxHash :: String -> Hash256
 importTxHash = getTxHash . fromJust . hexToTxHash . T.pack
@@ -514,8 +419,8 @@ readNextMessage net sock ingss = do
                                         -- wait for TMT threads alloc
                                 liftIO $ MS.wait (maxTMTBuilderThreadLock p2pEnv)
                                 liftIO $ TSH.insert (merkleQueueMap p2pEnv) (biBlockHash $ bf) qq
-                                LA.async $
-                                    merkleTreeBuilder qq (biBlockHash $ bf) (computeTreeHeight $ binTxTotalCount blin)
+                                -- LA.async $
+                                --    merkleTreeBuilder qq (biBlockHash $ bf) (computeTreeHeight $ binTxTotalCount blin)
                                 return qq
                             else do
                                 valx <- liftIO $ TSH.lookup (merkleQueueMap p2pEnv) (biBlockHash $ bf)

@@ -110,6 +110,14 @@ data MerkleNode =
 
 type HashCompute = (M.Map Int8 (MerkleNode), [MerkleNode])
 
+data BranchComputeState =
+    BranchComputeState
+        { hashCompute :: HashCompute
+        , txCount :: Word32
+        , lastTxn :: Maybe Hash256
+        }
+    deriving (Show, Eq, Ord)
+
 emptyMerkleNode :: MerkleNode
 emptyMerkleNode = MerkleNode {node = Nothing, leftChild = Nothing, rightChild = Nothing, isLeft = False}
 
