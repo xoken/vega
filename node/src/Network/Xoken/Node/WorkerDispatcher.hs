@@ -169,6 +169,47 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
                     throw mex
 
+zRPCDispatchUpdateOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Bool)
+zRPCDispatchUpdateOutpoint outPoint bhash height = do
+    dbe' <- getDB
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    debug lg $ LG.msg $ val "[dag] zRPCDispatchUpdateOutpoint"
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    let opIndex = outPointIndex $ outPoint
+        lexKey = getTxShortHash (outPointHash outPoint) 8
+    worker <- getRemoteWorker lexKey GetOutpoint
+    case worker of
+        Nothing
+            -- liftIO $ print "zRPCDispatchGetOutpoint - SELF"
+         -> do
+            debug lg $ LG.msg $ val "[dag] zRPCDispatchGetOutpoint: Worker Nothing"
+            val <-
+                updateOutpoint
+                    outPoint
+                    bhash
+                    height
+            return val
+        Just wrk
+            -- liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
+         -> do
+            debug lg $ LG.msg $ "[dag] zRPCDispatchGetOutpoint: Worker: " ++ show wrk
+            let mparam = ZUpdateOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash height
+            resp <- zRPCRequestDispatcher mparam wrk
+            -- liftIO $ print $ "zRPCDispatchGetOutpoint - RESPONSE " ++ show resp
+            case zrsPayload resp of
+                Right spl -> do
+                    case spl of
+                        Just pl ->
+                            case pl of
+                                ZUpdateOutpointResp upd -> return upd
+                        Nothing -> throw InvalidMessageTypeException
+                Left er -> do
+                    err lg $ LG.msg $ "decoding Tx updation error resp : " ++ show er
+                    let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
+                    throw mex
+
+
 zRPCDispatchBlocksTxsOutputs :: (HasXokenNodeEnv env m, MonadIO m) => [BlockHash] -> m ()
 zRPCDispatchBlocksTxsOutputs blockHashes = do
     dbe' <- getDB
@@ -482,6 +523,50 @@ validateOutpoint outPoint predecessors curBlkHash wait = do
                                 "[dag] validateOutpoint: event received _available_: " ++
                                 (show $ txHashToHex $ outPointHash outPoint)
                             validateOutpoint outPoint predecessors curBlkHash 0
+        Left (e :: SomeException) -> do
+            err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
+            err lg $ LG.msg $ "[dag] validateOutpoint: Error: Fetching from " ++ (show cf) ++ ": " ++ show e
+            throw KeyValueDBInsertException
+
+updateOutpoint ::
+       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+    => OutPoint
+    -> BlockHash
+    -> Word32
+    -> m (Bool)
+updateOutpoint outPoint bhash bht = do
+    dbe <- getDB
+    let rkdb = rocksDB dbe
+        cfs = rocksCF dbe
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    debug lg $
+        LG.msg $
+        "[dag] updateOutpoint called for (Outpoint,blkHash,blkHeight) " ++
+        (show (outPoint, bhash, bht))
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        opindx = fromIntegral $ outPointIndex outPoint :: Word32
+        optxid = outPointHash outPoint
+    cf <- liftIO $ TSH.lookup cfs ("outputs")
+    res <- liftIO $ try $ getDBCF rkdb (fromJust cf) (optxid, opindx)
+    case res of
+        Right (op :: Maybe ZtxiUtxo) -> do
+            case op of
+                Just zu -> do
+                    debug lg $ LG.msg $ " ZUT entry found : " ++ (show zu)
+                    let bhashes = (bhash:zuBlockHash zu)
+                        zu' = zu {zuBlockHash = bhashes, zuBlockHeight = bht}
+                    liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) zu'
+                    return $ True
+                Nothing -> do
+                    debug lg $
+                        LG.msg $
+                        "Tx not found: " ++ (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
+                    debug lg $
+                        LG.msg $
+                        "[dag] validateOutpoint: Tx not found: " ++
+                        (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
+                    return $ False
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
             err lg $ LG.msg $ "[dag] validateOutpoint: Error: Fetching from " ++ (show cf) ++ ": " ++ show e
