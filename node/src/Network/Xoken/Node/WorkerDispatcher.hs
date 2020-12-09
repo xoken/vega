@@ -169,7 +169,7 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
                     throw mex
 
-zRPCDispatchUpdateOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Bool)
+zRPCDispatchUpdateOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Word32)
 zRPCDispatchUpdateOutpoint outPoint bhash height = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
@@ -533,7 +533,7 @@ updateOutpoint ::
     => OutPoint
     -> BlockHash
     -> Word32
-    -> m (Bool)
+    -> m (Word32)
 updateOutpoint outPoint bhash bht = do
     dbe <- getDB
     let rkdb = rocksDB dbe
@@ -557,7 +557,7 @@ updateOutpoint outPoint bhash bht = do
                     let bhashes = replaceProvisionals bhash $ zuBlockHash zu
                         zu' = zu {zuBlockHash = bhashes, zuBlockHeight = bht}
                     liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) zu'
-                    return $ True
+                    return $ zuOpCount zu
                 Nothing -> do
                     debug lg $
                         LG.msg $
@@ -566,7 +566,7 @@ updateOutpoint outPoint bhash bht = do
                         LG.msg $
                         "[dag] validateOutpoint: Tx not found: " ++
                         (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
-                    return $ False
+                    return (-1)
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
             err lg $ LG.msg $ "[dag] validateOutpoint: Error: Fetching from " ++ (show cf) ++ ": " ++ show e

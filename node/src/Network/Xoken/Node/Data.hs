@@ -183,7 +183,7 @@ data ZRPCResponseBody
           , zBlockHash :: ![BlockHash]
           }
     | ZUpdateOutpointResp
-          { zOutpointUpdated :: !Bool
+          { zOutpointUpdated :: !Word32
           }
     | ZUnspendOutpointResp
           {
