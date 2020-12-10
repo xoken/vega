@@ -1067,6 +1067,7 @@ mineBlockFromCandidate = do
                                                                 ++ " sid: " ++ (show $ cbsid)
                     --peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
                     --mapM_ (\bp -> if bpConnected bp then processCompactBlock cb bp else return ()) peerMap
+                    newCandidateBlock bhsh
                     broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
                     mapM_ (\x -> updateZtxiUtxo x bhsh $ fromIntegral $ ht + 1) top
                     return $ Just $ cb
@@ -1079,8 +1080,11 @@ generateHeaderHash net hdr = if isValidPOW net hdr
 updateZtxiUtxo :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> BlockHash -> Word32 -> m ()
 updateZtxiUtxo txh bh ht = do
     count <- zRPCDispatchUpdateOutpoint (OutPoint txh 0) bh ht
-    let inds = [1 .. (count - 1)]
-    LA.mapConcurrently_ (\i -> zRPCDispatchUpdateOutpoint (OutPoint txh i) bh ht) inds
+    if count <= 0
+        then return ()
+        else do
+            let inds = [1 .. (count - 1)]
+            LA.mapConcurrently_ (\i -> zRPCDispatchUpdateOutpoint (OutPoint txh i) bh ht) inds
 
 {-
 updateZtxiUtxo' :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> BlockHash -> Word32 -> m ()

@@ -566,7 +566,7 @@ updateOutpoint outPoint bhash bht = do
                         LG.msg $
                         "[dag] validateOutpoint: Tx not found: " ++
                         (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
-                    return (-1)
+                    return 0
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
             err lg $ LG.msg $ "[dag] validateOutpoint: Error: Fetching from " ++ (show cf) ++ ": " ++ show e
