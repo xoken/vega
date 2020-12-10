@@ -105,6 +105,7 @@ import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.Common
+import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Service.Chain
 import Network.Xoken.Node.WorkerDispatcher
@@ -726,11 +727,7 @@ processCompactBlock cmpct peer = do
         Just dag -> do
             debug lg $ LG.msg $ ("New Candidate Block Found over: " ++ show bhash)
             mpTxLst <- liftIO $ DAG.getTopologicalSortedForest dag
-            let mpShortTxIDList =
-                    map
-                        (\(txid, rt) -> do
-                             (txHashToShortId' txid skey, (txid, rt)))
-                        mpTxLst
+            let mpShortTxIDList = map (\(txid, rt) -> do (txHashToShortId' txid skey, (txid, rt))) mpTxLst
             let mpShortTxIDMap = HM.fromList mpShortTxIDList
             let (usedTxns, missingTxns) =
                     L.partition
@@ -750,8 +747,8 @@ processCompactBlock cmpct peer = do
                              -- TODO: lock the previous dag and insert into a NEW dag!!
                           -> do
                              case rt of
-                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+)
-                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+))
+                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+) nextBcState
+                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+) nextBcState)
                 mpShortTxIDList
             --    lastIndex <- liftIO $ newIORef 0
             --    mtxIndexes <-
@@ -773,7 +770,11 @@ processCompactBlock cmpct peer = do
                 S.maxThreads (maxTxProcessingThreads $ nodeConfig bp2pEnv)
             --
             let scb = SQ.fromList $ cbShortIDs cmpct
-            liftIO $ TSH.insert (prefilledShortIDsProcessing bp2pEnv) bhash (skey, scb, cbPrefilledTxns cmpct, mpShortTxIDMap)
+            liftIO $
+                TSH.insert
+                    (prefilledShortIDsProcessing bp2pEnv)
+                    bhash
+                    (skey, scb, cbPrefilledTxns cmpct, mpShortTxIDMap)
             --
             -- 
             return ()
@@ -788,7 +789,7 @@ processBlockTransactions blockTxns = do
         bhash = btBlockhash blockTxns
         txhashes = txHash <$> (btTransactions blockTxns)
         conn = rocksDB dbe
-    (bhash',_) <- fetchBestBlock conn net
+    (bhash', _) <- fetchBestBlock conn net
     debug lg $ LG.msg ("processing Block Transactions! " ++ show bhash)
     debug lg $ LG.msg ("processing Block Transactions! " ++ show blockTxns)
     S.drain $
@@ -806,14 +807,17 @@ processBlockTransactions blockTxns = do
                 Just (skey, sids, cbpftxns, lkmap')
                     -- TODO: first insert blockTxns into `lkmap` we can find it subsequently
                  -> do
-                    let lkmap = HM.union lkmap' (HM.fromList $ fmap (\txh -> (txHashToShortId' txh skey,(txh,Nothing))) txhashes) 
+                    let lkmap =
+                            HM.union
+                                lkmap'
+                                (HM.fromList $ fmap (\txh -> (txHashToShortId' txh skey, (txh, Nothing))) txhashes)
                     pair <- liftIO $ newIORef sids
                     validator <- liftIO $ TSH.new 10
                     mapM_
                         (\ptx -> do
                              edges <- liftIO $ DAG.getOrigEdges dag (txHash $ pfTx ptx)
                              case edges of
-                                 Just (edgs,_) -> do
+                                 Just (edgs, _) -> do
                                      mapM_
                                          (\ed -> do
                                               fd <- liftIO $ TSH.lookup validator ed
@@ -834,7 +838,7 @@ processBlockTransactions blockTxns = do
                                           Just (x, _) -> do
                                               edges <- liftIO $ DAG.getOrigEdges dag x
                                               case edges of
-                                                  Just (edgs,_) -> do
+                                                  Just (edgs, _) -> do
                                                       mapM_
                                                           (\ed -> do
                                                                fd <- liftIO $ TSH.lookup validator ed
@@ -851,7 +855,7 @@ processBlockTransactions blockTxns = do
     olddag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash'
     case olddag of
         Just dag -> do
-            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 16 16
+            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 emptyBranchComputeState 16 16 (+) (nextBcState)
             liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash newdag
         Nothing -> do
             newCandidateBlock bhash
@@ -910,7 +914,7 @@ sendCompactBlockGetData pr hash = do
 newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
 newCandidateBlock hash = do
     bp2pEnv <- getBitcoinP2P
-    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) 16 16
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 
 newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
@@ -921,8 +925,7 @@ newCandidateBlockChainTip = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         conn = rocksDB dbe'
     (hash, _) <- fetchBestBlock conn net
-    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) 16 16
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 
 defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"
-
