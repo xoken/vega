@@ -139,6 +139,27 @@ requestHandler sock writeLock msg = do
                             -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
                             --     ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
                             --     return $ successResp mid $ ZTraceOutputsResp ret
+                            ZUpdateOutpoint txId index bhash ht
+                                -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
+                             -> do
+                                zz <-
+                                    LE.try $
+                                        updateOutpoint
+                                            (OutPoint txId index)
+                                            bhash
+                                            ht
+                                case zz of
+                                    Right upd
+                                        -- liftIO $
+                                        --     print $
+                                        --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
+                                     -> do
+                                        return $ successResp mid $ ZUpdateOutpointResp upd
+                                    Left (e :: SomeException) -> do
+                                        return $ errorResp mid (show e)
+                            -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
+                            --     ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
+                            --     return $ successResp mid $ ZTraceOutputsResp ret
                             ZValidateTx bhash blkht txind tx
                                 -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
                              -> do

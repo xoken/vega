@@ -17,7 +17,7 @@ module Network.Xoken.Node.P2P.PeerManager
 import qualified Codec.Serialise as CBOR
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (mapConcurrently)
-import Control.Concurrent.Async.Lifted as LA (async, cancel, concurrently_, race, wait, waitAnyCatch, withAsync)
+import Control.Concurrent.Async.Lifted as LA (async, cancel, concurrently_, mapConcurrently_, race, wait, waitAnyCatch, withAsync)
 import qualified Control.Concurrent.MSem as MS
 import qualified Control.Concurrent.MSemN as MSN
 import Control.Concurrent.MVar
@@ -952,11 +952,35 @@ mineBlockFromCandidate = do
                         " hash: " ++ (show $ head $ txhashes) ++ " sid: " ++ (show $ cbsid)
                     --peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
                     --mapM_ (\bp -> if bpConnected bp then processCompactBlock cb bp else return ()) peerMap
+                    newCandidateBlock bhsh
                     broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
+                    mapM_ (\x -> updateZtxiUtxo x bhsh $ fromIntegral $ ht + 1) top
                     return $ Just $ cb
 
 generateHeaderHash :: Network -> BlockHeader -> (BlockHash, Word32)
-generateHeaderHash net hdr =
-    if isValidPOW net hdr
-        then (headerHash hdr, bhNonce hdr)
-        else generateHeaderHash net (hdr {bhNonce = (bhNonce hdr + 1)})
+generateHeaderHash net hdr = if isValidPOW net hdr
+                                then (headerHash hdr, bhNonce hdr)
+                                else generateHeaderHash net (hdr {bhNonce = (bhNonce hdr + 1)})
+
+updateZtxiUtxo :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> BlockHash -> Word32 -> m ()
+updateZtxiUtxo txh bh ht = do
+    count <- zRPCDispatchUpdateOutpoint (OutPoint txh 0) bh ht
+    if count <= 0
+        then return ()
+        else do
+            let inds = [1 .. (count - 1)]
+            LA.mapConcurrently_ (\i -> zRPCDispatchUpdateOutpoint (OutPoint txh i) bh ht) inds
+
+{-
+updateZtxiUtxo' :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> BlockHash -> Word32 -> m ()
+updateZtxiUtxo' txh bh ht = updateZtxiUtxoOutpoints (OutPoint txh 0) bh ht
+
+updateZtxiUtxoOutpoints :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m ()
+updateZtxiUtxoOutpoints op@(OutPoint txh ind) bh ht = do
+    upd <- zRPCDispatchUpdateOutpoint op bh ht
+    if upd == (-1)
+        then return ()
+        else do
+            liftIO $ print $ "updateZtxiUtxoOutpoints: " ++ show (op,bh,ht)
+            updateZtxiUtxoOutpoints (op {outPointIndex = ind + 1}) bh ht
+-}

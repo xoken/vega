@@ -94,6 +94,12 @@ data ZRPCRequestParam
           , goBlockHash :: !(Maybe BlockHash)
           , goPredecessors :: !(DS.Set BlockHash)
           }
+    | ZUpdateOutpoint -- C =>> C | C =>> M  | M =>> C 
+          { uoTxID :: !TxHash
+          , uoIndex :: !Word32
+          , uoBlockHash :: !BlockHash
+          , uoBlockHeight :: !Word32
+          }
     | ZUnspendOutpoint -- C =>> C | C =>> M |  M =>> C 
           { goTxID :: !TxHash
           , goIndex :: !Word32
@@ -174,6 +180,9 @@ data ZRPCResponseBody
           { zOutValue :: !Word64
           , zScriptOutput :: !ByteString
           , zBlockHash :: ![BlockHash]
+          }
+    | ZUpdateOutpointResp
+          { zOutpointUpdated :: !Word32
           }
     | ZUnspendOutpointResp
           {

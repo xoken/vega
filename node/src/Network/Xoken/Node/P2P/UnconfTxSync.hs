@@ -209,6 +209,7 @@ processUnconfTransaction tx = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let conn = rocksDB $ dbe'
         cf = rocksCF dbe'
+    (bsh,bht) <- fetchBestBlock conn net
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processUnconfTransaction: processing Unconf Tx " ++ show (txHash tx)
     cftx <- liftIO $ TSH.lookup cf ("tx")
@@ -247,7 +248,7 @@ processUnconfTransaction tx = do
                  if (outPointHash nullOutPoint) == opHash
                      then do
                          bb <- fetchBestBlock conn net
-                         let sval = fromIntegral $ computeSubsidy net $ (fromIntegral (snd bb) :: Word32) -- TODO: replace with correct  block height
+                         let sval = fromIntegral $ computeSubsidy net $ (fromIntegral bht :: Word32) -- TODO: replace with correct  block height
                          return (sval, (shortHash, [], opHash, opindx))
                      else do
                          debug lg $
@@ -273,6 +274,7 @@ processUnconfTransaction tx = do
             (inputs)
     -- insert UTXO/s
     cf' <- liftIO $ TSH.lookup cf ("outputs")
+    let opCount = fromIntegral $ L.length outputs
     ovs <-
         mapM
             (\(opt, oindex) -> do
@@ -282,11 +284,12 @@ processUnconfTransaction tx = do
                          ZtxiUtxo
                              (txHash tx)
                              (oindex)
-                             [] -- if already present then ADD to the existing list of BlockHashes
+                             [mkProvisionalBlockHash bsh] -- if already present then ADD to the existing list of BlockHashes
                              (fromIntegral 9999999)
                              outpoints
                              []
                              (fromIntegral $ outValue opt)
+                             opCount
                  res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
                  case res of
                      Right _ -> return (zut)

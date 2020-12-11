@@ -167,6 +167,7 @@ data ZtxiUtxo =
         , zuInputs :: ![(TxHash, Word32)]
         , zuSpending :: ![Spending]
         , zuSatoshiValue :: !Word64
+        , zuOpCount :: !Word32
         }
     deriving (Show, Eq, Ord, Generic, Serialise)
 
