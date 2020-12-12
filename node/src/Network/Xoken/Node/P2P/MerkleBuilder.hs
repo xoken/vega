@@ -146,9 +146,9 @@ nextBcState bcState txHashes =
         runPush hashComp (h:hs) = runPush (pushHash hashComp (getTxHash h) Nothing Nothing treeHeight 0 False) hs
      in BranchComputeState (runPush (hashCompute bcState) hashesToProcess) newTxCount finalHash
 
-computeMerkleBranch :: BranchComputeState -> MerkleNode -> [MerkleNode]
+computeMerkleBranch :: BranchComputeState -> TxHash -> [TxHash]
 computeMerkleBranch (BranchComputeState hcState _ Nothing) _ = []
-computeMerkleBranch (BranchComputeState hcState txCount (Just finalTxHash)) merkleBranch = do
+computeMerkleBranch (BranchComputeState hcState txCount (Just finalTxHash)) coinbaseTxHash = do
     let finalHcState =
             pushHash
                 hcState
@@ -158,7 +158,6 @@ computeMerkleBranch (BranchComputeState hcState txCount (Just finalTxHash)) merk
                 (computeTreeHeight $ (fromIntegral txCount) + 1)
                 0
                 True
-        currentNode = merkleBranch
         parentNodes =
             case (snd finalHcState) of
                 [] -> []
@@ -173,8 +172,8 @@ computeMerkleBranch (BranchComputeState hcState txCount (Just finalTxHash)) merk
                                 case L.find (\(MerkleNode _ l r _) -> (node c == l) || (node c == r)) li of
                                     Just p -> p
                                     Nothing -> c
-                     in getParents currentNode res' []
-     in parentNodes ++ [merkleBranch]
+                     in getParents (MerkleNode (Just $ getTxHash coinbaseTxHash) Nothing Nothing True) res' []
+     in L.init $ L.reverse $ (TxHash . fromJust . node) <$> parentNodes
 
 importTxHash :: String -> Hash256
 importTxHash = getTxHash . fromJust . hexToTxHash . T.pack
