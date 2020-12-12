@@ -16,6 +16,7 @@ module Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
     , consolidate
     , getTopologicalSortedForest
     , getPrimaryTopologicalSorted
+    , getCurrentPrimaryTopologicalState
     , getOrigEdges
     , rollOver
     ) where
@@ -93,11 +94,11 @@ getPrimaryTopologicalSorted dag = do
         Nothing -> return []
 
 getCurrentPrimaryTopologicalState ::
-       (Eq v, Hashable v, Ord v, Show v) => TSDirectedAcyclicGraph v a m -> IO ((Int, a, m))
+       (Eq v, Hashable v, Ord v, Show v) => TSDirectedAcyclicGraph v a m -> IO ((Int, a, m, Maybe v))
 getCurrentPrimaryTopologicalState dag = do
     primary <- TSH.lookup (topologicalSorted dag) (baseVertex dag)
     case primary of
-        Just (pdag, va, mp) -> return (SQ.length pdag, va, mp)
+        Just (pdag, va, mp) -> return (SQ.length pdag, va, mp, SQ.lookup 0 pdag)
 
 consolidate ::
        (Eq v, Hashable v, Ord v, Show v, Show a, Num a)

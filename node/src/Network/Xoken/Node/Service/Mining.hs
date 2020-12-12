@@ -10,7 +10,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE BangPatterns #-}
 
-module Network.Xoken.Node.XokenService where
+module Network.Xoken.Node.Service.Mining where
 
 import Arivi.P2P.MessageHandler.HandlerTypes (HasNetworkConfig, networkConfig)
 import Arivi.P2P.P2PEnv
@@ -21,6 +21,7 @@ import Arivi.P2P.PubSub.Types
 import Arivi.P2P.RPC.Env
 import Arivi.P2P.RPC.Fetch
 import Arivi.P2P.Types hiding (msgType)
+import Codec.Compression.GZip as GZ
 import Codec.Serialise
 import Conduit hiding (runResourceT)
 import Control.Applicative
@@ -47,8 +48,6 @@ import qualified Data.ByteString.Base16 as B16 (decode, encode)
 import Data.ByteString.Base64 as B64
 import Data.ByteString.Base64.Lazy as B64L
 import qualified Data.ByteString.Char8 as BC
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Data.ByteString.Short as BSS
 import qualified Data.ByteString.UTF8 as BSU (toString)
 import Data.Char
@@ -81,13 +80,14 @@ import Network.Xoken.Address.Base58
 import Network.Xoken.Block.Common
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
-import Network.Xoken.Node.P2P.BlockSync
+import Network.Xoken.Node.P2P.BlockSync (fetchBestSyncedBlock)
 import Network.Xoken.Node.P2P.Common
+import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
-import Network.Xoken.Node.Service.Mining
 import Network.Xoken.Util (bsToInteger, integerToBS)
 import Numeric (showHex)
 import System.Logger as LG
@@ -97,29 +97,15 @@ import Text.Read
 import Xoken
 import qualified Xoken.NodeConfig as NC
 
-data EncodingFormat
-    = CBOR
-    | JSON
-    | DEFAULT
-
-data EndPointConnection =
-    EndPointConnection
-        { requestQueue :: TQueue XDataReq
-        , context :: MVar TLS.Context
-        , encodingFormat :: IORef EncodingFormat
-        }
-
-goGetResource :: (HasXokenNodeEnv env m, MonadIO m) => RPCMessage -> Network -> m (RPCMessage)
-goGetResource msg net = do
-    dbe <- getDB
-    lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
-    case rqMethod msg of
-        "GET_MINING_CANDIDATE" -> do
-            case rqParams msg of
-                GetMiningCandidateRequest provideCoinbaseTx -> do
-                    getMiningCandidate net
-                    --              
-                    return $ RPCResponse 200 $ Right $ Just $ (GetMiningCandidateResp "" "" (Just "") 0 0 "" 0 0 [])
-                _ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_PARAMS Nothing
-        _____ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_METHOD Nothing
+getMiningCandidate :: (HasXokenNodeEnv env m, MonadIO m) => Network -> m ([TxHash])
+getMiningCandidate net = do
+    rkdb <- rocksDB <$> getDB
+    candidateBlocksTsh <- candidateBlocks <$> getBitcoinP2P
+    bestSyncedBlockHash <- fst <$> fetchBestSyncedBlock rkdb net
+    candidateBlock <- liftIO $ TSH.lookup candidateBlocksTsh bestSyncedBlockHash
+    case candidateBlock of
+        Nothing -> throw KeyValueDBLookupException
+        Just blk -> do
+            (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
+            let merkleBranch = computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
+            return merkleBranch
