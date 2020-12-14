@@ -118,8 +118,11 @@ goGetResource msg net = do
         "GET_MINING_CANDIDATE" -> do
             case rqParams msg of
                 GetMiningCandidateRequest provideCoinbaseTx -> do
-                    getMiningCandidate net
-                    --              
-                    return $ RPCResponse 200 $ Right $ Just $ (GetMiningCandidateResp "" "" (Just "") 0 0 "" 0 0 [])
+                    resp <- LE.try $ getMiningCandidate net
+                    case resp of
+                        Left (e :: SomeException) -> do
+                            err lg $ LG.msg $ "Error: GET_MINING_CANDIDATE: " <> (show e)
+                            return $ RPCResponse 400 $ Left $ RPCError INTERNAL_ERROR Nothing
+                        Right r' -> return $ RPCResponse 200 $ Right $ Just r'
                 _ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_PARAMS Nothing
         _____ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_METHOD Nothing

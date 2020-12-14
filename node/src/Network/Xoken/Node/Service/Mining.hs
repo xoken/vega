@@ -90,7 +90,7 @@ import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Transaction (makeCoinbaseTx)
-import Network.Xoken.Util (bsToInteger, integerToBS)
+import Network.Xoken.Util (encodeHex)
 import Numeric (showHex)
 import System.Logger as LG
 import System.Logger.Message
@@ -99,7 +99,7 @@ import Text.Read
 import Xoken
 import qualified Xoken.NodeConfig as NC
 
-getMiningCandidate :: (HasXokenNodeEnv env m, MonadIO m) => Network -> m (Tx, [TxHash])
+getMiningCandidate :: (HasXokenNodeEnv env m, MonadIO m) => Network -> m RPCResponseBody
 getMiningCandidate net = do
     bp2pEnv <- getBitcoinP2P
     nodeCfg <- nodeConfig <$> getBitcoinP2P
@@ -115,10 +115,23 @@ getMiningCandidate net = do
         Nothing -> throw KeyValueDBLookupException
         Just blk -> do
             (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
-            let merkleBranch = computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
+            let merkleBranch = txHashToHex <$> computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
                 coinbaseTx =
+                    DT.unpack $
+                    encodeHex $
+                    DS.encode $
                     makeCoinbaseTx
                         (fromIntegral $ bestSyncedBlockHeight)
                         coinbaseAddress
                         (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
-            return (coinbaseTx, merkleBranch)
+            return $
+                GetMiningCandidateResp
+                    ""
+                    ""
+                    coinbaseTx
+                    0
+                    0
+                    ""
+                    0
+                    (fromIntegral $ bestSyncedBlockHeight)
+                    (DT.unpack <$> merkleBranch)

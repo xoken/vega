@@ -284,17 +284,17 @@ data ErrorResponse =
 instance ToJSON ErrorResponse where
     toJSON (ErrorResponse c m d) = object ["code" .= c, "message" .= m, "data" .= d]
 
-data RPCReqParams =
-    GetMiningCandidateRequest
-        { gmcrProvideCoinbaseTx :: Maybe Bool
-        }
+data RPCReqParams
+    = GetMiningCandidateRequest
+          { gmcrProvideCoinbaseTx :: Maybe Bool
+          }
     | SubmitMiningSolutionRequest
-        { smsrId :: String
-        , smsrNonce :: Int32
-        , smsrCoinbase :: Maybe String
-        , smsrTime :: Maybe Int32
-        , smsrVersion :: Maybe Int32
-        }
+          { smsrId :: String
+          , smsrNonce :: Int32
+          , smsrCoinbase :: Maybe String
+          , smsrTime :: Maybe Int32
+          , smsrVersion :: Maybe Int32
+          }
     deriving (Generic, Show, Hashable, Eq, Serialise, ToJSON)
 
 instance FromJSON RPCReqParams where
@@ -307,13 +307,13 @@ data RPCResponseBody =
     GetMiningCandidateResp
         { rgmcId :: String
         , rgmcPrevHash :: String
-        , rgmcCoinbase :: Maybe String
+        , rgmcCoinbase :: String
         , rgmcVersion :: Int32
         , rgmcCoinbaseValue :: Int64
         , rgmcnBits :: String
         , rgmcTime :: Int32
         , rgmcHeight :: Int32
-        , rgmcMerkelProof :: [String]
+        , rgmcMerkleProof :: [String]
         }
     deriving (Generic, Show, Hashable, Eq, Serialise)
 
