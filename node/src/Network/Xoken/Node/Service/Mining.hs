@@ -78,6 +78,7 @@ import qualified Database.Bolt as BT
 import qualified Network.Simple.TCP.TLS as TLS
 import Network.Xoken.Address.Base58
 import Network.Xoken.Block.Common
+import Network.Xoken.Block.Headers (computeSubsidy)
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
@@ -88,6 +89,7 @@ import Network.Xoken.Node.P2P.BlockSync (fetchBestSyncedBlock)
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Transaction (makeCoinbaseTx)
 import Network.Xoken.Util (bsToInteger, integerToBS)
 import Numeric (showHex)
 import System.Logger as LG
@@ -97,15 +99,26 @@ import Text.Read
 import Xoken
 import qualified Xoken.NodeConfig as NC
 
-getMiningCandidate :: (HasXokenNodeEnv env m, MonadIO m) => Network -> m ([TxHash])
+getMiningCandidate :: (HasXokenNodeEnv env m, MonadIO m) => Network -> m (Tx, [TxHash])
 getMiningCandidate net = do
+    bp2pEnv <- getBitcoinP2P
+    nodeCfg <- nodeConfig <$> getBitcoinP2P
     rkdb <- rocksDB <$> getDB
-    candidateBlocksTsh <- candidateBlocks <$> getBitcoinP2P
-    bestSyncedBlockHash <- fst <$> fetchBestSyncedBlock rkdb net
+    (bestSyncedBlockHash, bestSyncedBlockHeight) <- fetchBestSyncedBlock rkdb net
+    let candidateBlocksTsh = candidateBlocks bp2pEnv
+    let coinbaseAddress =
+            case stringToAddr (NC.bitcoinNetwork nodeCfg) (DT.pack $ NC.coinbaseTxAddress nodeCfg) of
+                Nothing -> throw KeyValueDBLookupException
+                Just a -> a
     candidateBlock <- liftIO $ TSH.lookup candidateBlocksTsh bestSyncedBlockHash
     case candidateBlock of
         Nothing -> throw KeyValueDBLookupException
         Just blk -> do
             (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
             let merkleBranch = computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
-            return merkleBranch
+                coinbaseTx =
+                    makeCoinbaseTx
+                        (fromIntegral $ bestSyncedBlockHeight)
+                        coinbaseAddress
+                        (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
+            return (coinbaseTx, merkleBranch)
