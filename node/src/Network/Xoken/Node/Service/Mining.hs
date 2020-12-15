@@ -121,17 +121,17 @@ getMiningCandidate net = do
                     encodeHex $
                     DS.encode $
                     makeCoinbaseTx
-                        (fromIntegral $ bestSyncedBlockHeight)
+                        (1 + fromIntegral bestSyncedBlockHeight)
                         coinbaseAddress
                         (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
             return $
                 GetMiningCandidateResp
                     ""
-                    ""
+                    (DT.unpack $ blockHashToHex bestSyncedBlockHash)
                     coinbaseTx
                     0
                     0
                     ""
                     0
-                    (fromIntegral $ bestSyncedBlockHeight)
+                    (fromIntegral bestSyncedBlockHeight)
                     (DT.unpack <$> merkleBranch)
