@@ -181,6 +181,7 @@ data ZRPCResponseBody
           { zOutValue :: !Word64
           , zScriptOutput :: !ByteString
           , zBlockHash :: ![BlockHash]
+          , zBlockHeight :: !Word32
           }
     | ZUpdateOutpointResp
           { zOutpointUpdated :: !Word32

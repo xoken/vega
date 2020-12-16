@@ -51,6 +51,7 @@ import Network.Socket as NS
 import Network.Socket.ByteString.Lazy as SB (recv, sendAll)
 import qualified Network.TLS as NTLS
 import Network.Xoken.Block.Common
+import Network.Xoken.Block.Headers
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
@@ -97,6 +98,7 @@ requestHandler sock writeLock msg = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     let rkdb = rocksDB dbe'
+        net = bitcoinNetwork $ nodeConfig bp2pEnv
     resp <-
         case (deserialiseOrFail msg) of
             Right ms ->
@@ -128,12 +130,12 @@ requestHandler sock writeLock msg = do
                                                bhash
                                                (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                 case zz of
-                                    Right (val, bhs)
+                                    Right (val, bhs, ht)
                                         -- liftIO $
                                         --     print $
                                         --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
                                      -> do
-                                        return $ successResp mid $ ZGetOutpointResp val B.empty bhs
+                                        return $ successResp mid $ ZGetOutpointResp val B.empty bhs ht
                                     Left (e :: SomeException) -> do
                                         return $ errorResp mid (show e)
                             -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
@@ -220,11 +222,17 @@ requestHandler sock writeLock msg = do
                                                          err lg $
                                                              LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
                                                          throw KeyValueDBInsertException
-                                             liftIO $
-                                                 TSH.insert
-                                                     (blockTree bp2pEnv)
-                                                     (headerHash header)
-                                                     (fromIntegral blkht, header))
+                                             tm <- liftIO $ floor <$> getPOSIXTime
+                                             liftIO $ atomically $ modifyTVar'
+                                                                    (blockTree bp2pEnv)
+                                                                    (\hm -> case connectBlock hm net tm header of
+                                                                                    Right (hm',_) -> hm'
+                                                                                    Left _ -> hm))
+                                             --liftIO $
+                                             --    TSH.insert
+                                             --        (blockTree bp2pEnv)
+                                             --        (headerHash header)
+                                             --        (fromIntegral blkht, header))
                                         headers
                                 case res of
                                     Right () -> do

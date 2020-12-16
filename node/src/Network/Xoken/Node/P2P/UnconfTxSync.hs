@@ -245,7 +245,6 @@ processUnconfTransaction tx = do
                  let opindx = fromIntegral $ outPointIndex $ prevOutput b
                  if (outPointHash nullOutPoint) == opHash
                      then do
-                         bb <- fetchBestBlock conn net
                          let sval = fromIntegral $ computeSubsidy net $ (fromIntegral bht :: Word32) -- TODO: replace with correct  block height
                          return (sval, (shortHash, [], opHash, opindx))
                      else do
@@ -257,7 +256,7 @@ processUnconfTransaction tx = do
                          -- even if parent tx is missing, lets proceed hoping it will become available soon. 
                          -- this assumption is crucial for async ZTXI logic.    
                          case zz of
-                             Right (val, bsh) -> do
+                             Right (val, bsh, _) -> do
                                  debug lg $ LG.msg $ "[dag] processUnconfTransaction: zz: " ++ (show $ zz)
                                  return (val, (shortHash, bsh, opHash, opindx))
                              Left (e :: SomeException) -> do

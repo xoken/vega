@@ -124,7 +124,7 @@ zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
                     throw mex
     return ()
 
-zRPCDispatchGetOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> Maybe BlockHash -> m (Word64, [BlockHash])
+zRPCDispatchGetOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> Maybe BlockHash -> m (Word64, [BlockHash], Word32)
 zRPCDispatchGetOutpoint outPoint bhash = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
@@ -162,7 +162,7 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     case spl of
                         Just pl ->
                             case pl of
-                                ZGetOutpointResp val scr bsh -> return (val, bsh)
+                                ZGetOutpointResp val scr bsh ht -> return (val, bsh, ht)
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
@@ -460,7 +460,7 @@ validateOutpoint ::
     -> DS.Set BlockHash
     -> Maybe BlockHash
     -> Int
-    -> m (Word64, [BlockHash])
+    -> m (Word64, [BlockHash], Word32)
 validateOutpoint outPoint predecessors curBlkHash wait = do
     dbe <- getDB
     let rkdb = rocksDB dbe
@@ -491,7 +491,7 @@ validateOutpoint outPoint predecessors curBlkHash wait = do
                         -- eagerly mark spent, in the unlikely scenario script stack eval fails, mark unspent
                     let vx = spendZtxiUtxo curBlkHash (optxid) (opindx) zu
                     liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) vx
-                    return $ (zuSatoshiValue zu, zuBlockHash zu)
+                    return $ (zuSatoshiValue zu, zuBlockHash zu, zuBlockHeight zu)
                 Nothing -> do
                     debug lg $
                         LG.msg $
