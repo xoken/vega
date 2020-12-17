@@ -138,6 +138,7 @@ getMiningCandidate = do
             let currentBestBlock = nodeHeader $ memoryBestHeader hm
                 nextWorkRequired =
                     getNextWorkRequired hm net (fromJust $ parentBlock hm currentBestBlock) currentBestBlock
+            timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
             return $
                 GetMiningCandidateResp
                     (toString uuid)
@@ -146,6 +147,6 @@ getMiningCandidate = do
                     0
                     (fromIntegral satVal)
                     (fromIntegral nextWorkRequired)
-                    0
+                    (round timestamp)
                     (1 + fromIntegral bestSyncedBlockHeight)
                     (DT.unpack <$> merkleBranch)
