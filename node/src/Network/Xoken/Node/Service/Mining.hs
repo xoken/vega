@@ -72,6 +72,7 @@ import qualified Data.Text.Encoding as E
 import Data.Time.Calendar
 import Data.Time.Clock
 import Data.Time.Clock.POSIX
+import Data.UUID
 import Data.Word
 import Data.Yaml
 import qualified Database.Bolt as BT
@@ -99,6 +100,12 @@ import Text.Read
 import Xoken
 import qualified Xoken.NodeConfig as NC
 
+generateUuid :: IO UUID
+generateUuid =
+    getStdGen >>= \g -> do
+        let (uuid, g') = random g :: (UUID, StdGen)
+         in setStdGen g' >> return uuid
+
 getMiningCandidate :: (HasXokenNodeEnv env m, MonadIO m) => m RPCResponseBody
 getMiningCandidate = do
     bp2pEnv <- getBitcoinP2P
@@ -117,6 +124,8 @@ getMiningCandidate = do
         Nothing -> throw KeyValueDBLookupException
         Just blk -> do
             (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
+            -- persist generated UUID and txCount in memory
+            uuid <- liftIO generateUuid
             let merkleBranch = txHashToHex <$> computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
                 coinbaseTx =
                     DT.unpack $
@@ -131,7 +140,7 @@ getMiningCandidate = do
                     getNextWorkRequired hm net (fromJust $ parentBlock hm currentBestBlock) currentBestBlock
             return $
                 GetMiningCandidateResp
-                    ""
+                    (toString uuid)
                     (DT.unpack $ blockHashToHex bestSyncedBlockHash)
                     coinbaseTx
                     0

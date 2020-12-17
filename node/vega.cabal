@@ -135,6 +135,7 @@ executable vega
     , list-t
     , store
     , siphash
+    , uuid
     
   default-language: Haskell2010
 
