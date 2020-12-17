@@ -548,7 +548,7 @@ processConfTransaction tx bhash blkht txind = do
                      else do
                          zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ Just bhash
                          case zz of
-                             Right (val, _) -> do
+                             Right (val, _, _) -> do
                                  return (val, (shortHash, opindx))
                              Left (e :: SomeException) -> do
                                  err lg $

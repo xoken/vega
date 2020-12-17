@@ -287,7 +287,7 @@ defBitcoinP2P nodeCnf = do
     tbt <- MS.new $ maxTMTBuilderThreads nodeCnf
     iut <- newTVarIO False
     udc <- H.new
-    blktr <- TSH.new 1
+    blktr <- newTVarIO $ initialChain $ bitcoinNetwork nodeCnf
     wrkc <- newTVarIO []
     bsb <- newTVarIO Nothing
     ptxq <- TSH.new 1
