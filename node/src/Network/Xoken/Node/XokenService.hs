@@ -118,7 +118,7 @@ goGetResource msg net = do
         "GET_MINING_CANDIDATE" -> do
             case rqParams msg of
                 GetMiningCandidateRequest provideCoinbaseTx -> do
-                    resp <- LE.try $ getMiningCandidate net
+                    resp <- LE.try $ getMiningCandidate
                     case resp of
                         Left (e :: SomeException) -> do
                             err lg $ LG.msg $ "Error: GET_MINING_CANDIDATE: " <> (show e)

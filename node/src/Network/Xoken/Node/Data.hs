@@ -311,7 +311,7 @@ data RPCResponseBody =
         , rgmcCoinbase :: String
         , rgmcVersion :: Int32
         , rgmcCoinbaseValue :: Int64
-        , rgmcnBits :: String
+        , rgmcnBits :: Int32
         , rgmcTime :: Int32
         , rgmcHeight :: Int32
         , rgmcMerkleProof :: [String]

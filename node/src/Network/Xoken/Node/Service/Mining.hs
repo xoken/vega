@@ -99,14 +99,16 @@ import Text.Read
 import Xoken
 import qualified Xoken.NodeConfig as NC
 
-getMiningCandidate :: (HasXokenNodeEnv env m, MonadIO m) => Network -> m RPCResponseBody
-getMiningCandidate net = do
+getMiningCandidate :: (HasXokenNodeEnv env m, MonadIO m) => m RPCResponseBody
+getMiningCandidate = do
     bp2pEnv <- getBitcoinP2P
     nodeCfg <- nodeConfig <$> getBitcoinP2P
+    net <- (NC.bitcoinNetwork . nodeConfig) <$> getBitcoinP2P
     rkdb <- rocksDB <$> getDB
     (bestSyncedBlockHash, bestSyncedBlockHeight) <- fetchBestSyncedBlock rkdb net
+    hm <- (liftIO . readTVarIO) $ blockTree bp2pEnv
     let candidateBlocksTsh = candidateBlocks bp2pEnv
-    let coinbaseAddress =
+        coinbaseAddress =
             case stringToAddr (NC.bitcoinNetwork nodeCfg) (DT.pack $ NC.coinbaseTxAddress nodeCfg) of
                 Nothing -> throw KeyValueDBLookupException
                 Just a -> a
@@ -124,14 +126,17 @@ getMiningCandidate net = do
                         (1 + fromIntegral bestSyncedBlockHeight)
                         coinbaseAddress
                         (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
+            let currentBestBlock = nodeHeader $ memoryBestHeader hm
+                nextWorkRequired =
+                    getNextWorkRequired hm net (fromJust $ parentBlock hm currentBestBlock) currentBestBlock
             return $
                 GetMiningCandidateResp
                     ""
                     (DT.unpack $ blockHashToHex bestSyncedBlockHash)
                     coinbaseTx
                     0
+                    (fromIntegral satVal)
+                    (fromIntegral nextWorkRequired)
                     0
-                    ""
-                    0
-                    (fromIntegral bestSyncedBlockHeight)
+                    (1 + fromIntegral bestSyncedBlockHeight)
                     (DT.unpack <$> merkleBranch)
