@@ -119,14 +119,16 @@ getMiningCandidate = do
             case stringToAddr (NC.bitcoinNetwork nodeCfg) (DT.pack $ NC.coinbaseTxAddress nodeCfg) of
                 Nothing -> throw KeyValueDBLookupException
                 Just a -> a
+        cbByUuidTSH = candidatesByUuid bp2pEnv
     candidateBlock <- liftIO $ TSH.lookup candidateBlocksTsh bestSyncedBlockHash
     case candidateBlock of
         Nothing -> throw KeyValueDBLookupException
         Just blk -> do
             (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
-            -- persist generated UUID and txCount in memory
             uuid <- liftIO generateUuid
-            let merkleBranch = txHashToHex <$> computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
+            let (merkleBranch, merkleRoot) =
+                    (\(b, r) -> (txHashToHex <$> b, fromJust r)) $
+                    computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
                 coinbaseTx =
                     DT.unpack $
                     encodeHex $
@@ -135,6 +137,8 @@ getMiningCandidate = do
                         (1 + fromIntegral bestSyncedBlockHeight)
                         coinbaseAddress
                         (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
+            -- persist generated UUID and txCount in memory
+            liftIO $ TSH.insert cbByUuidTSH uuid (fromIntegral txCount, merkleRoot)
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
             let parentBlock = memoryBestHeader hm
                 candidateHeader = BlockHeader 0 (BlockHash "") "" (round timestamp) 0 0
@@ -144,7 +148,7 @@ getMiningCandidate = do
                     (toString uuid)
                     (DT.unpack $ blockHashToHex bestSyncedBlockHash)
                     (Just coinbaseTx)
-                    0
+                    0x37ffe000
                     (fromIntegral satVal)
                     (fromIntegral nextWorkRequired)
                     (round timestamp)

@@ -18,8 +18,8 @@ import Control.Concurrent.STM.TVar
 import Control.Monad.Catch
 import Control.Monad.Reader
 import Control.Monad.Trans.Control
-import Crypto.Secp256k1
 import Crypto.MAC.SipHash as SH
+import Crypto.Secp256k1
 import qualified Data.ByteString.Char8 as C
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
@@ -30,6 +30,7 @@ import qualified Data.Map.Strict as M
 import Data.Sequence
 import Data.Text
 import Data.Time.Clock
+import Data.UUID
 import Data.Word
 import qualified Database.RocksDB as R
 import GHC.Generics
@@ -98,10 +99,11 @@ data BitcoinP2P =
         , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64 BranchComputeState))
         , compactBlocks :: !(TSH.TSHashTable BlockHash (CompactBlock, [TxHash]))
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
-        , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( SipKey 
+        , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( SipKey
                                                                      , Seq Word64
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
+        , candidatesByUuid :: !(TSH.TSHashTable UUID (Int32, TxHash))
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
 

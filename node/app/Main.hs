@@ -170,7 +170,15 @@ defaultConfig = do
 conf :: R.Config
 conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = True, R.prefixLength = Just 3}
 
-cfStr = ["outputs", "ep_outputs_odd", "ep_outputs_even", "ep_transactions_odd", "ep_transactions_even", "transactions", "tx"]
+cfStr =
+    [ "outputs"
+    , "ep_outputs_odd"
+    , "ep_outputs_even"
+    , "ep_transactions_odd"
+    , "ep_transactions_even"
+    , "transactions"
+    , "tx"
+    ]
 
 columnFamilies = fmap (\x -> (x, conf)) cfStr
 
@@ -240,7 +248,10 @@ runSyncStatusChecker = do
             if isSynced
                 then "Yes"
                 else "No"
-        mn <- if isSynced then mineBlockFromCandidate else return Nothing
+        mn <-
+            if isSynced
+                then mineBlockFromCandidate
+                else return Nothing
         liftIO $ print $ "Sync status: " ++ show mn
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced
         liftIO $ threadDelay (60 * 1000000)
@@ -295,7 +306,33 @@ defBitcoinP2P nodeCnf = do
     cblk <- TSH.new 1
     cmpct <- TSH.new 1
     pftx <- TSH.new 10
-    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc blktr wrkc bsb ptxq cand cblk cmpct pftx
+    cbu <- TSH.new 1
+    return $
+        BitcoinP2P
+            nodeCnf
+            g
+            bp
+            mv
+            hl
+            st
+            tl
+            ep
+            tc
+            (rpf, rpc)
+            mq
+            ts
+            tbt
+            iut
+            udc
+            blktr
+            wrkc
+            bsb
+            ptxq
+            cand
+            cblk
+            cmpct
+            pftx
+            cbu
 
 initVega :: IO ()
 initVega = do
