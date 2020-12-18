@@ -135,10 +135,10 @@ getMiningCandidate = do
                         (1 + fromIntegral bestSyncedBlockHeight)
                         coinbaseAddress
                         (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
-            let currentBestBlock = nodeHeader $ memoryBestHeader hm
-                nextWorkRequired =
-                    getNextWorkRequired hm net (fromJust $ parentBlock hm currentBestBlock) currentBestBlock
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
+            let parentBlock = memoryBestHeader hm
+                candidateHeader = BlockHeader 0 (BlockHash "") "" (round timestamp) 0 0
+                nextWorkRequired = getNextWorkRequired hm net parentBlock candidateHeader
             return $
                 GetMiningCandidateResp
                     (toString uuid)
