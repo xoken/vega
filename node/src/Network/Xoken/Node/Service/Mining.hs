@@ -143,7 +143,7 @@ getMiningCandidate = do
                 GetMiningCandidateResp
                     (toString uuid)
                     (DT.unpack $ blockHashToHex bestSyncedBlockHash)
-                    coinbaseTx
+                    (Just coinbaseTx)
                     0
                     (fromIntegral satVal)
                     (fromIntegral nextWorkRequired)

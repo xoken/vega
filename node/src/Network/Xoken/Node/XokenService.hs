@@ -123,6 +123,13 @@ goGetResource msg net = do
                         Left (e :: SomeException) -> do
                             err lg $ LG.msg $ "Error: GET_MINING_CANDIDATE: " <> (show e)
                             return $ RPCResponse 400 $ Left $ RPCError INTERNAL_ERROR Nothing
-                        Right r' -> return $ RPCResponse 200 $ Right $ Just r'
+                        Right r' ->
+                            return $
+                            RPCResponse 200 $
+                            Right $
+                            Just $
+                            if fromMaybe False provideCoinbaseTx
+                                then r'
+                                else r' {rgmcCoinbase = Nothing}
                 _ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_PARAMS Nothing
         _____ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_METHOD Nothing

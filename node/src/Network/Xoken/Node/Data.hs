@@ -308,7 +308,7 @@ data RPCResponseBody =
     GetMiningCandidateResp
         { rgmcId :: String
         , rgmcPrevHash :: String
-        , rgmcCoinbase :: String
+        , rgmcCoinbase :: Maybe String
         , rgmcVersion :: Int32
         , rgmcCoinbaseValue :: Int64
         , rgmcnBits :: Int32
