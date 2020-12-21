@@ -244,7 +244,7 @@ processHeaders hdrs = do
                                              Nothing -> throw BlockHashNotFoundException
             let lenIndexed = L.length indexed
             debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)
-            mapConcurrently_
+            mapM_
                 (\y -> do
                      let header = fst $ snd y
                          hdrHash = blockHashToHex $ headerHash header
