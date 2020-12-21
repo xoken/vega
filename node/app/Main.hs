@@ -184,6 +184,9 @@ runThreads config nodeConf bp2p lg certPaths = do
         let cfZip = zip cfStr (R.columnFamilies rkdb)
             btcf = snd $ fromJust $ Data.List.find ((== "blocktree") . fst) cfZip
         hm <- repopulateBlockTree rkdb btcf
+        nh <- case hm of
+                Just h -> CMS.atomically $ swapTVar (blockTree bp2p) h
+                Nothing -> readTVarIO (blockTree bp2p) -- TODO: handled Nothing due to errors
         cfM <- TSH.fromList 1 $ cfZip
         let dbh = DatabaseHandles rkdb cfM
         let allegoryEnv = AllegoryEnv $ allegoryVendorSecretKey nodeConf
@@ -322,26 +325,29 @@ repopulateBlockTree rkdb cf = do
     print "Loading BlockTree from memory..."
     t1 <- getCurrentTime
     kv <- R.scanCF rkdb cf
-    t2 <- getCurrentTime
-    let kv' = DM.mapMaybe (\(k,v) -> case S.decode k of
-                                Right (k' :: ShortBlockHash) -> Just (k', BSS.toShort v)
-                                Left _ -> Nothing) kv
-    t3 <- getCurrentTime
-    bn <- getDB' rkdb ("blocknode" :: B.ByteString)
-    case bn of
-        Nothing -> return Nothing
-        Just bn' -> do
-            let bnd' = S.decode bn'
-            case bnd' of
-                Left e -> do
-                    print $ e
-                    return Nothing
-                Right bnd -> do
-                    print $ "Loaded " ++ show (length kv') ++ " entries"
-                    print $ "Started scan: " ++ show t1
-                    print $ "Stopped scan and started decode: " ++ show t2
-                    print $ "Stopped decode " ++ show t3
-                    return $ Just $ HeaderMemory (HM.fromList kv') bnd
+    if Data.List.null kv
+        then return Nothing
+        else do
+            t2 <- getCurrentTime
+            let kv' = DM.mapMaybe (\(k,v) -> case S.decode k of
+                                        Right (k' :: ShortBlockHash) -> Just (k', BSS.toShort v)
+                                        Left _ -> Nothing) kv
+            t3 <- getCurrentTime
+            bn <- getDB' rkdb ("blocknode" :: B.ByteString)
+            case bn of
+                Nothing -> return Nothing
+                Just bn' -> do
+                    let bnd' = S.decode bn'
+                    case bnd' of
+                        Left e -> do
+                            print $ e
+                            return Nothing
+                        Right bnd -> do
+                            print $ "Loaded " ++ show (length kv') ++ " entries"
+                            print $ "Started scan: " ++ show t1
+                            print $ "Stopped scan and started decode: " ++ show t2
+                            print $ "Stopped decode " ++ show t3
+                            return $ Just $ HeaderMemory (HM.fromList kv') bnd
 
 relaunch :: IO ()
 relaunch =
