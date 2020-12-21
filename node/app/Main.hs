@@ -12,6 +12,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 import Arivi.Crypto.Utils.PublicKey.Signature as ACUPS
 import Arivi.Crypto.Utils.PublicKey.Utils
@@ -57,18 +58,19 @@ import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Char8 as CL
+import qualified Data.ByteString.Short as BSS
 import Data.Char
 import Data.Default
 import Data.Default
 import Data.Function
 import Data.Functor.Identity
+import Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
 import Data.IORef
 import Data.Int
 import Data.List
 import Data.Map.Strict as M
-import Data.Maybe
-import Data.Maybe
+import Data.Maybe as DM
 import Data.Pool
 import Data.Serialize as Serialize
 import Data.Serialize as S
@@ -89,6 +91,7 @@ import qualified Database.Bolt as BT
 import qualified Database.RocksDB as R hiding (rocksDB)
 import Network.Simple.TCP
 import Network.Socket
+import Network.Xoken.Block.Headers
 import Network.Xoken.Node.AriviService
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
@@ -169,7 +172,7 @@ defaultConfig = do
 conf :: R.Config
 conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = True, R.prefixLength = Just 3}
 
-cfStr = ["outputs", "ep_outputs_odd", "ep_outputs_even", "ep_transactions_odd", "ep_transactions_even", "transactions", "tx"]
+cfStr = ["outputs", "ep_outputs_odd", "ep_outputs_even", "ep_transactions_odd", "ep_transactions_even", "transactions", "tx", "blocktree"]
 
 columnFamilies = fmap (\x -> (x, conf)) cfStr
 
@@ -178,7 +181,10 @@ withDBCF path = R.withDBCF path conf columnFamilies
 runThreads :: Config.Config -> NC.NodeConfig -> BitcoinP2P -> LG.Logger -> [FilePath] -> IO ()
 runThreads config nodeConf bp2p lg certPaths = do
     withDBCF "xdb" $ \rkdb -> do
-        cfM <- TSH.fromList 1 $ zip cfStr (R.columnFamilies rkdb)
+        let cfZip = zip cfStr (R.columnFamilies rkdb)
+            btcf = snd $ fromJust $ Data.List.find ((== "blocktree") . fst) cfZip
+        hm <- repopulateBlockTree rkdb btcf
+        cfM <- TSH.fromList 1 $ cfZip
         let dbh = DatabaseHandles rkdb cfM
         let allegoryEnv = AllegoryEnv $ allegoryVendorSecretKey nodeConf
         let xknEnv = XokenNodeEnv bp2p dbh lg allegoryEnv
@@ -283,7 +289,7 @@ defBitcoinP2P nodeCnf = do
     tbt <- MS.new $ maxTMTBuilderThreads nodeCnf
     iut <- newTVarIO False
     udc <- H.new
-    blktr <- newTVarIO $ initialChain $ bitcoinNetwork nodeCnf
+    blktr <- newTVarIO $ initialChain $ bitcoinNetwork nodeCnf  
     wrkc <- newTVarIO []
     bsb <- newTVarIO Nothing
     ptxq <- TSH.new 1
@@ -310,6 +316,32 @@ initVega = do
     unless (cfp && kfp && csfp) $ P.error "Error: missing TLS certificate or keyfile"
     -- launch node --
     runNode cnf nodeCnf bp2p [certFP, keyFP, csrFP]
+
+repopulateBlockTree :: R.DB -> R.ColumnFamily -> IO (Maybe HeaderMemory)
+repopulateBlockTree rkdb cf = do
+    print "Loading BlockTree from memory..."
+    t1 <- getCurrentTime
+    kv <- R.scanCF rkdb cf
+    t2 <- getCurrentTime
+    let kv' = DM.mapMaybe (\(k,v) -> case S.decode k of
+                                Right (k' :: ShortBlockHash) -> Just (k', BSS.toShort v)
+                                Left _ -> Nothing) kv
+    t3 <- getCurrentTime
+    bn <- getDB' rkdb ("blocknode" :: B.ByteString)
+    case bn of
+        Nothing -> return Nothing
+        Just bn' -> do
+            let bnd' = S.decode bn'
+            case bnd' of
+                Left e -> do
+                    print $ e
+                    return Nothing
+                Right bnd -> do
+                    print $ "Loaded " ++ show (length kv') ++ " entries"
+                    print $ "Started scan: " ++ show t1
+                    print $ "Stopped scan and started decode: " ++ show t2
+                    print $ "Stopped decode " ++ show t3
+                    return $ Just $ HeaderMemory (HM.fromList kv') bnd
 
 relaunch :: IO ()
 relaunch =

@@ -98,6 +98,7 @@ requestHandler sock writeLock msg = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     let rkdb = rocksDB dbe'
+        cf = rocksCF dbe'
         net = bitcoinNetwork $ nodeConfig bp2pEnv
     resp <-
         case (deserialiseOrFail msg) of
@@ -223,11 +224,21 @@ requestHandler sock writeLock msg = do
                                                              LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
                                                          throw KeyValueDBInsertException
                                              tm <- liftIO $ floor <$> getPOSIXTime
-                                             liftIO $ atomically $ modifyTVar'
+                                             bnm <- liftIO $ atomically $ stateTVar
                                                                     (blockTree bp2pEnv)
                                                                     (\hm -> case connectBlock hm net tm header of
-                                                                                    Right (hm',_) -> hm'
-                                                                                    Left _ -> hm))
+                                                                                    Right (hm',bn) -> (Just bn,hm')
+                                                                                    Left _ -> (Nothing,hm))
+                                             case bnm of
+                                                Just b -> do
+                                                    let sb = shortBlockHash $ headerHash $ nodeHeader b
+                                                        bne = S.encode b
+                                                    putDB rkdb ("blocknode" :: B.ByteString) bne
+                                                    cfhm' <- liftIO $ TSH.lookup cf "blocktree"
+                                                    case cfhm' of
+                                                        Just cf' -> putDBCF rkdb cf' sb bne
+                                                        Nothing -> return ()
+                                                Nothing -> return ())
                                              --liftIO $
                                              --    TSH.insert
                                              --        (blockTree bp2pEnv)
