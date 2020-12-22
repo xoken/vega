@@ -22,6 +22,7 @@ import Control.Error.Util (hush)
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
+import Control.Monad.Extra (mapMaybeM)
 import Control.Monad.Logger
 import Control.Monad.Reader
 import Control.Monad.STM
@@ -245,22 +246,10 @@ processHeaders hdrs = do
                                              Nothing -> throw BlockHashNotFoundException
             let lenIndexed = L.length indexed
             debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)
-            mapM_
+            bns <- mapMaybeM
                 (\y -> do
                      let header = fst $ snd y
-                         hdrHash = blockHashToHex $ headerHash header
                          blkht = fst y
-                     resp <-
-                         liftIO $
-                         try $ do
-                             putDB rkdb blkht (hdrHash, header)
-                             putDB rkdb hdrHash (blkht, header)
-                     case resp of
-                         Right () -> return ()
-                         Left (e :: SomeException) ->
-                             liftIO $ do
-                                 err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
-                                 throw KeyValueDBInsertException
                      tm <- liftIO $ floor <$> getPOSIXTime
                      bnm <- liftIO $ atomically
                                    $ stateTVar
@@ -270,13 +259,15 @@ processHeaders hdrs = do
                                                         Left _ -> (Nothing,hm))
                      case bnm of
                         Just b -> putHeaderMemoryElem b
-                        Nothing -> return ())
+                        Nothing -> return ()
+                     return $ (\x -> (x,(header,blkht))) <$> bnm)
                      --liftIO $ TSH.insert (blockTree bp2pEnv) (headerHash header) (fromIntegral blkht, header))
                 indexed
-            unless (L.null indexed) $ do
-                let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ fst z)) indexed
+            unless (L.null bns) $ do
+                let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ snd $ snd z)) bns
                 zRPCDispatchNotifyNewBlockHeader headers
-                markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
+                putBestBlockNode $ fst $ last bns
+                -- markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
                 liftIO $ putMVar (bestBlockUpdated bp2pEnv) True
         False -> do
             err lg $ LG.msg $ val "Error: BlocksNotChainedException"

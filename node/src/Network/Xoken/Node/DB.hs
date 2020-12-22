@@ -17,14 +17,18 @@ import Network.Xoken.Block.Common
 putHeaderMemoryElem :: (HasXokenNodeEnv env m, MonadIO m) => BlockNode -> m ()
 putHeaderMemoryElem b = do
     dbe' <- getDB
-    bp2pEnv <- getBitcoinP2P
     let rkdb = rocksDB dbe'
         cf = rocksCF dbe'
-        net = bitcoinNetwork $ nodeConfig bp2pEnv
         sb = S.encode $ shortBlockHash $ headerHash $ nodeHeader b
         bne = S.encode b
-    R.put rkdb ("blocknode" :: B.ByteString) bne
     cfhm' <- liftIO $ TSH.lookup cf "blocktree"
     case cfhm' of
         Just cf' -> R.putCF rkdb cf' sb bne
         Nothing -> return ()
+
+putBestBlockNode :: (HasXokenNodeEnv env m, MonadIO m) => BlockNode -> m ()
+putBestBlockNode b = do
+    dbe' <- getDB
+    let rkdb = rocksDB dbe'
+        bne = S.encode b
+    R.put rkdb ("blocknode" :: B.ByteString) bne
