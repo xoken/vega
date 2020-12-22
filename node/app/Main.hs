@@ -333,7 +333,7 @@ repopulateBlockTree rkdb cf = do
                                         Right (k' :: ShortBlockHash) -> Just (k', BSS.toShort v)
                                         Left _ -> Nothing) kv
             t3 <- getCurrentTime
-            bn <- getDB' rkdb ("blocknode" :: B.ByteString)
+            bn <- R.get rkdb ("blocknode" :: B.ByteString)
             case bn of
                 Nothing -> return Nothing
                 Just bn' -> do
@@ -343,10 +343,10 @@ repopulateBlockTree rkdb cf = do
                             print $ e
                             return Nothing
                         Right bnd -> do
-                            print $ "Loaded " ++ show (length kv') ++ " entries"
-                            print $ "Started scan: " ++ show t1
-                            print $ "Stopped scan and started decode: " ++ show t2
-                            print $ "Stopped decode " ++ show t3
+                            putStrLn $ "Loaded " ++ show (length kv') ++ " entries"
+                            putStrLn $ "Started scan: " ++ show t1
+                            putStrLn $ "Stopped scan and started decode: " ++ show t2
+                            putStrLn $ "Stopped decode " ++ show t3
                             return $ Just $ HeaderMemory (HM.fromList kv') bnd
 
 relaunch :: IO ()

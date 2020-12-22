@@ -59,6 +59,7 @@ import Network.Xoken.Network.Common -- (GetData(..), MessageCommand(..), Network
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.Common
@@ -268,14 +269,7 @@ processHeaders hdrs = do
                                                         Right (hm',bn) -> (Just bn,hm')
                                                         Left _ -> (Nothing,hm))
                      case bnm of
-                        Just b -> do
-                            let sb = shortBlockHash $ headerHash $ nodeHeader b
-                                bne = S.encode b
-                            putDB rkdb ("blocknode" :: B.ByteString) bne
-                            cfhm' <- liftIO $ TSH.lookup cf "blocktree"
-                            case cfhm' of
-                                Just cf' -> putDBCF rkdb cf' sb bne
-                                Nothing -> return ()
+                        Just b -> putHeaderMemoryElem b
                         Nothing -> return ())
                      --liftIO $ TSH.insert (blockTree bp2pEnv) (headerHash header) (fromIntegral blkht, header))
                 indexed

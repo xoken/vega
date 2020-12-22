@@ -54,6 +54,7 @@ import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.BlockSync
@@ -230,14 +231,7 @@ requestHandler sock writeLock msg = do
                                                                                     Right (hm',bn) -> (Just bn,hm')
                                                                                     Left _ -> (Nothing,hm))
                                              case bnm of
-                                                Just b -> do
-                                                    let sb = shortBlockHash $ headerHash $ nodeHeader b
-                                                        bne = S.encode b
-                                                    putDB rkdb ("blocknode" :: B.ByteString) bne
-                                                    cfhm' <- liftIO $ TSH.lookup cf "blocktree"
-                                                    case cfhm' of
-                                                        Just cf' -> putDBCF rkdb cf' sb bne
-                                                        Nothing -> return ()
+                                                Just b -> putHeaderMemoryElem b
                                                 Nothing -> return ())
                                              --liftIO $
                                              --    TSH.insert
