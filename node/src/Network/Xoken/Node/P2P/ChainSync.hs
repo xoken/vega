@@ -208,7 +208,8 @@ processHeaders hdrs = do
                 genesisHash = blockHashToHex $ headerHash $ getGenesisHeader net
                 rkdb = rocksDB dbe'
                 cf = rocksCF dbe'
-                headPrevHash = (blockHashToHex $ prevBlock $ fst $ head $ headersList hdrs)
+                headPrevBlockHash = prevBlock $ fst $ head $ headersList hdrs
+                headPrevHash = blockHashToHex headPrevBlockHash
                 hdrHash y = headerHash $ fst y
                 validate m = validateWithCheckPoint net (fromIntegral m) (hdrHash <$> (headersList hdrs))
             bbn <- fetchBestBlock
@@ -230,9 +231,9 @@ processHeaders hdrs = do
                                          debug lg $ LG.msg $ LG.val ("Does not match best-block, redundant Headers msg")
                                          return [] -- already synced
                                      else do
-                                         res <- fetchMatchBlockOffset rkdb headPrevHash
+                                         res <- fetchMatchBlockOffset rkdb headPrevBlockHash
                                          case res of
-                                             Just (matchBHash, matchBHt) -> do
+                                             Just matchBHt -> do
                                                  unless (validate matchBHt) $ throw InvalidBlocksException
                                                  if ((snd bb) >
                                                      (matchBHt + fromIntegral (L.length $ headersList hdrs) + 12) -- reorg limit of 12 blocks
@@ -257,9 +258,9 @@ processHeaders hdrs = do
                                                                      "Have synced blocks beyond point of re-org: synced @ " <>
                                                                      (show bestSynced) <>
                                                                      " versus point of re-org: " <>
-                                                                     (show $ (matchBHash, matchBHt)) <>
+                                                                     (show $ (headPrevHash, matchBHt)) <>
                                                                      ", re-syncing from thereon"
-                                                                 NXB.markBestSyncedBlock matchBHash $ fromIntegral matchBHt
+                                                                 NXB.markBestSyncedBlock headPrevHash $ fromIntegral matchBHt
                                                                  return reOrgDiff
                                                              else return reOrgDiff
                                              Nothing -> throw BlockHashNotFoundException
@@ -292,10 +293,11 @@ processHeaders hdrs = do
             err lg $ LG.msg $ val "Error: BlocksNotChainedException"
             throw BlocksNotChainedException
 
-fetchMatchBlockOffset :: (HasLogger m, MonadIO m) => R.DB -> Text -> m (Maybe (Text, BlockHeight))
-fetchMatchBlockOffset rkdb hashes = do
+fetchMatchBlockOffset :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> BlockHash -> m (Maybe BlockHeight)
+fetchMatchBlockOffset rkdb hash = do
     lg <- getLogger
-    x <- liftIO $ R.get rkdb (C.pack . T.unpack $ hashes)
-    case x of
+    bp2pEnv <- getBitcoinP2P
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    case getBlockHeaderMemory hash hm of
         Nothing -> return Nothing
-        Just h -> return $ Just $ (hashes, fromIntegral $ (read . T.unpack . DTE.decodeUtf8 $ h :: Int32))
+        Just bn -> return $ Just $ nodeHeight bn
