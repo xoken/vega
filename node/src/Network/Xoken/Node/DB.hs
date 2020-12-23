@@ -17,13 +17,10 @@ import Network.Xoken.Block.Common
 putHeaderMemoryElem :: (HasXokenNodeEnv env m, MonadIO m) => BlockNode -> m ()
 putHeaderMemoryElem b = do
     dbe' <- getDB
-    bp2pEnv <- getBitcoinP2P
     let rkdb = rocksDB dbe'
         cf = rocksCF dbe'
-        net = bitcoinNetwork $ nodeConfig bp2pEnv
         sb = S.encode $ shortBlockHash $ headerHash $ nodeHeader b
         bne = S.encode b
-    R.put rkdb ("blocknode" :: B.ByteString) bne
     cfhm' <- liftIO $ TSH.lookup cf "blocktree"
     case cfhm' of
         Just cf' -> R.putCF rkdb cf' sb bne
@@ -46,3 +43,25 @@ scanCF db cf = liftIO $ do
                                 _ -> sn
                   else
                       return []
+
+putBestBlockNode :: (HasXokenNodeEnv env m, MonadIO m) => BlockNode -> m ()
+putBestBlockNode b = do
+    dbe' <- getDB
+    let rkdb = rocksDB dbe'
+        bne = S.encode b
+    R.put rkdb ("blocknode" :: B.ByteString) bne
+
+
+getBestBlockNode :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe BlockNode)
+getBestBlockNode = do
+    dbe' <- getDB
+    let rkdb = rocksDB dbe'
+    return $ getBestBlockNodeIO rkdb
+    R.get rkdb ("blocknode" :: B.ByteString)
+
+getBestBlockNodeIO :: (MonadIO m) => R.DB -> m (Maybe BlockNode)
+getBestBlockNodeIO rkdb = do
+    bne <- R.get rkdb ("blocknode" :: B.ByteString)
+    return $ case S.decode <$> bne of
+                Just (Right b) -> b
+                _ -> Nothing

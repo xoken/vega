@@ -22,6 +22,7 @@ import Control.Error.Util (hush)
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
+import Control.Monad.Extra (mapMaybeM)
 import Control.Monad.Logger
 import Control.Monad.Reader
 import Control.Monad.STM
@@ -162,10 +163,12 @@ markBestBlock rkdb hash height = do
     R.put rkdb "best_chain_tip_height" $ C.pack $ show height
     --liftIO $ print "MARKED BEST BLOCK FROM ROCKS DB"
 
-getBlockLocator :: (HasLogger m, MonadIO m) => R.DB -> Network -> m ([BlockHash])
+getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> Network -> m ([BlockHash])
 getBlockLocator rkdb net = do
-    lg <- getLogger
-    debug lg $ LG.msg $ val "[rdb] fetchBestBlock from getBlockLocator - before"
+    bp2pEnv <- getBitcoinP2P
+    bn <- fetchBestBlock
+    return $ blockLocator (blockTree bp2pEnv) b
+    {-
     (hash, ht) <- fetchBestBlock rkdb net
     debug lg $ LG.msg $ val "[rdb] fetchBestBlock from getBlockLocator - after"
     let bl = L.insert ht $ filter (> 0) $ takeWhile (< ht) $ map (\x -> ht - (2 ^ x)) [0 .. 20] -- [1,2,4,8,16,32,64,... ,262144,524288,1048576]
@@ -186,6 +189,7 @@ getBlockLocator rkdb net = do
         Left (e :: SomeException) -> do
             debug lg $ LG.msg $ "[Error] getBlockLocator: " ++ show e
             throw e
+    -}
 
 processHeaders :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Headers -> m ()
 processHeaders hdrs = do
@@ -206,7 +210,8 @@ processHeaders hdrs = do
                 headPrevHash = (blockHashToHex $ prevBlock $ fst $ head $ headersList hdrs)
                 hdrHash y = headerHash $ fst y
                 validate m = validateWithCheckPoint net (fromIntegral m) (hdrHash <$> (headersList hdrs))
-            bb <- fetchBestBlock rkdb net
+            bbn <- fetchBestBlock rkdb net
+            let bb = (headerHash $ nodeHeader bbn, nodeHeight bbn)
             -- TODO: throw exception if it's a bitcoin cash block
             indexed <-
                 if (blockHashToHex $ fst bb) == genesisHash
@@ -259,22 +264,10 @@ processHeaders hdrs = do
                                              Nothing -> throw BlockHashNotFoundException
             let lenIndexed = L.length indexed
             debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)
-            mapM_
+            bns <- mapMaybeM
                 (\y -> do
                      let header = fst $ snd y
-                         hdrHash = blockHashToHex $ headerHash header
                          blkht = fst y
-                     resp <-
-                         liftIO $
-                         try $ do
-                             putDB rkdb blkht (hdrHash, header)
-                             putDB rkdb hdrHash (blkht, header)
-                     case resp of
-                         Right () -> return ()
-                         Left (e :: SomeException) ->
-                             liftIO $ do
-                                 err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
-                                 throw KeyValueDBInsertException
                      tm <- liftIO $ floor <$> getPOSIXTime
                      bnm <- liftIO $ atomically
                                    $ stateTVar
@@ -284,13 +277,15 @@ processHeaders hdrs = do
                                                         Left _ -> (Nothing,hm))
                      case bnm of
                         Just b -> putHeaderMemoryElem b
-                        Nothing -> return ())
+                        Nothing -> return ()
+                     return $ (\x -> (x,(header,blkht))) <$> bnm)
                      --liftIO $ TSH.insert (blockTree bp2pEnv) (headerHash header) (fromIntegral blkht, header))
                 indexed
-            unless (L.null indexed) $ do
-                let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ fst z)) indexed
+            unless (L.null bns) $ do
+                let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ snd $ snd z)) bns
                 zRPCDispatchNotifyNewBlockHeader headers
-                markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
+                putBestBlockNode $ fst $ last bns
+                -- markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
                 liftIO $ putMVar (bestBlockUpdated bp2pEnv) True
         False -> do
             err lg $ LG.msg $ val "Error: BlocksNotChainedException"

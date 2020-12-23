@@ -256,14 +256,14 @@ checkBlocksFullySynced net = do
     rkdb <- rocksDB <$> getDB
     bestBlock <- fetchBestBlock rkdb net
     bestSynced <- fetchBestSyncedBlock rkdb net
-    return $ bestBlock == bestSynced
+    return $ (headerHash $ nodeHeader bestBlock, nodeHeight bestBlock) == bestSynced
 
 checkBlocksFullySynced_ :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Int32
 checkBlocksFullySynced_ net = do
     rkdb <- rocksDB <$> getDB
     bestBlock <- fetchBestBlock rkdb net
     bestSynced <- fetchBestSyncedBlock rkdb net
-    return $ (snd bestBlock) - (snd bestSynced)
+    return $ (nodeHeight bestBlock) - (snd bestSynced)
 
 getBatchSizeMainnet :: Int32 -> Int32 -> [Int32]
 getBatchSizeMainnet peerCount n
@@ -791,7 +791,8 @@ processBlockTransactions blockTxns = do
         bhash = btBlockhash blockTxns
         txhashes = txHash <$> (btTransactions blockTxns)
         conn = rocksDB dbe
-    (bhash', _) <- fetchBestBlock conn net
+    bbn <- fetchBestBlock
+    let bhash' = headerHash $ nodeHeader bbn
     debug lg $ LG.msg ("processing Block Transactions! " ++ show bhash)
     debug lg $ LG.msg ("processing Block Transactions! " ++ show blockTxns)
     S.drain $
@@ -926,7 +927,8 @@ newCandidateBlockChainTip = do
     dbe' <- getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         conn = rocksDB dbe'
-    (hash, _) <- fetchBestBlock conn net
+    bbn <- fetchBestBlock
+    let hash = headerHash $ nodeHeader bbn
     tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 

@@ -238,11 +238,12 @@ splitList xs = (f 1 xs, f 0 xs)
   where
     f n a = map fst . filter (odd . snd) . zip a $ [n ..]
 
-fetchBestBlock :: (HasLogger m, MonadIO m) => R.DB -> Network -> m (BlockHash, Int32)
-fetchBestBlock rkdb net = do
-    lg <- getLogger
-    hash <- liftIO $ R.get rkdb "best_chain_tip_hash"
-    height <- liftIO $ R.get rkdb "best_chain_tip_height"
+fetchBestBlock :: (HasXokenNodeEnv env m, MonadIO m) => m (BlockNode)
+fetchBestBlock = do
+    bp2pEnv <- getBitcoinP2P
+    hm <- atomically $ readTVarIO (blockTree bp2pEnv)
+    return $ blockNode a
+    {-
     case (hash, height) of
         (Just hs, Just ht)
             -- liftIO $
@@ -256,6 +257,7 @@ fetchBestBlock rkdb net = do
         _ -> do
             debug lg $ LG.msg $ val "Bestblock is genesis."
             return ((headerHash $ getGenesisHeader net), 0)
+    -}
 
 -- getTxShortCode :: TxHash -> Word8
 -- getTxShortCode txh = sum $ map (\(x, p) -> (fromIntegral x) * (16 ^ p)) list

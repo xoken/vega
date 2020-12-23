@@ -367,21 +367,15 @@ repopulateBlockTree rkdb cf = do
                                         Right (k' :: ShortBlockHash) -> Just (k', BSS.toShort v)
                                         Left _ -> Nothing) kv
             t3 <- getCurrentTime
-            bn <- R.get rkdb ("blocknode" :: B.ByteString)
+            bn <- getBestBlockNodeIO rkdb
             case bn of
                 Nothing -> return Nothing
                 Just bn' -> do
-                    let bnd' = S.decode bn'
-                    case bnd' of
-                        Left e -> do
-                            print $ e
-                            return Nothing
-                        Right bnd -> do
-                            putStrLn $ "Loaded " ++ show (length kv') ++ " entries"
-                            putStrLn $ "Started scan: " ++ show t1
-                            putStrLn $ "Stopped scan and started decode: " ++ show t2
-                            putStrLn $ "Stopped decode " ++ show t3
-                            return $ Just $ HeaderMemory (HM.fromList kv') bnd
+                    putStrLn $ "Loaded " ++ show (length kv') ++ " entries"
+                    putStrLn $ "Started scan: " ++ show t1
+                    putStrLn $ "Stopped scan and started decode: " ++ show t2
+                    putStrLn $ "Stopped decode " ++ show t3
+                    return $ Just $ HeaderMemory (HM.fromList kv') bn'
 
 relaunch :: IO ()
 relaunch =

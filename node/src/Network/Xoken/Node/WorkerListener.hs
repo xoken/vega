@@ -211,19 +211,6 @@ requestHandler sock writeLock msg = do
                                     LE.try $
                                     mapM_
                                         (\(ZBlockHeader header blkht) -> do
-                                             let hdrHash = blockHashToHex $ headerHash header
-                                             resp <-
-                                                 liftIO $
-                                                 try $ do
-                                                     putDB rkdb blkht (hdrHash, header)
-                                                     putDB rkdb hdrHash (blkht, header)
-                                             case resp of
-                                                 Right () -> return ()
-                                                 Left (e :: SomeException) ->
-                                                     liftIO $ do
-                                                         err lg $
-                                                             LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
-                                                         throw KeyValueDBInsertException
                                              tm <- liftIO $ floor <$> getPOSIXTime
                                              bnm <- liftIO $ atomically $ stateTVar
                                                                     (blockTree bp2pEnv)
