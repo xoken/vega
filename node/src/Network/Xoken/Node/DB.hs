@@ -28,3 +28,21 @@ putHeaderMemoryElem b = do
     case cfhm' of
         Just cf' -> R.putCF rkdb cf' sb bne
         Nothing -> return ()
+
+scanCF db cf = liftIO $ do
+    R.withIterCF db cf $ \iter -> do
+        R.iterFirst iter
+        getNext iter
+    where --getNext :: Iterator -> m [(Maybe ByteString,Maybe ByteString)]
+          getNext i = do
+              valid <- R.iterValid i
+              if valid
+                  then do
+                    kv <- R.iterEntry i
+                    R.iterNext i
+                    sn <- getNext i
+                    return $ case kv of
+                                Just (k,v) -> ((k,v):sn)
+                                _ -> sn
+                  else
+                      return []

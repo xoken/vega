@@ -94,6 +94,7 @@ import Network.Socket
 import Network.Xoken.Block.Headers
 import Network.Xoken.Node.AriviService
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
@@ -357,7 +358,7 @@ repopulateBlockTree :: R.DB -> R.ColumnFamily -> IO (Maybe HeaderMemory)
 repopulateBlockTree rkdb cf = do
     print "Loading BlockTree from memory..."
     t1 <- getCurrentTime
-    kv <- R.scanCF rkdb cf
+    kv <- scanCF rkdb cf
     if Data.List.null kv
         then return Nothing
         else do
