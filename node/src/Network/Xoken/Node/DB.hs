@@ -32,3 +32,18 @@ putBestBlockNode b = do
     let rkdb = rocksDB dbe'
         bne = S.encode b
     R.put rkdb ("blocknode" :: B.ByteString) bne
+
+
+getBestBlockNode :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe BlockNode)
+getBestBlockNode = do
+    dbe' <- getDB
+    let rkdb = rocksDB dbe'
+    return $ getBestBlockNodeIO rkdb
+    R.get rkdb ("blocknode" :: B.ByteString)
+
+getBestBlockNodeIO :: (MonadIO m) => R.DB -> m (Maybe BlockNode)
+getBestBlockNodeIO rkdb = do
+    bne <- R.get rkdb ("blocknode" :: B.ByteString)
+    return $ case S.decode <$> bne of
+                Just (Right b) -> b
+                _ -> Nothing

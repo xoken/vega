@@ -162,10 +162,12 @@ markBestBlock rkdb hash height = do
     R.put rkdb "best_chain_tip_height" $ C.pack $ show height
     --liftIO $ print "MARKED BEST BLOCK FROM ROCKS DB"
 
-getBlockLocator :: (HasLogger m, MonadIO m) => R.DB -> Network -> m ([BlockHash])
+getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> Network -> m ([BlockHash])
 getBlockLocator rkdb net = do
-    lg <- getLogger
-    debug lg $ LG.msg $ val "[rdb] fetchBestBlock from getBlockLocator - before"
+    bp2pEnv <- getBitcoinP2P
+    bn <- fetchBestBlock
+    return $ blockLocator (blockTree bp2pEnv) b
+    {-
     (hash, ht) <- fetchBestBlock rkdb net
     debug lg $ LG.msg $ val "[rdb] fetchBestBlock from getBlockLocator - after"
     let bl = L.insert ht $ filter (> 0) $ takeWhile (< ht) $ map (\x -> ht - (2 ^ x)) [0 .. 20] -- [1,2,4,8,16,32,64,... ,262144,524288,1048576]
@@ -186,6 +188,7 @@ getBlockLocator rkdb net = do
         Left (e :: SomeException) -> do
             debug lg $ LG.msg $ "[Error] getBlockLocator: " ++ show e
             throw e
+    -}
 
 processHeaders :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Headers -> m ()
 processHeaders hdrs = do
@@ -206,7 +209,8 @@ processHeaders hdrs = do
                 headPrevHash = (blockHashToHex $ prevBlock $ fst $ head $ headersList hdrs)
                 hdrHash y = headerHash $ fst y
                 validate m = validateWithCheckPoint net (fromIntegral m) (hdrHash <$> (headersList hdrs))
-            bb <- fetchBestBlock rkdb net
+            bbn <- fetchBestBlock rkdb net
+            let bb = (headerHash $ nodeHeader bbn, nodeHeight bbn)
             -- TODO: throw exception if it's a bitcoin cash block
             indexed <-
                 if (blockHashToHex $ fst bb) == genesisHash
