@@ -254,16 +254,16 @@ markBestSyncedBlock hash height = do
 checkBlocksFullySynced :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Bool
 checkBlocksFullySynced net = do
     rkdb <- rocksDB <$> getDB
-    bestBlock <- fetchBestBlock rkdb net
+    bestBlock <- fetchBestBlock
     bestSynced <- fetchBestSyncedBlock rkdb net
-    return $ (headerHash $ nodeHeader bestBlock, nodeHeight bestBlock) == bestSynced
+    return $ (headerHash $ nodeHeader bestBlock, fromIntegral $ nodeHeight bestBlock) == bestSynced
 
 checkBlocksFullySynced_ :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Int32
 checkBlocksFullySynced_ net = do
     rkdb <- rocksDB <$> getDB
-    bestBlock <- fetchBestBlock rkdb net
+    bestBlock <- fetchBestBlock
     bestSynced <- fetchBestSyncedBlock rkdb net
-    return $ (nodeHeight bestBlock) - (snd bestSynced)
+    return $ (fromIntegral $ nodeHeight bestBlock) - (snd bestSynced)
 
 getBatchSizeMainnet :: Int32 -> Int32 -> [Int32]
 getBatchSizeMainnet peerCount n

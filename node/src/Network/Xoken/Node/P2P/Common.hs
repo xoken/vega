@@ -241,8 +241,8 @@ splitList xs = (f 1 xs, f 0 xs)
 fetchBestBlock :: (HasXokenNodeEnv env m, MonadIO m) => m (BlockNode)
 fetchBestBlock = do
     bp2pEnv <- getBitcoinP2P
-    hm <- atomically $ readTVarIO (blockTree bp2pEnv)
-    return $ blockNode a
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    return $ memoryBestHeader hm
     {-
     case (hash, height) of
         (Just hs, Just ht)

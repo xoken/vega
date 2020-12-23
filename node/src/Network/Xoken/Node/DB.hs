@@ -56,8 +56,7 @@ getBestBlockNode :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe BlockNode)
 getBestBlockNode = do
     dbe' <- getDB
     let rkdb = rocksDB dbe'
-    return $ getBestBlockNodeIO rkdb
-    R.get rkdb ("blocknode" :: B.ByteString)
+    getBestBlockNodeIO rkdb
 
 getBestBlockNodeIO :: (MonadIO m) => R.DB -> m (Maybe BlockNode)
 getBestBlockNodeIO rkdb = do

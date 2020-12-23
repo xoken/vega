@@ -167,7 +167,8 @@ getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> Ne
 getBlockLocator rkdb net = do
     bp2pEnv <- getBitcoinP2P
     bn <- fetchBestBlock
-    return $ blockLocator (blockTree bp2pEnv) b
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    return $ blockLocator hm bn
     {-
     (hash, ht) <- fetchBestBlock rkdb net
     debug lg $ LG.msg $ val "[rdb] fetchBestBlock from getBlockLocator - after"
@@ -210,7 +211,7 @@ processHeaders hdrs = do
                 headPrevHash = (blockHashToHex $ prevBlock $ fst $ head $ headersList hdrs)
                 hdrHash y = headerHash $ fst y
                 validate m = validateWithCheckPoint net (fromIntegral m) (hdrHash <$> (headersList hdrs))
-            bbn <- fetchBestBlock rkdb net
+            bbn <- fetchBestBlock
             let bb = (headerHash $ nodeHeader bbn, nodeHeight bbn)
             -- TODO: throw exception if it's a bitcoin cash block
             indexed <-
@@ -249,7 +250,7 @@ processHeaders hdrs = do
                                                                  "Does not match best-block, potential block re-org..."
                                                          let reOrgDiff = zip [(matchBHt + 1) ..] (headersList hdrs)
                                                          bestSynced <- NXB.fetchBestSyncedBlock rkdb net
-                                                         if snd bestSynced >= matchBHt
+                                                         if snd bestSynced >= (fromIntegral matchBHt)
                                                              then do
                                                                  debug lg $
                                                                      LG.msg $
@@ -258,7 +259,7 @@ processHeaders hdrs = do
                                                                      " versus point of re-org: " <>
                                                                      (show $ (matchBHash, matchBHt)) <>
                                                                      ", re-syncing from thereon"
-                                                                 NXB.markBestSyncedBlock matchBHash matchBHt
+                                                                 NXB.markBestSyncedBlock matchBHash $ fromIntegral matchBHt
                                                                  return reOrgDiff
                                                              else return reOrgDiff
                                              Nothing -> throw BlockHashNotFoundException
@@ -291,10 +292,10 @@ processHeaders hdrs = do
             err lg $ LG.msg $ val "Error: BlocksNotChainedException"
             throw BlocksNotChainedException
 
-fetchMatchBlockOffset :: (HasLogger m, MonadIO m) => R.DB -> Text -> m (Maybe (Text, Int32))
+fetchMatchBlockOffset :: (HasLogger m, MonadIO m) => R.DB -> Text -> m (Maybe (Text, BlockHeight))
 fetchMatchBlockOffset rkdb hashes = do
     lg <- getLogger
     x <- liftIO $ R.get rkdb (C.pack . T.unpack $ hashes)
     case x of
         Nothing -> return Nothing
-        Just h -> return $ Just $ (hashes, read . T.unpack . DTE.decodeUtf8 $ h :: Int32)
+        Just h -> return $ Just $ (hashes, fromIntegral $ (read . T.unpack . DTE.decodeUtf8 $ h :: Int32))
