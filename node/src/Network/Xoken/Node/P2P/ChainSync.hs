@@ -38,7 +38,7 @@ import Data.Int
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Serialize
+import Data.Serialize as S
 import Data.Store as DSE
 import Data.String.Conversions
 import Data.Text (Text)
@@ -59,6 +59,7 @@ import Network.Xoken.Network.Common -- (GetData(..), MessageCommand(..), Network
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import qualified Network.Xoken.Node.P2P.BlockSync as NXB (fetchBestSyncedBlock, markBestSyncedBlock)
@@ -201,6 +202,7 @@ processHeaders hdrs = do
             let net = bitcoinNetwork $ nodeConfig bp2pEnv
                 genesisHash = blockHashToHex $ headerHash $ getGenesisHeader net
                 rkdb = rocksDB dbe'
+                cf = rocksCF dbe'
                 headPrevHash = (blockHashToHex $ prevBlock $ fst $ head $ headersList hdrs)
                 hdrHash y = headerHash $ fst y
                 validate m = validateWithCheckPoint net (fromIntegral m) (hdrHash <$> (headersList hdrs))
@@ -257,7 +259,7 @@ processHeaders hdrs = do
                                              Nothing -> throw BlockHashNotFoundException
             let lenIndexed = L.length indexed
             debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)
-            mapConcurrently_
+            mapM_
                 (\y -> do
                      let header = fst $ snd y
                          hdrHash = blockHashToHex $ headerHash header
@@ -274,11 +276,15 @@ processHeaders hdrs = do
                                  err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
                                  throw KeyValueDBInsertException
                      tm <- liftIO $ floor <$> getPOSIXTime
-                     liftIO $ atomically $ modifyTVar'
-                                            (blockTree bp2pEnv)
-                                            (\hm -> case connectBlock hm net tm header of
-                                                            Right (hm',_) -> hm'
-                                                            Left _ -> hm))
+                     bnm <- liftIO $ atomically
+                                   $ stateTVar
+                                        (blockTree bp2pEnv)
+                                        (\hm -> case connectBlock hm net tm header of
+                                                        Right (hm',bn) -> (Just bn,hm')
+                                                        Left _ -> (Nothing,hm))
+                     case bnm of
+                        Just b -> putHeaderMemoryElem b
+                        Nothing -> return ())
                      --liftIO $ TSH.insert (blockTree bp2pEnv) (headerHash header) (fromIntegral blkht, header))
                 indexed
             unless (L.null indexed) $ do

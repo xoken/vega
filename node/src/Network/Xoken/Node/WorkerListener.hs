@@ -54,6 +54,7 @@ import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.BlockSync
@@ -98,6 +99,7 @@ requestHandler sock writeLock msg = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     let rkdb = rocksDB dbe'
+        cf = rocksCF dbe'
         net = bitcoinNetwork $ nodeConfig bp2pEnv
     resp <-
         case (deserialiseOrFail msg) of
@@ -223,11 +225,14 @@ requestHandler sock writeLock msg = do
                                                              LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
                                                          throw KeyValueDBInsertException
                                              tm <- liftIO $ floor <$> getPOSIXTime
-                                             liftIO $ atomically $ modifyTVar'
+                                             bnm <- liftIO $ atomically $ stateTVar
                                                                     (blockTree bp2pEnv)
                                                                     (\hm -> case connectBlock hm net tm header of
-                                                                                    Right (hm',_) -> hm'
-                                                                                    Left _ -> hm))
+                                                                                    Right (hm',bn) -> (Just bn,hm')
+                                                                                    Left _ -> (Nothing,hm))
+                                             case bnm of
+                                                Just b -> putHeaderMemoryElem b
+                                                Nothing -> return ())
                                              --liftIO $
                                              --    TSH.insert
                                              --        (blockTree bp2pEnv)
