@@ -66,6 +66,7 @@ data NodeConfig =
         , endPointTLSListenPort :: PortNumber
         , maxTxProcessingThreads :: Int
         , maxTxProcessingBuffer :: Int
+        , coinbaseTxAddress :: String
         }
     deriving (Show, Generic)
 

@@ -266,91 +266,6 @@ setupPeerConnection saddr = do
                                      warn lg $ msg ("SocketConnectException: " ++ show addr)
                                      return Nothing
 
-hashPair :: Hash256 -> Hash256 -> Hash256
-hashPair a b = doubleSHA256 $ encode a `B.append` encode b
-
-pushHash :: HashCompute -> Hash256 -> Maybe Hash256 -> Maybe Hash256 -> Int8 -> Int8 -> Bool -> HashCompute
-pushHash (stateMap, res) nhash left right ht ind final =
-    case node prev of
-        Just pv ->
-            if ind < ht
-                then pushHash
-                         ( (M.insert ind emptyMerkleNode stateMap)
-                         , (insertSpecial
-                                (Just pv)
-                                (left)
-                                (right)
-                                True
-                                (insertSpecial (Just nhash) (leftChild prev) (rightChild prev) False res)))
-                         (hashPair pv nhash)
-                         (Just pv)
-                         (Just nhash)
-                         ht
-                         (ind + 1)
-                         final
-                else throw MerkleTreeInvalidException -- Fatal error, can only happen in case of invalid leaf nodes
-        Nothing ->
-            if ht == ind
-                then (stateMap, (insertSpecial (Just nhash) left right True res))
-                else if final
-                         then pushHash
-                                  (updateState, (insertSpecial (Just nhash) left right True res))
-                                  (hashPair nhash nhash)
-                                  (Just nhash)
-                                  (Just nhash)
-                                  ht
-                                  (ind + 1)
-                                  final
-                         else (updateState, res)
-  where
-    insertSpecial sib lft rht flg lst = L.insert (MerkleNode sib lft rht flg) lst
-    updateState = M.insert ind (MerkleNode (Just nhash) left right True) stateMap
-    prev =
-        case M.lookupIndex (fromIntegral ind) stateMap of
-            Just i -> snd $ M.elemAt i stateMap
-            Nothing -> emptyMerkleNode
-
-updateMerkleSubTrees ::
-       DatabaseHandles
-    -> HashCompute
-    -> Hash256
-    -> Maybe Hash256
-    -> Maybe Hash256
-    -> Int8
-    -> Int8
-    -> Bool
-    -> IO (HashCompute)
-updateMerkleSubTrees dbe hashComp newhash left right ht ind final = do
-    eres <- try $ return $ pushHash hashComp newhash left right ht ind final
-    case eres of
-        Left MerkleTreeInvalidException -> do
-            print (" PushHash Invalid Merkle Leaves exception")
-            throw MerkleSubTreeDBInsertException
-        Right (state, res) -- = pushHash hashComp newhash left right ht ind final
-         -> do
-            if not $ L.null res
-                then do
-                    let (create, match) =
-                            L.partition
-                                (\x ->
-                                     case x of
-                                         (MerkleNode sib lft rht _) ->
-                                             if isJust sib && isJust lft && isJust rht
-                                                 then False
-                                                 else if isJust sib
-                                                          then True
-                                                          else throw MerkleTreeComputeException)
-                                (res)
-                    let finMatch =
-                            L.sortBy
-                                (\x y ->
-                                     if (leftChild x == node y) || (rightChild x == node y)
-                                         then GT
-                                         else LT)
-                                match
-                    return (state, [])
-                else return (state, res)
-
 resilientRead ::
        (HasLogger m, MonadBaseControl IO m, MonadIO m) => Socket -> BlockIngestState -> m (([Tx], LC.ByteString), Int64)
 resilientRead sock !blin = do
@@ -382,66 +297,6 @@ resilientRead sock !blin = do
                 Right res -> do
                     return (res, LC.length txbyt2)
         Right res -> return (res, LC.length txbyt)
-
-merkleTreeBuilder ::
-       (HasBitcoinP2P m, HasLogger m, HasDatabaseHandles m, MonadBaseControl IO m, MonadIO m)
-    => TQueue (TxHash, Bool)
-    -> BlockHash
-    -> Int8
-    -> m ()
-merkleTreeBuilder tque blockHash treeHt = do
-    p2pEnv <- getBitcoinP2P
-    lg <- getLogger
-    dbe <- getDB
-    continue <- liftIO $ newIORef True
-    txPage <- liftIO $ newIORef []
-    txPageNum <- liftIO $ newIORef 1
-    tv <- liftIO $ newIORef (M.empty, [])
-    whileM_ (liftIO $ readIORef continue) $ do
-        hcstate <- liftIO $ readIORef tv
-        ores <- LA.race (liftIO $ threadDelay (1000000 * 60)) (liftIO $ atomically $ readTQueue tque)
-        case ores of
-            Left ()
-                -- likely the peer conn terminated, just end this thread
-                -- do NOT delete queue as another peer connection could have establised meanwhile
-             -> do
-                liftIO $ writeIORef continue False
-                liftIO $ MS.signal (maxTMTBuilderThreadLock p2pEnv)
-            Right (txh, isLast) -> do
-                pg <- liftIO $ readIORef txPage
-                if (fromIntegral $ L.length pg) == 100
-                    then do
-                        pgn <- liftIO $ readIORef txPageNum
-                        --LA.async $ commitTxPage pg blockHash pgn
-                        liftIO $ writeIORef txPage [txh]
-                        liftIO $ writeIORef txPageNum (pgn + 1)
-                    else do
-                        liftIO $ modifyIORef' txPage (\x -> x ++ [txh])
-                res <-
-                    LE.try $ liftIO $ updateMerkleSubTrees dbe hcstate (getTxHash txh) Nothing Nothing treeHt 0 isLast
-                case res of
-                    Right (hcs) -> do
-                        liftIO $ writeIORef tv hcs
-                    Left (ee :: SomeException) -> do
-                        err lg $
-                            LG.msg
-                                ("[ERROR] Quit building TMT. FATAL Bug! (1) " ++
-                                 show ee ++ " | " ++ show (getTxHash txh))
-                        liftIO $ writeIORef continue False
-                        liftIO $ MS.signal (maxTMTBuilderThreadLock p2pEnv)
-                        -- do NOT delete queue here, merely end this thread
-                        throw ee
-                when isLast $ do
-                    pg <- liftIO $ readIORef txPage
-                    if L.null pg
-                        then return ()
-                        else do
-                            pgn <- liftIO $ readIORef txPageNum
-                            --LA.async $ commitTxPage pg blockHash pgn
-                            return ()
-                    liftIO $ writeIORef continue False
-                    liftIO $ TSH.delete (merkleQueueMap p2pEnv) blockHash
-                    liftIO $ MS.signal (maxTMTBuilderThreadLock p2pEnv)
 
 readNextMessage ::
        (HasBitcoinP2P m, HasLogger m, HasDatabaseHandles m, MonadBaseControl IO m, MonadIO m)
@@ -477,8 +332,8 @@ readNextMessage net sock ingss = do
                                         -- wait for TMT threads alloc
                                 liftIO $ MS.wait (maxTMTBuilderThreadLock p2pEnv)
                                 liftIO $ TSH.insert (merkleQueueMap p2pEnv) (biBlockHash $ bf) qq
-                                LA.async $
-                                    merkleTreeBuilder qq (biBlockHash $ bf) (computeTreeHeight $ binTxTotalCount blin)
+                                -- LA.async $
+                                --    merkleTreeBuilder qq (biBlockHash $ bf) (computeTreeHeight $ binTxTotalCount blin)
                                 return qq
                             else do
                                 valx <- liftIO $ TSH.lookup (merkleQueueMap p2pEnv) (biBlockHash $ bf)
@@ -615,8 +470,7 @@ messageHandler peer (mm, ingss) = do
         conn = rocksDB db
         cf = rocksCF db
     case mm of
-        Just msg
-          -> do
+        Just msg -> do
             liftIO $ print $ "MSG: " ++ (show $ msgType msg)
             case (msg) of
                 MHeaders hdrs -> do
@@ -658,11 +512,10 @@ messageHandler peer (mm, ingss) = do
                                      debug lg $ LG.msg ("INV - new Block: " ++ (show bhash))
                                      unsynced <- checkBlocksFullySynced_ net
                                      if unsynced <= (3 :: Int32)
-                                        then do
-                                            newCandidateBlock $ BlockHash bhash
-                                            processCompactBlockGetData peer $ invHash x
-                                        else
-                                            liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
+                                         then do
+                                             newCandidateBlock $ BlockHash bhash
+                                             processCompactBlockGetData peer $ invHash x
+                                         else liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
                                      indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
                                      debug lg $ LG.msg ("INV - new Tx: " ++ (show $ TxHash $ invHash x))
@@ -765,34 +618,41 @@ messageHandler peer (mm, ingss) = do
                             return $ msgType msg
                         Nothing -> return $ msgType msg
                 MGetData (GetData gd) -> do
-                    mapM_ (\(InvVector invt invh) -> do
-                                debug lg $ LG.msg $ "recieved getdata: " ++ show (invt,invh)
-                                case invt of
-                                    InvBlock -> do
-                                        cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
-                                        case cmptblkm of
-                                            Just (cmptblk,_) -> do
-                                                liftIO $ threadDelay (1000000 * 5)
-                                                debug lg $ LG.msg $ "sent CompactBlock: " ++ (show $ BlockHash invh)
-                                                sendCmptBlock cmptblk peer
-                                            Nothing -> return ()
-                                    InvCompactBlock -> do
-                                        cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
-                                        case cmptblkm of
-                                            Just (cmptblk,_) -> do
-                                                liftIO $ threadDelay (1000000 * 5)
-                                                debug lg $ LG.msg $ "sent CompactBlock: " ++ (show $ BlockHash invh)
-                                                sendCmptBlock cmptblk peer
-                                            Nothing -> return ()
-                                    InvTx -> do
-                                        return ()) gd
+                    mapM_
+                        (\(InvVector invt invh) -> do
+                             debug lg $ LG.msg $ "recieved getdata: " ++ show (invt, invh)
+                             case invt of
+                                 InvBlock -> do
+                                     cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
+                                     case cmptblkm of
+                                         Just (cmptblk, _) -> do
+                                             liftIO $ threadDelay (1000000 * 5)
+                                             debug lg $ LG.msg $ "sent CompactBlock: " ++ (show $ BlockHash invh)
+                                             sendCmptBlock cmptblk peer
+                                         Nothing -> return ()
+                                 InvCompactBlock -> do
+                                     cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) (BlockHash invh)
+                                     case cmptblkm of
+                                         Just (cmptblk, _) -> do
+                                             liftIO $ threadDelay (1000000 * 5)
+                                             debug lg $ LG.msg $ "sent CompactBlock: " ++ (show $ BlockHash invh)
+                                             sendCmptBlock cmptblk peer
+                                         Nothing -> return ()
+                                 InvTx -> do
+                                     return ())
+                        gd
                     return $ msgType msg
-                MGetHeaders (GetHeaders ver bl bh) -> do
+                MGetHeaders (GetHeaders ver bl bh)
                     -- TODO: use blocklocator to send more than one header
+                 -> do
                     cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) bh
-                    let ret = case cmptblkm of
-                                    Just (cmptblk,_) -> [(cbHeader cmptblk, VarInt $ fromIntegral $ cbShortIDsLength cmptblk + cbPrefilledTxnLength cmptblk)]
-                                    Nothing -> []
+                    let ret =
+                            case cmptblkm of
+                                Just (cmptblk, _) ->
+                                    [ ( cbHeader cmptblk
+                                      , VarInt $ fromIntegral $ cbShortIDsLength cmptblk + cbPrefilledTxnLength cmptblk)
+                                    ]
+                                Nothing -> []
                     sendRequestMessages peer $ MHeaders $ Headers ret
                     return $ msgType msg
                 MSendCompact _ -> do
@@ -800,13 +660,15 @@ messageHandler peer (mm, ingss) = do
                     return $ msgType msg
                 MGetBlockTxns gbt@(GetBlockTxns bh ln bi) -> do
                     cmptblkm <- liftIO $ TSH.lookup (compactBlocks bp2pEnv) bh
-                    (btl,bt) <- case cmptblkm of
-                                    Just (cmptblk,txhs) -> do
-                                        liftIO $ print $ "MGetBlockTxns: txs:" ++ show txhs ++ " GetBlockTxns:" ++ show gbt
-                                        return (ln, fmap (\i -> txhs !! (fromIntegral $ i - 1)) bi)
-                                    Nothing -> do
-                                        liftIO $ print $ "MGetBlockTxns: candidateBlock doesn't exist; GetBlockTxns:" ++ show gbt
-                                        return (0,[])
+                    (btl, bt) <-
+                        case cmptblkm of
+                            Just (cmptblk, txhs) -> do
+                                liftIO $ print $ "MGetBlockTxns: txs:" ++ show txhs ++ " GetBlockTxns:" ++ show gbt
+                                return (ln, fmap (\i -> txhs !! (fromIntegral $ i - 1)) bi)
+                            Nothing -> do
+                                liftIO $
+                                    print $ "MGetBlockTxns: candidateBlock doesn't exist; GetBlockTxns:" ++ show gbt
+                                return (0, [])
                     txs' <- mapM (txFromHash conn cf) bt
                     let txs = catMaybes txs'
                         btls = fromIntegral $ L.length txs
@@ -1002,7 +864,12 @@ broadcastToPeers msg = do
     liftIO $ putStrLn $ "Broadcasting " ++ show (msgType msg) ++ " to peers"
     bp2pEnv <- getBitcoinP2P
     peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
-    mapM_ (\bp -> if bpConnected bp then sendRequestMessages bp msg else return ()) peerMap
+    mapM_
+        (\bp ->
+             if bpConnected bp
+                 then sendRequestMessages bp msg
+                 else return ())
+        peerMap
     liftIO $ putStrLn $ "Broadcasted " ++ show (msgType msg) ++ " to peers"
 
 sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
@@ -1030,15 +897,19 @@ mineBlockFromCandidate = do
     case dag of
         Nothing -> return Nothing
         Just dag' -> do
-            top <-liftIO $ DAG.getPrimaryTopologicalSorted dag'
+            top <- liftIO $ DAG.getPrimaryTopologicalSorted dag'
             ct <- liftIO getPOSIXTime
             if L.null top
                 then do
                     liftIO $ print $ "Couldn't mine cmptblk (dag empty over): " ++ show bhash
                     return Nothing
                 else do
-                    let cbase = makeCoinbaseTx (fromIntegral $ ht + 1) (fromJust $ stringToAddr net "msedZ3WsLDsd97f2cPo26J5xU5ZjBgTExz") 1250000000
-                        txhashes = (txHash cbase:top)
+                    let cbase =
+                            makeCoinbaseTx
+                                (fromIntegral $ ht + 1)
+                                (fromJust $ stringToAddr net "msedZ3WsLDsd97f2cPo26J5xU5ZjBgTExz")
+                                1250000000
+                        txhashes = (txHash cbase : top)
                     --    TxHash hh = txHash $ cbase
                     --let TxHash hh' = head top
                     --tx' <- liftIO $ TSH.lookup (unconfTxCache bp2pEnv) (TxHash hh')
@@ -1047,7 +918,14 @@ mineBlockFromCandidate = do
                     --        liftIO $ print $ "Mined cmptblk (tx not in cache): " ++ show (TxHash hh')
                     --        return Nothing
                     --    Just tx -> do
-                    let bh = BlockHeader 0x20000000 bhash (buildMerkleRoot txhashes) (fromIntegral $ floor ct) 0x207fffff (1) -- BlockHeader
+                    let bh =
+                            BlockHeader
+                                0x20000000
+                                bhash
+                                (buildMerkleRoot txhashes)
+                                (fromIntegral $ floor ct)
+                                0x207fffff
+                                (1) -- BlockHeader
                         (bhsh@(BlockHash bhsh'), nn) = generateHeaderHash net bh
                         sidl = fromIntegral $ L.length $ top -- shortIds length
                         skey = getCompactBlockSipKey bh $ fromIntegral nn
@@ -1059,13 +937,20 @@ mineBlockFromCandidate = do
                         pftx = [PrefilledTx 0 $ cbase]
                         (cbsid:sids) = map (\txid -> txHashToShortId' txid skey) $ txhashes -- shortIds
                         cb = CompactBlock (bh {bhNonce = nn}) (fromIntegral nn) sidl sids pfl pftx
-                    liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb,top)
-                    liftIO $ print $ "Mined cmptblk " ++ show bhsh ++ " over " ++ show bhash
-                                                                ++ " with work " ++ (show $ headerWork bh)
-                                                                ++ " and coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase)
+                    liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb, top)
+                    liftIO $
+                        print $
+                        "Mined cmptblk " ++
+                        show bhsh ++
+                        " over " ++
+                        show bhash ++
+                        " with work " ++
+                        (show $ headerWork bh) ++
+                        " and coinbase tx: " ++
+                        (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase)
                                                                 -- ++ " and prev coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase')
-                                                                ++ " hash: " ++ (show $ head $ txhashes)
-                                                                ++ " sid: " ++ (show $ cbsid)
+                         ++
+                        " hash: " ++ (show $ head $ txhashes) ++ " sid: " ++ (show $ cbsid)
                     --peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
                     --mapM_ (\bp -> if bpConnected bp then processCompactBlock cb bp else return ()) peerMap
                     newCandidateBlock bhsh

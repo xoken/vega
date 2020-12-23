@@ -94,6 +94,7 @@ import Network.Socket
 import Network.Xoken.Block.Headers
 import Network.Xoken.Node.AriviService
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
@@ -104,6 +105,7 @@ import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Service.Chain
+import Network.Xoken.Node.TLSServer
 import Network.Xoken.Node.WorkerListener
 import Options.Applicative
 import Paths_vega as P
@@ -192,7 +194,9 @@ runThreads config nodeConf bp2p lg certPaths = do
         let allegoryEnv = AllegoryEnv $ allegoryVendorSecretKey nodeConf
         let xknEnv = XokenNodeEnv bp2p dbh lg allegoryEnv
         let serviceEnv = ServiceEnv xknEnv
-        --
+        -- start TLS endpoint
+        epHandler <- newTLSEndpointServiceHandler
+        LA.async $ startTLSEndpoint epHandler (endPointTLSListenIP nodeConf) (endPointTLSListenPort nodeConf) certPaths
         -- start HTTP endpoint
         let snapConfig =
                 Snap.defaultConfig & Snap.setSSLBind (DTE.encodeUtf8 $ DT.pack $ endPointHTTPSListenIP nodeConf) &
@@ -218,10 +222,11 @@ runThreads config nodeConf bp2p lg certPaths = do
                                 withAsync setupSeedPeerConnection $ \_ -> do
                                     withAsync runEgressChainSync $ \_ -> do
                                         withAsync runBlockCacheQueue $ \_ -> do
-                                            withAsync runPeerSync $ \_ -> do
-                                                withAsync runSyncStatusChecker $ \z -> do
-                                                    _ <- LA.wait z
-                                                    return ()
+                                            withAsync (handleNewConnectionRequest epHandler) $ \_ -> do
+                                                withAsync runPeerSync $ \_ -> do
+                                                    withAsync runSyncStatusChecker $ \z -> do
+                                                        _ <- LA.wait z
+                                                        return ()
                         else LA.wait y)
         liftIO $ putStrLn $ "node recovering from fatal DB connection failure!"
     return ()
@@ -245,7 +250,10 @@ runSyncStatusChecker = do
             if isSynced
                 then "Yes"
                 else "No"
-        mn <- if isSynced then mineBlockFromCandidate else return Nothing
+        mn <-
+            if isSynced
+                then mineBlockFromCandidate
+                else return Nothing
         liftIO $ print $ "Sync status: " ++ show mn
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced
         liftIO $ threadDelay (60 * 1000000)
@@ -300,7 +308,33 @@ defBitcoinP2P nodeCnf = do
     cblk <- TSH.new 1
     cmpct <- TSH.new 1
     pftx <- TSH.new 10
-    return $ BitcoinP2P nodeCnf g bp mv hl st tl ep tc (rpf, rpc) mq ts tbt iut udc blktr wrkc bsb ptxq cand cblk cmpct pftx
+    cbu <- TSH.new 1
+    return $
+        BitcoinP2P
+            nodeCnf
+            g
+            bp
+            mv
+            hl
+            st
+            tl
+            ep
+            tc
+            (rpf, rpc)
+            mq
+            ts
+            tbt
+            iut
+            udc
+            blktr
+            wrkc
+            bsb
+            ptxq
+            cand
+            cblk
+            cmpct
+            pftx
+            cbu
 
 initVega :: IO ()
 initVega = do
@@ -324,7 +358,7 @@ repopulateBlockTree :: R.DB -> R.ColumnFamily -> IO (Maybe HeaderMemory)
 repopulateBlockTree rkdb cf = do
     print "Loading BlockTree from memory..."
     t1 <- getCurrentTime
-    kv <- R.scanCF rkdb cf
+    kv <- scanCF rkdb cf
     if Data.List.null kv
         then return Nothing
         else do

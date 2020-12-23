@@ -73,6 +73,7 @@ import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Common
+import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.WorkerDispatcher
 import Network.Xoken.Script.Standard
@@ -192,11 +193,12 @@ insertTxIdOutputs conn cf (txid, outputIndex) txOut = do
 isNotConfirmed :: TxHash -> IO Bool
 isNotConfirmed txHash = return False
 
-coalesceUnconfTransaction :: (TSDirectedAcyclicGraph TxHash Word64) -> TxHash -> [TxHash] -> Word64 -> IO ()
+coalesceUnconfTransaction ::
+       (TSDirectedAcyclicGraph TxHash Word64 BranchComputeState) -> TxHash -> [TxHash] -> Word64 -> IO ()
 coalesceUnconfTransaction dag txhash hashes sats = do
     print $ "coalesceUnconfTransaction called for tx: " ++ show (txhash)
     unconfHashes <- filterM (isNotConfirmed) hashes
-    DAG.coalesce dag txhash unconfHashes sats (+)
+    DAG.coalesce dag txhash unconfHashes sats (+) nextBcState
 
 processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([TxHash])
 processUnconfTransaction tx = do
@@ -350,9 +352,14 @@ processUnconfTransaction tx = do
         Just ev -> liftIO $ EV.signal ev
         Nothing -> return ()
     -- let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
-    let parentTxns = catMaybes $ map (\(_,(_,bsh,ophs,_)) -> case bsh of
-                                                    [] -> Just ophs
-                                                    _ -> Nothing) inputValsOutpoints
+    let parentTxns =
+            catMaybes $
+            map
+                (\(_, (_, bsh, ophs, _)) ->
+                     case bsh of
+                         [] -> Just ophs
+                         _ -> Nothing)
+                inputValsOutpoints
     return (parentTxns)
 
 getSatsValueFromEpochOutpoint ::
@@ -410,10 +417,9 @@ addTxCandidateBlocks txHash candBlockHashes depTxHashes = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let conn = rocksDB $ dbe'
         cfs = rocksCF dbe'
-    debug lg $ LG.msg $ "Appending to candidate blocks Tx " ++ show (txHash) ++ " with parent Tx's: " ++ show depTxHashes
-    mapM_
-        (\bhash -> addTxCandidateBlock txHash bhash depTxHashes)
-        candBlockHashes
+    debug lg $
+        LG.msg $ "Appending to candidate blocks Tx " ++ show (txHash) ++ " with parent Tx's: " ++ show depTxHashes
+    mapM_ (\bhash -> addTxCandidateBlock txHash bhash depTxHashes) candBlockHashes
 
 addTxCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TxHash -> BlockHash -> [TxHash] -> m ()
 addTxCandidateBlock txHash candBlockHash depTxHashes = do
@@ -424,7 +430,7 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
     case q of
         Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show candBlockHash)
         Just dag -> do
-            liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+)
+            liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+) nextBcState
             dagT <- liftIO $ (DAG.getTopologicalSortedForest dag)
             dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)
             liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP
