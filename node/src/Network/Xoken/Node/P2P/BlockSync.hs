@@ -421,11 +421,30 @@ runBlockCacheQueue =
                     if L.length sent == 0 &&
                        L.length unsent == 0 && L.length receiveInProgress == 0 && L.length recvComplete == 0
                         then do
-                            let !lelm = last $ L.sortOn (snd . snd) (syt)
-                            debug lg $ LG.msg $ ("marking best synced " ++ show (blockHashToHex $ fst $ lelm))
-                            markBestSyncedBlock (blockHashToHex $ fst $ lelm) (fromIntegral $ snd $ snd $ lelm)
+                            --let !lelm = last $ L.sortOn (snd . snd) (syt)
+                            let !(lhash,(_,lht)) = last $ syt
+                            debug lg $ LG.msg $ ("marking best synced " ++ show (blockHashToHex $ lhash))
+                            markBestSyncedBlock (blockHashToHex $ lhash) (fromIntegral $ lht)
                             --
-                            _ <- LA.async $ zRPCDispatchBlocksTxsOutputs (fst $ unzip syt)
+                            lp <- getDB' rkdb ("last-pruned" :: B.ByteString)
+                            let (lpht,lphs) = fromMaybe (0,headerHash $ getGenesisHeader net) lp :: (BlockHeight,BlockHash)
+                            debug lg $ LG.msg $ ("Last pruned: " ++ show (lpht,blockHashToHex $ lphs) ++ "; for best synced: " ++ show (lht, blockHashToHex lhash))
+                            if lht - lpht <= 11
+                                then do
+                                    debug lg $ LG.msg $ ("Last pruned too close. Skipping pruning. " ++ show (lht, lpht, lht - lpht))
+                                    return ()
+                                else do
+                                    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+                                    let bnm = getBlockHeaderMemory lhash hm
+                                    case bnm of
+                                        Nothing -> return ()
+                                        Just bn -> do
+                                            let anc = fmap (\x -> (nodeHeight x, headerHash $ nodeHeader x)) $ drop 10 $ getParents hm (fromIntegral $ lht - lpht - 1) bn
+                                            debug lg $ LG.msg $ ("Pruning " ++ show ((fmap blockHashToHex) <$> anc))
+                                            debug lg $ LG.msg $ ("Marking Last Pruned: " ++ show (head anc))
+                                            putDB rkdb ("last-pruned" :: B.ByteString) (head anc)
+                                            _ <- LA.async $ zRPCDispatchBlocksTxsOutputs $ fmap snd anc -- (fst $ unzip syt)
+                                            return ()
                             --
                             mapM
                                 (\(k, _) -> do
