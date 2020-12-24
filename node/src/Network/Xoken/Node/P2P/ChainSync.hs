@@ -163,7 +163,7 @@ markBestBlock rkdb hash height = do
     R.put rkdb "best_chain_tip_height" $ C.pack $ show height
     --liftIO $ print "MARKED BEST BLOCK FROM ROCKS DB"
 
-getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> Network -> m ([BlockHash])
+getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> Network -> m (BlockLocator)
 getBlockLocator rkdb net = do
     bp2pEnv <- getBitcoinP2P
     bn <- fetchBestBlock
@@ -214,6 +214,7 @@ processHeaders hdrs = do
                 validate m = validateWithCheckPoint net (fromIntegral m) (hdrHash <$> (headersList hdrs))
             bbn <- fetchBestBlock
             let bb = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+            debug lg $ LG.msg $ "Fetched best block: " ++ show bb
             -- TODO: throw exception if it's a bitcoin cash block
             indexed <-
                 if (blockHashToHex $ fst bb) == genesisHash
@@ -285,8 +286,9 @@ processHeaders hdrs = do
                 indexed
             unless (L.null bns) $ do
                 let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ snd $ snd z)) bns
-                zRPCDispatchNotifyNewBlockHeader headers
-                putBestBlockNode $ fst $ last bns
+                    bnode = fst $ last bns
+                zRPCDispatchNotifyNewBlockHeader headers bnode
+                putBestBlockNode bnode
                 -- markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
                 liftIO $ putMVar (bestBlockUpdated bp2pEnv) True
         False -> do

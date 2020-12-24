@@ -53,6 +53,7 @@ import Network.Socket
 import Network.Socket.ByteString as SB (recv, sendAll)
 import qualified Network.TLS as NTLS
 import Network.Xoken.Block.Common
+import Network.Xoken.Block.Headers
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
@@ -263,8 +264,8 @@ zRPCDispatchBlocksTxsOutputs blockHashes = do
 --                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
 --                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
 --                     throw mex
-zRPCDispatchNotifyNewBlockHeader :: (HasXokenNodeEnv env m, MonadIO m) => [ZBlockHeader] -> m ()
-zRPCDispatchNotifyNewBlockHeader headers = do
+zRPCDispatchNotifyNewBlockHeader :: (HasXokenNodeEnv env m, MonadIO m) => [ZBlockHeader] -> BlockNode -> m ()
+zRPCDispatchNotifyNewBlockHeader headers bn = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
@@ -275,7 +276,7 @@ zRPCDispatchNotifyNewBlockHeader headers = do
              case wrk of
                  SelfWorker {..} -> return ()
                  RemoteWorker {..} -> do
-                     let mparam = ZNotifyNewBlockHeader headers
+                     let mparam = ZNotifyNewBlockHeader headers bn
                      resp <- zRPCRequestDispatcher mparam wrk
                      case zrsPayload resp of
                          Right spl -> do

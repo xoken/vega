@@ -203,7 +203,7 @@ requestHandler sock writeLock msg = do
                              -> do
                                 pruneBlocksTxnsOutputs blockHashes
                                 return $ successResp mid $ ZPruneBlockTxOutputsResp
-                            ZNotifyNewBlockHeader headers
+                            ZNotifyNewBlockHeader headers bn
                                 -- liftIO $ print $ "ZNotifyNewBlockHeader - REQUEST " ++ (show $ P.head headers)
                              -> do
                                 debug lg $ LG.msg $ "decoded ZNotifyNewBlockHeader : " ++ (show $ P.head headers)
@@ -228,6 +228,7 @@ requestHandler sock writeLock msg = do
                                         headers
                                 case res of
                                     Right () -> do
+                                        putBestBlockNode bn
                                         liftIO $
                                             print $
                                             "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show $ P.head headers)
