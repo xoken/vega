@@ -24,7 +24,15 @@ putHeaderMemoryElem b = do
     cfhm' <- liftIO $ TSH.lookup cf "blocktree"
     case cfhm' of
         Just cf' -> R.putCF rkdb cf' sb bne
-        Nothing -> return ()
+        Nothing -> do
+            liftIO $ print "Couldn't get cf"
+            return ()
+
+putHeaderMemoryElemIO :: (MonadIO m) => R.DB -> R.ColumnFamily -> BlockNode -> m ()
+putHeaderMemoryElemIO rkdb cf b = do
+    let sb = S.encode $ shortBlockHash $ headerHash $ nodeHeader b
+        bne = S.encode b
+    R.putCF rkdb cf sb bne
 
 scanCF db cf = liftIO $ do
     R.withIterCF db cf $ \iter -> do
@@ -62,5 +70,5 @@ getBestBlockNodeIO :: (MonadIO m) => R.DB -> m (Maybe BlockNode)
 getBestBlockNodeIO rkdb = do
     bne <- R.get rkdb ("blocknode" :: B.ByteString)
     return $ case S.decode <$> bne of
-                Just (Right b) -> b
+                Just (Right b) -> Just b
                 _ -> Nothing
