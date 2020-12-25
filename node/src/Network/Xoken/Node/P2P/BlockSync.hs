@@ -308,48 +308,31 @@ runBlockCacheQueue =
         retn <-
             if sysz == 0
                 then do
-                    (hash, ht) <- fetchBestSyncedBlock rkdb net
-                    let cacheInd = getBatchSize net (fromIntegral $ L.length connPeers) ht
-                    let !bks = map (\x -> ht + x) cacheInd
-                    res <-
-                        liftIO $
-                        try $
-                        mapM
-                            (\k -> do
-                                 x <- getDB' rkdb k -- Maybe (Text, BlockHeader)
-                                 return $
-                                     case x :: Maybe (Text, BlockHeader) of
-                                         Nothing -> Nothing
-                                         Just (x', _) -> Just (k, x'))
-                            (bks)
-                    case res of
-                        Left (e :: SomeException) -> do
-                            err lg $ LG.msg ("Error: runBlockCacheQueue: " ++ show e)
-                            throw e
-                        Right (op' :: [Maybe (Int32, Text)]) -> do
-                            let op = catMaybes $ op'
-                            if L.length op == 0
+                    (bhash, ht') <- fetchBestSyncedBlock rkdb net
+                    hmem <- liftIO $ readTVarIO (blockTree bp2pEnv)
+                    let ht = fromIntegral ht'
+                        bc = last $ getBatchSize net (fromIntegral $ L.length connPeers) ht
+                        bh = ht + bc
+                    --let !bks = map (\x -> ht + x) cacheInd
+                        parc = bc - 1
+                        ans = getAncestor hmem (fromIntegral bh) (memoryBestHeader hmem)
+                        op = case ans of
+                                    Nothing -> []
+                                    Just an -> getParents hmem (fromIntegral parc) an
+                    if L.length op == 0
+                        then do
+                            trace lg $ LG.msg $ val "Synced fully!"
+                            return (Nothing)
+                        else if L.length op == (fromIntegral bc)
                                 then do
-                                    trace lg $ LG.msg $ val "Synced fully!"
+                                    debug lg $ LG.msg $ val "Reloading cache."
+                                    let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) $ L.reverse op
+                                    mapM (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
+                                    let e = p !! 0
+                                    return (Just $ BlockInfo (fst e) (snd $ snd e))
+                                else do
+                                    debug lg $ LG.msg $ val "Still loading block headers, try again!"
                                     return (Nothing)
-                                else if L.length op == (fromIntegral $ last cacheInd)
-                                         then do
-                                             debug lg $ LG.msg $ val "Reloading cache."
-                                             let !p =
-                                                     catMaybes $
-                                                     map
-                                                         (\x ->
-                                                              case (hexToBlockHash $ snd x) of
-                                                                  Just h ->
-                                                                      Just (h, (RequestQueued, fromIntegral $ fst x))
-                                                                  Nothing -> Nothing)
-                                                         (op)
-                                             mapM (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
-                                             let e = p !! 0
-                                             return (Just $ BlockInfo (fst e) (snd $ snd e))
-                                         else do
-                                             debug lg $ LG.msg $ val "Still loading block headers, try again!"
-                                             return (Nothing)
                 else do
                     mapM
                         (\(bsh, (_, ht)) -> do
