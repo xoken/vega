@@ -318,7 +318,8 @@ runBlockCacheQueue =
                         ans = getAncestor hmem (fromIntegral bh) (memoryBestHeader hmem)
                         op = case ans of
                                     Nothing -> []
-                                    Just an -> getParents hmem (fromIntegral parc) an
+                                    Just an -> L.reverse (an:getParents hmem (fromIntegral parc) an)
+                    liftIO $ print (bhash,ht,bc,bh,parc,ans,op)
                     if L.length op == 0
                         then do
                             trace lg $ LG.msg $ val "Synced fully!"
@@ -326,7 +327,7 @@ runBlockCacheQueue =
                         else if L.length op == (fromIntegral bc)
                                 then do
                                     debug lg $ LG.msg $ val "Reloading cache."
-                                    let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) $ L.reverse op
+                                    let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) op
                                     mapM (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
                                     let e = p !! 0
                                     return (Just $ BlockInfo (fst e) (snd $ snd e))
