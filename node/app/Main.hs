@@ -31,7 +31,7 @@ import Control.Arrow
 import Control.Concurrent (threadDelay)
 import Control.Concurrent
 import Control.Concurrent.Async as A (async)
-import Control.Concurrent.Async.Lifted as LA (async, race, wait, withAsync)
+import Control.Concurrent.Async.Lifted as LA (race, wait, withAsync)
 import Control.Concurrent.Event as EV
 import Control.Concurrent.MSem as MS
 import Control.Concurrent.MVar
@@ -196,7 +196,7 @@ runThreads config nodeConf bp2p lg certPaths = do
         let serviceEnv = ServiceEnv xknEnv
         -- start TLS endpoint
         epHandler <- newTLSEndpointServiceHandler
-        LA.async $ startTLSEndpoint epHandler (endPointTLSListenIP nodeConf) (endPointTLSListenPort nodeConf) certPaths
+        async $ startTLSEndpoint epHandler (endPointTLSListenIP nodeConf) (endPointTLSListenPort nodeConf) certPaths
         -- start HTTP endpoint
         let snapConfig =
                 Snap.defaultConfig & Snap.setSSLBind (DTE.encodeUtf8 $ DT.pack $ endPointHTTPSListenIP nodeConf) &
@@ -204,7 +204,7 @@ runThreads config nodeConf bp2p lg certPaths = do
                 Snap.setSSLKey (certPaths !! 1) &
                 Snap.setSSLCert (head certPaths) &
                 Snap.setSSLChainCert False
-        LA.async $ Snap.serveSnaplet snapConfig (appInit xknEnv)
+        async $ Snap.serveSnaplet snapConfig (appInit xknEnv)
         --
         -- current node
         let node = vegaNode nodeConf
