@@ -319,7 +319,7 @@ runBlockCacheQueue =
                         op = case ans of
                                     Nothing -> []
                                     Just an -> L.reverse (an:getParents hmem (fromIntegral parc) an)
-                    liftIO $ print (bhash,ht,bc,bh,parc,ans,op)
+                    --liftIO $ print (bhash,ht,bc,bh,parc,ans,op)
                     if L.length op == 0
                         then do
                             trace lg $ LG.msg $ val "Synced fully!"
