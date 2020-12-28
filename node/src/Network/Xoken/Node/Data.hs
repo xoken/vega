@@ -116,6 +116,7 @@ data ZRPCRequestParam
           }
     | ZNotifyNewBlockHeader -- M =>> C
           { znBlockHeaders :: ![ZBlockHeader]
+          , znBlockNode :: !BlockNode
           }
     | ZPruneBlockTxOutputs
           { prBlockHashes :: ![BlockHash]
@@ -152,6 +153,8 @@ deriving instance Store TxHash
 deriving instance Store Hash256
 
 deriving instance Store BlockHeader
+
+deriving instance Serialise BlockNode
 
 data ZRPCError =
     ZRPCError

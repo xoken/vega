@@ -209,7 +209,8 @@ processUnconfTransaction tx = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let conn = rocksDB $ dbe'
         cf = rocksCF dbe'
-    (bsh,bht) <- fetchBestBlock conn net
+    bbn <- fetchBestBlock
+    let (bsh,bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processUnconfTransaction: processing Unconf Tx " ++ show (txHash tx)
     cftx <- liftIO $ TSH.lookup cf ("tx")

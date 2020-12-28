@@ -185,7 +185,7 @@ runThreads config nodeConf bp2p lg certPaths = do
     withDBCF "xdb" $ \rkdb -> do
         let cfZip = zip cfStr (R.columnFamilies rkdb)
             btcf = snd $ fromJust $ Data.List.find ((== "blocktree") . fst) cfZip
-        hm <- repopulateBlockTree rkdb btcf
+        hm <- repopulateBlockTree (bitcoinNetwork nodeConf) rkdb btcf
         nh <- case hm of
                 Just h -> CMS.atomically $ swapTVar (blockTree bp2p) h
                 Nothing -> readTVarIO (blockTree bp2p) -- TODO: handled Nothing due to errors
@@ -354,34 +354,33 @@ initVega = do
     -- launch node --
     runNode cnf nodeCnf bp2p [certFP, keyFP, csrFP]
 
-repopulateBlockTree :: R.DB -> R.ColumnFamily -> IO (Maybe HeaderMemory)
-repopulateBlockTree rkdb cf = do
+repopulateBlockTree :: Network -> R.DB -> R.ColumnFamily -> IO (Maybe HeaderMemory)
+repopulateBlockTree net rkdb cf = do
     print "Loading BlockTree from memory..."
     t1 <- getCurrentTime
     kv <- scanCF rkdb cf
     if Data.List.null kv
-        then return Nothing
+        then do
+            -- print "BlockTree not found"
+            putHeaderMemoryElemIO rkdb cf $ genesisNode net
+            return Nothing
         else do
             t2 <- getCurrentTime
             let kv' = DM.mapMaybe (\(k,v) -> case S.decode k of
                                         Right (k' :: ShortBlockHash) -> Just (k', BSS.toShort v)
                                         Left _ -> Nothing) kv
             t3 <- getCurrentTime
-            bn <- R.get rkdb ("blocknode" :: B.ByteString)
+            bn <- getBestBlockNodeIO rkdb
             case bn of
-                Nothing -> return Nothing
+                Nothing -> do
+                    -- print "getBestBlockNodeIO returned Nothing"
+                    return Nothing
                 Just bn' -> do
-                    let bnd' = S.decode bn'
-                    case bnd' of
-                        Left e -> do
-                            print $ e
-                            return Nothing
-                        Right bnd -> do
-                            putStrLn $ "Loaded " ++ show (length kv') ++ " entries"
-                            putStrLn $ "Started scan: " ++ show t1
-                            putStrLn $ "Stopped scan and started decode: " ++ show t2
-                            putStrLn $ "Stopped decode " ++ show t3
-                            return $ Just $ HeaderMemory (HM.fromList kv') bnd
+                    putStrLn $ "Loaded " ++ show (length kv') ++ " BlockTree entries"
+                    --putStrLn $ "Started scan: " ++ show t1
+                    --putStrLn $ "Stopped scan and started decode: " ++ show t2
+                    --putStrLn $ "Stopped decode " ++ show t3
+                    return $ Just $ HeaderMemory (HM.fromList kv') bn'
 
 relaunch :: IO ()
 relaunch =

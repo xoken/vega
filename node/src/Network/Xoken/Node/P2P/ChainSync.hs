@@ -22,6 +22,7 @@ import Control.Error.Util (hush)
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
+import Control.Monad.Extra (mapMaybeM)
 import Control.Monad.Logger
 import Control.Monad.Reader
 import Control.Monad.STM
@@ -162,10 +163,13 @@ markBestBlock rkdb hash height = do
     R.put rkdb "best_chain_tip_height" $ C.pack $ show height
     --liftIO $ print "MARKED BEST BLOCK FROM ROCKS DB"
 
-getBlockLocator :: (HasLogger m, MonadIO m) => R.DB -> Network -> m ([BlockHash])
+getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> Network -> m (BlockLocator)
 getBlockLocator rkdb net = do
-    lg <- getLogger
-    debug lg $ LG.msg $ val "[rdb] fetchBestBlock from getBlockLocator - before"
+    bp2pEnv <- getBitcoinP2P
+    bn <- fetchBestBlock
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    return $ blockLocator hm bn
+    {-
     (hash, ht) <- fetchBestBlock rkdb net
     debug lg $ LG.msg $ val "[rdb] fetchBestBlock from getBlockLocator - after"
     let bl = L.insert ht $ filter (> 0) $ takeWhile (< ht) $ map (\x -> ht - (2 ^ x)) [0 .. 20] -- [1,2,4,8,16,32,64,... ,262144,524288,1048576]
@@ -186,6 +190,7 @@ getBlockLocator rkdb net = do
         Left (e :: SomeException) -> do
             debug lg $ LG.msg $ "[Error] getBlockLocator: " ++ show e
             throw e
+    -}
 
 processHeaders :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Headers -> m ()
 processHeaders hdrs = do
@@ -203,10 +208,13 @@ processHeaders hdrs = do
                 genesisHash = blockHashToHex $ headerHash $ getGenesisHeader net
                 rkdb = rocksDB dbe'
                 cf = rocksCF dbe'
-                headPrevHash = (blockHashToHex $ prevBlock $ fst $ head $ headersList hdrs)
+                headPrevBlockHash = prevBlock $ fst $ head $ headersList hdrs
+                headPrevHash = blockHashToHex headPrevBlockHash
                 hdrHash y = headerHash $ fst y
                 validate m = validateWithCheckPoint net (fromIntegral m) (hdrHash <$> (headersList hdrs))
-            bb <- fetchBestBlock rkdb net
+            bbn <- fetchBestBlock
+            let bb = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+            debug lg $ LG.msg $ "Fetched best block: " ++ show bb
             -- TODO: throw exception if it's a bitcoin cash block
             indexed <-
                 if (blockHashToHex $ fst bb) == genesisHash
@@ -224,9 +232,9 @@ processHeaders hdrs = do
                                          debug lg $ LG.msg $ LG.val ("Does not match best-block, redundant Headers msg")
                                          return [] -- already synced
                                      else do
-                                         res <- fetchMatchBlockOffset rkdb headPrevHash
+                                         res <- fetchMatchBlockOffset rkdb headPrevBlockHash
                                          case res of
-                                             Just (matchBHash, matchBHt) -> do
+                                             Just matchBHt -> do
                                                  unless (validate matchBHt) $ throw InvalidBlocksException
                                                  if ((snd bb) >
                                                      (matchBHt + fromIntegral (L.length $ headersList hdrs) + 12) -- reorg limit of 12 blocks
@@ -244,37 +252,25 @@ processHeaders hdrs = do
                                                                  "Does not match best-block, potential block re-org..."
                                                          let reOrgDiff = zip [(matchBHt + 1) ..] (headersList hdrs)
                                                          bestSynced <- NXB.fetchBestSyncedBlock rkdb net
-                                                         if snd bestSynced >= matchBHt
+                                                         if snd bestSynced >= (fromIntegral matchBHt)
                                                              then do
                                                                  debug lg $
                                                                      LG.msg $
                                                                      "Have synced blocks beyond point of re-org: synced @ " <>
                                                                      (show bestSynced) <>
                                                                      " versus point of re-org: " <>
-                                                                     (show $ (matchBHash, matchBHt)) <>
+                                                                     (show $ (headPrevHash, matchBHt)) <>
                                                                      ", re-syncing from thereon"
-                                                                 NXB.markBestSyncedBlock matchBHash matchBHt
+                                                                 NXB.markBestSyncedBlock headPrevHash $ fromIntegral matchBHt
                                                                  return reOrgDiff
                                                              else return reOrgDiff
                                              Nothing -> throw BlockHashNotFoundException
             let lenIndexed = L.length indexed
             debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)
-            mapM_
+            bns <- mapMaybeM
                 (\y -> do
                      let header = fst $ snd y
-                         hdrHash = blockHashToHex $ headerHash header
                          blkht = fst y
-                     resp <-
-                         liftIO $
-                         try $ do
-                             putDB rkdb blkht (hdrHash, header)
-                             putDB rkdb hdrHash (blkht, header)
-                     case resp of
-                         Right () -> return ()
-                         Left (e :: SomeException) ->
-                             liftIO $ do
-                                 err lg $ LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
-                                 throw KeyValueDBInsertException
                      tm <- liftIO $ floor <$> getPOSIXTime
                      bnm <- liftIO $ atomically
                                    $ stateTVar
@@ -284,22 +280,26 @@ processHeaders hdrs = do
                                                         Left _ -> (Nothing,hm))
                      case bnm of
                         Just b -> putHeaderMemoryElem b
-                        Nothing -> return ())
+                        Nothing -> return ()
+                     return $ (\x -> (x,(header,blkht))) <$> bnm)
                      --liftIO $ TSH.insert (blockTree bp2pEnv) (headerHash header) (fromIntegral blkht, header))
                 indexed
-            unless (L.null indexed) $ do
-                let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ fst z)) indexed
-                zRPCDispatchNotifyNewBlockHeader headers
-                markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
+            unless (L.null bns) $ do
+                let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ snd $ snd z)) bns
+                    bnode = fst $ last bns
+                zRPCDispatchNotifyNewBlockHeader headers bnode
+                putBestBlockNode bnode
+                -- markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
                 liftIO $ putMVar (bestBlockUpdated bp2pEnv) True
         False -> do
             err lg $ LG.msg $ val "Error: BlocksNotChainedException"
             throw BlocksNotChainedException
 
-fetchMatchBlockOffset :: (HasLogger m, MonadIO m) => R.DB -> Text -> m (Maybe (Text, Int32))
-fetchMatchBlockOffset rkdb hashes = do
+fetchMatchBlockOffset :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> BlockHash -> m (Maybe BlockHeight)
+fetchMatchBlockOffset rkdb hash = do
     lg <- getLogger
-    x <- liftIO $ R.get rkdb (C.pack . T.unpack $ hashes)
-    case x of
+    bp2pEnv <- getBitcoinP2P
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    case getBlockHeaderMemory hash hm of
         Nothing -> return Nothing
-        Just h -> return $ Just $ (hashes, read . T.unpack . DTE.decodeUtf8 $ h :: Int32)
+        Just bn -> return $ Just $ nodeHeight bn

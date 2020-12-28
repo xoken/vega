@@ -891,7 +891,8 @@ mineBlockFromCandidate = do
     dbe <- getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         conn = rocksDB dbe
-    (bhash, ht) <- fetchBestBlock conn net
+    bbn <- fetchBestBlock
+    let (bhash,ht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
     dag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
     case dag of
         Nothing -> return Nothing

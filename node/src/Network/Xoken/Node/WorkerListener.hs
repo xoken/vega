@@ -203,7 +203,7 @@ requestHandler sock writeLock msg = do
                              -> do
                                 pruneBlocksTxnsOutputs blockHashes
                                 return $ successResp mid $ ZPruneBlockTxOutputsResp
-                            ZNotifyNewBlockHeader headers
+                            ZNotifyNewBlockHeader headers bn
                                 -- liftIO $ print $ "ZNotifyNewBlockHeader - REQUEST " ++ (show $ P.head headers)
                              -> do
                                 debug lg $ LG.msg $ "decoded ZNotifyNewBlockHeader : " ++ (show $ P.head headers)
@@ -211,19 +211,6 @@ requestHandler sock writeLock msg = do
                                     LE.try $
                                     mapM_
                                         (\(ZBlockHeader header blkht) -> do
-                                             let hdrHash = blockHashToHex $ headerHash header
-                                             resp <-
-                                                 liftIO $
-                                                 try $ do
-                                                     putDB rkdb blkht (hdrHash, header)
-                                                     putDB rkdb hdrHash (blkht, header)
-                                             case resp of
-                                                 Right () -> return ()
-                                                 Left (e :: SomeException) ->
-                                                     liftIO $ do
-                                                         err lg $
-                                                             LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
-                                                         throw KeyValueDBInsertException
                                              tm <- liftIO $ floor <$> getPOSIXTime
                                              bnm <- liftIO $ atomically $ stateTVar
                                                                     (blockTree bp2pEnv)
@@ -241,6 +228,7 @@ requestHandler sock writeLock msg = do
                                         headers
                                 case res of
                                     Right () -> do
+                                        putBestBlockNode bn
                                         liftIO $
                                             print $
                                             "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show $ P.head headers)
