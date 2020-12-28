@@ -105,6 +105,7 @@ data BlockSyncException
     | OutputAlreadySpentException
     | InvalidTxSatsValueException
     | InvalidDAGEdgeException
+    | ZUnknownHandler
     deriving (Show, Read)
 
 instance Exception BlockSyncException
@@ -237,11 +238,12 @@ splitList xs = (f 1 xs, f 0 xs)
   where
     f n a = map fst . filter (odd . snd) . zip a $ [n ..]
 
-fetchBestBlock :: (HasLogger m, MonadIO m) => R.DB -> Network -> m (BlockHash, Int32)
-fetchBestBlock rkdb net = do
-    lg <- getLogger
-    hash <- liftIO $ R.get rkdb "best_chain_tip_hash"
-    height <- liftIO $ R.get rkdb "best_chain_tip_height"
+fetchBestBlock :: (HasXokenNodeEnv env m, MonadIO m) => m (BlockNode)
+fetchBestBlock = do
+    bp2pEnv <- getBitcoinP2P
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    return $ memoryBestHeader hm
+    {-
     case (hash, height) of
         (Just hs, Just ht)
             -- liftIO $
@@ -255,6 +257,7 @@ fetchBestBlock rkdb net = do
         _ -> do
             debug lg $ LG.msg $ val "Bestblock is genesis."
             return ((headerHash $ getGenesisHeader net), 0)
+    -}
 
 -- getTxShortCode :: TxHash -> Word8
 -- getTxShortCode txh = sum $ map (\(x, p) -> (fromIntegral x) * (16 ^ p)) list
@@ -289,6 +292,17 @@ getDBCF rkdb cf k = do
     case DS.decode <$> res of
         Just (Left e) -> do
             liftIO $ print $ "getDBCF ERROR" ++ show e
+            throw KeyValueDBLookupException
+        Just (Right m) -> return $ Just m
+        Nothing -> return Nothing
+
+
+getDBCF_ :: (Store a, Store b) => R.DB -> R.ColumnFamily -> a -> IO (Maybe b)
+getDBCF_ rkdb cf k = do
+    res <- R.getCF rkdb cf (DS.encode k)
+    case DS.decode <$> res of
+        Just (Left e) -> do
+            print $ "getDBCF_ ERROR" ++ show e
             throw KeyValueDBLookupException
         Just (Right m) -> return $ Just m
         Nothing -> return Nothing
@@ -336,3 +350,15 @@ sendMessage sock writeLock payload = do
             (\x -> do
                  LB.sendAll sock prefix
                  LB.sendAll sock payload)
+
+mkProvisionalBlockHash :: BlockHash -> BlockHash
+mkProvisionalBlockHash b = let bh = S.runGet S.get $ B.append (B.take 16 $ S.runPut $ S.put b) "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255"  :: Either String BlockHash
+                           in either (const b) (Prelude.id) bh
+
+isProvisionalBlockHash :: BlockHash -> Bool
+isProvisionalBlockHash = (== "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255") . (B.drop 16 . S.runPut . S.put)
+
+replaceProvisionals :: BlockHash -> [BlockHash] -> [BlockHash]
+replaceProvisionals bh [] = [bh]
+replaceProvisionals bh (pbh:bhs) | isProvisionalBlockHash pbh = (bh:filter (not . isProvisionalBlockHash) bhs)
+                                 | otherwise = pbh:(replaceProvisionals bh bhs)

@@ -15,12 +15,17 @@ module Network.Xoken.Node.P2P.BlockSync
     , processBlockTransactions
     , processConfTransaction
     , peerBlockSync
+    , fetchBestSyncedBlock
+    , markBestSyncedBlock
     , checkBlocksFullySynced
+    , checkBlocksFullySynced_
     , runPeerSync
     , runBlockCacheQueue
     , sendRequestMessages
     , zRPCDispatchTxValidate
     , processCompactBlockGetData
+    , newCandidateBlock
+    , newCandidateBlockChainTip
     ) where
 
 import Codec.Serialise
@@ -100,6 +105,7 @@ import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.Common
+import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Service.Chain
 import Network.Xoken.Node.WorkerDispatcher
@@ -248,9 +254,16 @@ markBestSyncedBlock hash height = do
 checkBlocksFullySynced :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Bool
 checkBlocksFullySynced net = do
     rkdb <- rocksDB <$> getDB
-    bestBlock <- fetchBestBlock rkdb net
+    bestBlock <- fetchBestBlock
     bestSynced <- fetchBestSyncedBlock rkdb net
-    return $ bestBlock == bestSynced
+    return $ (headerHash $ nodeHeader bestBlock, fromIntegral $ nodeHeight bestBlock) == bestSynced
+
+checkBlocksFullySynced_ :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Int32
+checkBlocksFullySynced_ net = do
+    rkdb <- rocksDB <$> getDB
+    bestBlock <- fetchBestBlock
+    bestSynced <- fetchBestSyncedBlock rkdb net
+    return $ (fromIntegral $ nodeHeight bestBlock) - (snd bestSynced)
 
 getBatchSizeMainnet :: Int32 -> Int32 -> [Int32]
 getBatchSizeMainnet peerCount n
@@ -272,6 +285,7 @@ getBatchSizeTestnet peerCount n
 getBatchSize :: Network -> Int32 -> Int32 -> [Int32]
 getBatchSize net peerCount n
     | (getNetworkName net == "bsvtest") = getBatchSizeTestnet peerCount n
+    | (getNetworkName net == "regtest") = [1]
     | otherwise = getBatchSizeMainnet peerCount n
 
 runBlockCacheQueue :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
@@ -294,48 +308,32 @@ runBlockCacheQueue =
         retn <-
             if sysz == 0
                 then do
-                    (hash, ht) <- fetchBestSyncedBlock rkdb net
-                    let cacheInd = getBatchSize net (fromIntegral $ L.length connPeers) ht
-                    let !bks = map (\x -> ht + x) cacheInd
-                    res <-
-                        liftIO $
-                        try $
-                        mapM
-                            (\k -> do
-                                 x <- getDB' rkdb k -- Maybe (Text, BlockHeader)
-                                 return $
-                                     case x :: Maybe (Text, BlockHeader) of
-                                         Nothing -> Nothing
-                                         Just (x', _) -> Just (k, x'))
-                            (bks)
-                    case res of
-                        Left (e :: SomeException) -> do
-                            err lg $ LG.msg ("Error: runBlockCacheQueue: " ++ show e)
-                            throw e
-                        Right (op' :: [Maybe (Int32, Text)]) -> do
-                            let op = catMaybes $ op'
-                            if L.length op == 0
+                    (bhash, ht') <- fetchBestSyncedBlock rkdb net
+                    hmem <- liftIO $ readTVarIO (blockTree bp2pEnv)
+                    let ht = fromIntegral ht'
+                        bc = last $ getBatchSize net (fromIntegral $ L.length connPeers) ht
+                        bh = ht + bc
+                    --let !bks = map (\x -> ht + x) cacheInd
+                        parc = bc - 1
+                        ans = getAncestor hmem (fromIntegral bh) (memoryBestHeader hmem)
+                        op = case ans of
+                                    Nothing -> []
+                                    Just an -> L.reverse (an:getParents hmem (fromIntegral parc) an)
+                    --liftIO $ print (bhash,ht,bc,bh,parc,ans,op)
+                    if L.length op == 0
+                        then do
+                            trace lg $ LG.msg $ val "Synced fully!"
+                            return (Nothing)
+                        else if L.length op == (fromIntegral bc)
                                 then do
-                                    debug lg $ LG.msg $ val "Synced fully!"
+                                    debug lg $ LG.msg $ val "Reloading cache."
+                                    let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) op
+                                    mapM (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
+                                    let e = p !! 0
+                                    return (Just $ BlockInfo (fst e) (snd $ snd e))
+                                else do
+                                    debug lg $ LG.msg $ val "Still loading block headers, try again!"
                                     return (Nothing)
-                                else if L.length op == (fromIntegral $ last cacheInd)
-                                         then do
-                                             debug lg $ LG.msg $ val "Reloading cache."
-                                             let !p =
-                                                     catMaybes $
-                                                     map
-                                                         (\x ->
-                                                              case (hexToBlockHash $ snd x) of
-                                                                  Just h ->
-                                                                      Just (h, (RequestQueued, fromIntegral $ fst x))
-                                                                  Nothing -> Nothing)
-                                                         (op)
-                                             mapM (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
-                                             let e = p !! 0
-                                             return (Just $ BlockInfo (fst e) (snd $ snd e))
-                                         else do
-                                             debug lg $ LG.msg $ val "Still loading block headers, try again!"
-                                             return (Nothing)
                 else do
                     mapM
                         (\(bsh, (_, ht)) -> do
@@ -407,11 +405,30 @@ runBlockCacheQueue =
                     if L.length sent == 0 &&
                        L.length unsent == 0 && L.length receiveInProgress == 0 && L.length recvComplete == 0
                         then do
-                            let !lelm = last $ L.sortOn (snd . snd) (syt)
-                            debug lg $ LG.msg $ ("marking best synced " ++ show (blockHashToHex $ fst $ lelm))
-                            markBestSyncedBlock (blockHashToHex $ fst $ lelm) (fromIntegral $ snd $ snd $ lelm)
+                            --let !lelm = last $ L.sortOn (snd . snd) (syt)
+                            let !(lhash,(_,lht)) = last $ syt
+                            debug lg $ LG.msg $ ("marking best synced " ++ show (blockHashToHex $ lhash))
+                            markBestSyncedBlock (blockHashToHex $ lhash) (fromIntegral $ lht)
                             --
-                            _ <- LA.async $ zRPCDispatchBlocksTxsOutputs (fst $ unzip syt)
+                            lp <- getDB' rkdb ("last-pruned" :: B.ByteString)
+                            let (lpht,lphs) = fromMaybe (0,headerHash $ getGenesisHeader net) lp :: (BlockHeight,BlockHash)
+                            debug lg $ LG.msg $ ("Last pruned: " ++ show (lpht,blockHashToHex $ lphs) ++ "; for best synced: " ++ show (lht, blockHashToHex lhash))
+                            if lht - lpht <= 11
+                                then do
+                                    debug lg $ LG.msg $ ("Last pruned too close. Skipping pruning. " ++ show (lht, lpht, lht - lpht))
+                                    return ()
+                                else do
+                                    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+                                    let bnm = getBlockHeaderMemory lhash hm
+                                    case bnm of
+                                        Nothing -> return ()
+                                        Just bn -> do
+                                            let anc = fmap (\x -> (nodeHeight x, headerHash $ nodeHeader x)) $ drop 10 $ getParents hm (fromIntegral $ lht - lpht - 1) bn
+                                            debug lg $ LG.msg $ ("Pruning " ++ show ((fmap blockHashToHex) <$> anc))
+                                            debug lg $ LG.msg $ ("Marking Last Pruned: " ++ show (head anc))
+                                            putDB rkdb ("last-pruned" :: B.ByteString) (head anc)
+                                            _ <- LA.async $ zRPCDispatchBlocksTxsOutputs $ fmap snd anc -- (fst $ unzip syt)
+                                            return ()
                             --
                             mapM
                                 (\(k, _) -> do
@@ -501,7 +518,7 @@ insertTxIdOutputs conn cf (txid, outputIndex) txOut = do
     case res of
         Right _ -> return ()
         Left (e :: SomeException) -> do
-            err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
+            err lg $ LG.msg $ "[dag] Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
             throw KeyValueDBInsertException
 
 processConfTransaction ::
@@ -515,6 +532,7 @@ processConfTransaction tx bhash blkht txind = do
     let conn = rocksDB $ dbe'
         cf = rocksCF dbe'
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
+    debug lg $ LG.msg $ "[dag] processing Tx " ++ show (txHash tx)
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
     --
@@ -531,9 +549,9 @@ processConfTransaction tx bhash blkht txind = do
                          let sval = fromIntegral $ computeSubsidy net $ (fromIntegral blkht :: Word32)
                          return (sval, (shortHash, opindx))
                      else do
-                         zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) bhash
+                         zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ Just bhash
                          case zz of
-                             Right val -> do
+                             Right (val, _, _) -> do
                                  return (val, (shortHash, opindx))
                              Left (e :: SomeException) -> do
                                  err lg $
@@ -547,6 +565,7 @@ processConfTransaction tx bhash blkht txind = do
             (inputs)
     -- insert UTXO/s
     cf' <- liftIO $ TSH.lookup cf ("outputs")
+    let opCount = fromIntegral $ L.length outputs
     ovs <-
         mapM
             (\(opt, oindex) -> do
@@ -560,6 +579,7 @@ processConfTransaction tx bhash blkht txind = do
                              outpoints
                              []
                              (fromIntegral $ outValue opt)
+                             opCount
                  res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
                  case res of
                      Right _ -> return (zut)
@@ -699,32 +719,20 @@ processCompactBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Compac
 processCompactBlock cmpct peer = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    let bhash = headerHash $ cbHeader cmpct
-    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    let bhdr = cbHeader cmpct
+        bhash = headerHash bhdr
+    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash ++ "  " ++ show cmpct)
     --
-    let keyhash = sha256 $ S.encode bhash `C.append` S.encode (cbNonce cmpct)
-        bs = S.encode keyhash
-        k0 =
-            case runGet getWord64le bs of
-                Left e -> Prelude.error e
-                Right a -> a
-        k1 =
-            case runGet getWord64le $ B.drop 8 bs of
-                Left e -> Prelude.error e
-                Right a -> a
-        skey = SipKey k0 k1
+    let skey = getCompactBlockSipKey bhdr (cbNonce cmpct)
     let cmpctTxLst = zip (cbShortIDs cmpct) [1 ..]
     cb <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
     case cb of
-        Nothing -> err lg $ LG.msg $ ("Candidate block not found!: " ++ show bhash)
+        Nothing -> do
+            return ()
         Just dag -> do
-            mpTxLst <- liftIO $ getTopologicalSortedForest dag
-            let mpShortTxIDList =
-                    map
-                        (\(txid, rt) -> do
-                             let (SipHash val) = hashWith 2 4 skey $ S.encode txid
-                             (val, (txid, rt)))
-                        mpTxLst
+            debug lg $ LG.msg $ ("New Candidate Block Found over: " ++ show bhash)
+            mpTxLst <- liftIO $ DAG.getTopologicalSortedForest dag
+            let mpShortTxIDList = map (\(txid, rt) -> do (txHashToShortId' txid skey, (txid, rt))) mpTxLst
             let mpShortTxIDMap = HM.fromList mpShortTxIDList
             let (usedTxns, missingTxns) =
                     L.partition
@@ -744,17 +752,18 @@ processCompactBlock cmpct peer = do
                              -- TODO: lock the previous dag and insert into a NEW dag!!
                           -> do
                              case rt of
-                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+)
-                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+))
+                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+) nextBcState
+                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+) nextBcState)
                 mpShortTxIDList
-            lastIndex <- liftIO $ newIORef 0
-            mtxIndexes <-
-                mapM
-                    (\(__, indx) -> do
-                         prev <- liftIO $ readIORef lastIndex
-                         liftIO $ writeIORef lastIndex indx
-                         return $ indx - prev)
-                    missingTxns
+            --    lastIndex <- liftIO $ newIORef 0
+            --    mtxIndexes <-
+            --        mapM
+            --            (\(__, indx) -> do
+            --                prev <- liftIO $ readIORef lastIndex
+            --                liftIO $ writeIORef lastIndex indx
+            --                return $ indx - prev)
+            --            missingTxns
+            let mtxIndexes = map snd missingTxns
             let gbtxn = GetBlockTxns bhash (fromIntegral $ L.length mtxIndexes) mtxIndexes
             sendRequestMessages peer $ MGetBlockTxns gbtxn
             --
@@ -766,7 +775,11 @@ processCompactBlock cmpct peer = do
                 S.maxThreads (maxTxProcessingThreads $ nodeConfig bp2pEnv)
             --
             let scb = SQ.fromList $ cbShortIDs cmpct
-            liftIO $ TSH.insert (prefilledShortIDsProcessing bp2pEnv) bhash (scb, cbPrefilledTxns cmpct, mpShortTxIDMap)
+            liftIO $
+                TSH.insert
+                    (prefilledShortIDsProcessing bp2pEnv)
+                    bhash
+                    (skey, scb, cbPrefilledTxns cmpct, mpShortTxIDMap)
             --
             -- 
             return ()
@@ -776,8 +789,15 @@ processBlockTransactions :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => B
 processBlockTransactions blockTxns = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    let bhash = btBlockhash blockTxns
-    debug lg $ LG.msg ("processing Compact Block! " ++ show bhash)
+    dbe <- getDB
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        bhash = btBlockhash blockTxns
+        txhashes = txHash <$> (btTransactions blockTxns)
+        conn = rocksDB dbe
+    bbn <- fetchBestBlock
+    let bhash' = headerHash $ nodeHeader bbn
+    debug lg $ LG.msg ("processing Block Transactions! " ++ show bhash)
+    debug lg $ LG.msg ("processing Block Transactions! " ++ show blockTxns)
     S.drain $
         aheadly $
         S.fromList (btTransactions blockTxns) & S.mapM (processDeltaTx bhash) &
@@ -790,16 +810,20 @@ processBlockTransactions blockTxns = do
         Just dag -> do
             res <- liftIO $ TSH.lookup (prefilledShortIDsProcessing bp2pEnv) bhash
             case res of
-                Just (sids, cbpftxns, lkmap)
+                Just (skey, sids, cbpftxns, lkmap')
                     -- TODO: first insert blockTxns into `lkmap` we can find it subsequently
                  -> do
+                    let lkmap =
+                            HM.union
+                                lkmap'
+                                (HM.fromList $ fmap (\txh -> (txHashToShortId' txh skey, (txh, Nothing))) txhashes)
                     pair <- liftIO $ newIORef sids
                     validator <- liftIO $ TSH.new 10
                     mapM_
                         (\ptx -> do
                              edges <- liftIO $ DAG.getOrigEdges dag (txHash $ pfTx ptx)
                              case edges of
-                                 Just edgs -> do
+                                 Just (edgs, _) -> do
                                      mapM_
                                          (\ed -> do
                                               fd <- liftIO $ TSH.lookup validator ed
@@ -808,6 +832,7 @@ processBlockTransactions blockTxns = do
                                                   Nothing -> throw KeyValueDBInsertException -- stop not topologically sorted
                                           )
                                          edgs
+                                 Nothing -> return ()
                              liftIO $ TSH.insert validator (txHash $ pfTx ptx) ()
                              cur <- liftIO $ readIORef pair
                              let (frag, rem) = SQ.splitAt (fromIntegral $ pfIndex ptx) cur
@@ -819,7 +844,7 @@ processBlockTransactions blockTxns = do
                                           Just (x, _) -> do
                                               edges <- liftIO $ DAG.getOrigEdges dag x
                                               case edges of
-                                                  Just edgs -> do
+                                                  Just (edgs, _) -> do
                                                       mapM_
                                                           (\ed -> do
                                                                fd <- liftIO $ TSH.lookup validator ed
@@ -832,6 +857,14 @@ processBlockTransactions blockTxns = do
                                           Nothing -> return ())
                                  frag)
                         (cbpftxns)
+                Nothing -> return ()
+    olddag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash'
+    case olddag of
+        Just dag -> do
+            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 emptyBranchComputeState 16 16 (+) (nextBcState)
+            liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash newdag
+        Nothing -> do
+            newCandidateBlock bhash
 
 processDeltaTx :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> Tx -> m ()
 processDeltaTx bhash tx = do
@@ -883,3 +916,23 @@ sendCompactBlockGetData pr hash = do
                 Left (e :: SomeException) -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
+
+newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
+newCandidateBlock hash = do
+    bp2pEnv <- getBitcoinP2P
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
+    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
+
+newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+newCandidateBlockChainTip = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    dbe' <- getDB
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        conn = rocksDB dbe'
+    bbn <- fetchBestBlock
+    let hash = headerHash $ nodeHeader bbn
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
+    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
+
+defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"

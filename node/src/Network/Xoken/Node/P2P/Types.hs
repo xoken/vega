@@ -69,6 +69,7 @@ data BitcoinPeer =
         , bpNonce :: !Word64 -- random nonce sent during handshake
         , statsTracker :: !PeerTracker -- track sync stats
         , blockFetchQueue :: !(MVar (BlockInfo))
+        , bpSendcmpt :: !(IORef Bool) -- does the peer ask for CompactBlocks
         }
 
 data PeerTracker =
@@ -108,6 +109,19 @@ data MerkleNode =
     deriving (Show, Eq, Ord)
 
 type HashCompute = (M.Map Int8 (MerkleNode), [MerkleNode])
+
+data BranchComputeState =
+    BranchComputeState
+        { hashCompute :: HashCompute
+        , txCount :: Word32
+        , lastTxn :: Maybe TxHash
+        }
+    deriving (Show, Eq, Ord)
+
+emptyHashCompute :: HashCompute
+emptyHashCompute = (M.empty, [])
+
+emptyBranchComputeState = BranchComputeState emptyHashCompute 0 Nothing
 
 emptyMerkleNode :: MerkleNode
 emptyMerkleNode = MerkleNode {node = Nothing, leftChild = Nothing, rightChild = Nothing, isLeft = False}
@@ -153,6 +167,7 @@ data ZtxiUtxo =
         , zuInputs :: ![(TxHash, Word32)]
         , zuSpending :: ![Spending]
         , zuSatoshiValue :: !Word64
+        , zuOpCount :: !Word32
         }
     deriving (Show, Eq, Ord, Generic, Serialise)
 

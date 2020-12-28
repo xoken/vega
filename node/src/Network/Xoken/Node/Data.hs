@@ -18,7 +18,6 @@ import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.Trans.Maybe
 import Data.Aeson as A
-import qualified Data.Aeson.Encode.Pretty as AP
 import qualified Data.Aeson.Encoding as A
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -92,8 +91,14 @@ data ZRPCRequestParam
     | ZGetOutpoint -- C =>> C | C =>> M  | M =>> C 
           { goTxID :: !TxHash
           , goIndex :: !Word32
-          , goBlockHash :: !BlockHash
+          , goBlockHash :: !(Maybe BlockHash)
           , goPredecessors :: !(DS.Set BlockHash)
+          }
+    | ZUpdateOutpoint -- C =>> C | C =>> M  | M =>> C 
+          { uoTxID :: !TxHash
+          , uoIndex :: !Word32
+          , uoBlockHash :: !BlockHash
+          , uoBlockHeight :: !Word32
           }
     | ZUnspendOutpoint -- C =>> C | C =>> M |  M =>> C 
           { goTxID :: !TxHash
@@ -111,6 +116,7 @@ data ZRPCRequestParam
           }
     | ZNotifyNewBlockHeader -- M =>> C
           { znBlockHeaders :: ![ZBlockHeader]
+          , znBlockNode :: !BlockNode
           }
     | ZPruneBlockTxOutputs
           { prBlockHashes :: ![BlockHash]
@@ -148,6 +154,8 @@ deriving instance Store Hash256
 
 deriving instance Store BlockHeader
 
+deriving instance Serialise BlockNode
+
 data ZRPCError =
     ZRPCError
         { zrsStatusMessage :: !ZRPCErrors
@@ -174,6 +182,11 @@ data ZRPCResponseBody
     | ZGetOutpointResp
           { zOutValue :: !Word64
           , zScriptOutput :: !ByteString
+          , zBlockHash :: ![BlockHash]
+          , zBlockHeight :: !Word32
+          }
+    | ZUpdateOutpointResp
+          { zOutpointUpdated :: !Word32
           }
     | ZUnspendOutpointResp
           {
@@ -189,8 +202,7 @@ data ZRPCResponseBody
           }
     | ZPruneBlockTxOutputsResp
     | ZValidateUnconfirmedTxResp
-          { utCandidateParentBlock :: ![BlockHash]
-          , utDependentTransaction :: ![TxHash]
+          { utDependentTransaction :: ![TxHash] -- utCandidateParentBlock :: ![BlockHash]
           }
     | ZOk
     | ZPong
@@ -215,7 +227,6 @@ data RPCMessage
           }
     | RPCResponse
           { rsStatusCode :: Int16
-          , pretty :: Bool
           , rsResp :: Either RPCError (Maybe RPCResponseBody)
           }
     deriving (Show, Generic, Hashable, Eq, Serialise)
@@ -278,365 +289,50 @@ instance ToJSON ErrorResponse where
     toJSON (ErrorResponse c m d) = object ["code" .= c, "message" .= m, "data" .= d]
 
 data RPCReqParams
-    = AuthenticateReq
-          { username :: String
-          , password :: String
-          , prettyPrint :: Bool
+    = GetMiningCandidateRequest
+          { gmcrProvideCoinbaseTx :: Maybe Bool
           }
-    | GeneralReq
-          { sessionKey :: String
-          , prettyPrint :: Bool
-          , methodParams :: Maybe RPCReqParams'
+    | SubmitMiningSolutionRequest
+          { smsrId :: String
+          , smsrNonce :: Int32
+          , smsrCoinbase :: Maybe String
+          , smsrTime :: Maybe Int32
+          , smsrVersion :: Maybe Int32
           }
-    deriving (Show, Generic, Hashable, Eq, Serialise)
+    deriving (Generic, Show, Hashable, Eq, Serialise, ToJSON)
 
 instance FromJSON RPCReqParams where
     parseJSON (Object o) =
-        (AuthenticateReq <$> o .: "username" <*> o .: "password" <*> o .:? "prettyPrint" .!= True) <|>
-        (GeneralReq <$> o .: "sessionKey" <*> o .:? "prettyPrint" .!= True <*> o .:? "methodParams")
+        (GetMiningCandidateRequest <$> o .:? "provide_coinbase_tx") <|>
+        (SubmitMiningSolutionRequest <$> o .: "id" <*> o .: "nonce" <*> o .:? "coinbase" <*> o .:? "time" <*>
+         o .:? "version")
 
-data RPCReqParams'
-    = AddUser
-          { auUsername :: String
-          , auApiExpiryTime :: Maybe UTCTime
-          , auApiQuota :: Maybe Int32
-          , auFirstName :: String
-          , auLastName :: String
-          , auEmail :: String
-          , auRoles :: Maybe [String]
-          }
-    | GetBlockByHeight
-          { gbHeight :: Int
-          }
-    | GetBlocksByHeights
-          { gbHeights :: [Int]
-          }
-    | GetBlockByHash
-          { gbBlockHash :: String
-          }
-    | GetBlocksByHashes
-          { gbBlockHashes :: [String]
-          }
-    | GetChainHeaders
-          { gcHeight :: Int32
-          , gcPageSize :: Int
-          }
-    | GetTxIDsByBlockHash
-          { gtTxBlockHash :: String
-          , gtPageSize :: Int32
-          , gtPageNumber :: Int32
-          }
-    | GetTransactionByTxID
-          { gtTxHash :: String
-          }
-    | GetTransactionsByTxIDs
-          { gtTxHashes :: [String]
-          }
-    | GetRawTransactionByTxID
-          { gtRTxHash :: String
-          }
-    | GetRawTransactionsByTxIDs
-          { gtRTxHashes :: [String]
-          }
-    | GetOutputsByAddress
-          { gaAddrOutputs :: String
-          , gaPageSize :: Maybe Int32
-          , gaCursor :: Maybe String
-          }
-    | GetOutputsByAddresses
-          { gasAddrOutputs :: [String]
-          , gasPageSize :: Maybe Int32
-          , gasCursor :: Maybe String
-          }
-    | GetOutputsByScriptHash
-          { gaScriptHashOutputs :: String
-          , gaScriptHashPageSize :: Maybe Int32
-          , gaScriptHashCursor :: Maybe String
-          }
-    | GetOutputsByScriptHashes
-          { gasScriptHashOutputs :: [String]
-          , gasScriptHashPageSize :: Maybe Int32
-          , gasScriptHashCursor :: Maybe String
-          }
-    | GetUTXOsByAddress
-          { guaAddrOutputs :: String
-          , guaPageSize :: Maybe Int32
-          , guaCursor :: Maybe String
-          }
-    | GetUTXOsByScriptHash
-          { guScriptHashOutputs :: String
-          , guScriptHashPageSize :: Maybe Int32
-          , guScriptHashCursor :: Maybe String
-          }
-    | GetUTXOsByAddresses
-          { guasAddrOutputs :: [String]
-          , guasPageSize :: Maybe Int32
-          , guasCursor :: Maybe String
-          }
-    | GetUTXOsByScriptHashes
-          { gusScriptHashOutputs :: [String]
-          , gusScriptHashPageSize :: Maybe Int32
-          , gusScriptHashCursor :: Maybe String
-          }
-    | GetMerkleBranchByTxID
-          { gmbMerkleBranch :: String
-          }
-    | GetAllegoryNameBranch
-          { gaName :: String
-          , gaIsProducer :: Bool
-          }
-    | RelayTx
-          { rTx :: ByteString
-          }
-    | GetPartiallySignedAllegoryTx
-          { gpsaPaymentInputs :: [(OutPoint', Int)]
-          , gpsaName :: ([Int], Bool) -- name & isProducer
-          , gpsaOutputOwner :: String
-          , gpsaOutputChange :: String
-          }
-    | GetTxOutputSpendStatus
-          { gtssHash :: String
-          , gtssIndex :: Int32
-          }
-    | UserByUsername
-          { uUsername :: String
-          }
-    | UpdateUserByUsername
-          { uuUsername :: String
-          , uuUpdateData :: UpdateUserByUsername'
-          }
-    deriving (Generic, Show, Hashable, Eq, Serialise, ToJSON)
-
-instance FromJSON RPCReqParams' where
-    parseJSON (Object o) =
-        (GetBlockByHeight <$> o .: "height") <|> (GetBlocksByHeights <$> o .: "heights") <|>
-        (GetBlockByHash <$> o .: "hash") <|>
-        (GetBlocksByHashes <$> o .: "hashes") <|>
-        (GetTxIDsByBlockHash <$> o .: "hash" <*> o .:? "pageSize" .!= 100 <*> o .:? "pageNumber" .!= 1) <|>
-        (GetTransactionByTxID <$> o .: "txid") <|>
-        (GetTransactionsByTxIDs <$> o .: "txids") <|>
-        (GetRawTransactionByTxID <$> o .: "txid") <|>
-        (GetRawTransactionsByTxIDs <$> o .: "txids") <|>
-        (GetOutputsByAddress <$> o .: "address" <*> o .:? "pageSize" <*> o .:? "cursor") <|>
-        (GetOutputsByAddresses <$> o .: "addresses" <*> o .:? "pageSize" <*> o .:? "cursor") <|>
-        (GetOutputsByScriptHash <$> o .: "scriptHash" <*> o .:? "pageSize" <*> o .:? "cursor") <|>
-        (GetOutputsByScriptHashes <$> o .: "scriptHashes" <*> o .:? "pageSize" <*> o .:? "cursor") <|>
-        (GetUTXOsByAddress <$> o .: "address" <*> o .:? "pageSize" <*> o .:? "cursor") <|>
-        (GetUTXOsByAddresses <$> o .: "addresses" <*> o .:? "pageSize" <*> o .:? "cursor") <|>
-        (GetUTXOsByScriptHash <$> o .: "scriptHash" <*> o .:? "pageSize" <*> o .:? "cursor") <|>
-        (GetUTXOsByScriptHashes <$> o .: "scriptHashes" <*> o .:? "pageSize" <*> o .:? "cursor") <|>
-        (GetMerkleBranchByTxID <$> o .: "txid") <|>
-        (GetAllegoryNameBranch <$> o .: "name" <*> o .: "isProducer") <|>
-        (RelayTx . BL.toStrict . GZ.decompress . B64L.decodeLenient . BL.fromStrict . T.encodeUtf8 <$> o .: "rawTx") <|>
-        (GetPartiallySignedAllegoryTx <$> o .: "paymentInputs" <*> o .: "name" <*> o .: "outputOwner" <*>
-         o .: "outputChange") <|>
-        (AddUser <$> o .: "username" <*> o .:? "apiExpiryTime" <*> o .:? "apiQuota" <*> o .: "firstName" <*>
-         o .: "lastName" <*>
-         o .: "email" <*>
-         o .:? "roles") <|>
-        (GetTxOutputSpendStatus <$> o .: "txid" <*> o .: "index") <|>
-        (UserByUsername <$> o .: "username") <|>
-        (UpdateUserByUsername <$> o .: "username" <*> o .: "updateData") <|>
-        (GetChainHeaders <$> o .:? "startBlockHeight" .!= 1 <*> o .:? "pageSize" .!= 2000)
-
-data RPCResponseBody
-    = AuthenticateResp
-          { auth :: AuthResp
-          }
-    | RespAddUser
-          { addUser :: AddUserResp
-          }
-    | RespBlockByHeight
-          { block :: BlockRecord
-          }
-    | RespBlocksByHeight
-          { blocks :: [BlockRecord]
-          }
-    | RespBlockByHash
-          { block :: BlockRecord
-          }
-    | RespBlocksByHashes
-          { blocks :: [BlockRecord]
-          }
-    | RespChainInfo
-          { chainInfo :: ChainInfo
-          }
-    | RespChainHeaders
-          { chainHeaders :: [ChainHeader]
-          }
-    | RespTxIDsByBlockHash
-          { txids :: [String]
-          }
-    | RespTransactionByTxID
-          { tx :: TxRecord
-          }
-    | RespTransactionsByTxIDs
-          { txs :: [TxRecord]
-          }
-    | RespRawTransactionByTxID
-          { rawTx :: RawTxRecord
-          }
-    | RespRawTransactionsByTxIDs
-          { rawTxs :: [RawTxRecord]
-          }
-    | RespOutputsByAddress
-          { nextCursor :: Maybe String
-          , saddressOutputs :: [AddressOutputs]
-          }
-    | RespOutputsByAddresses
-          { nextCursor :: Maybe String
-          , maddressOutputs :: [AddressOutputs]
-          }
-    | RespOutputsByScriptHash
-          { nextCursor :: Maybe String
-          , sscriptOutputs :: [ScriptOutputs]
-          }
-    | RespOutputsByScriptHashes
-          { nextCursor :: Maybe String
-          , mscriptOutputs :: [ScriptOutputs]
-          }
-    | RespUTXOsByAddress
-          { nextCursor :: Maybe String
-          , saddressUTXOs :: [AddressOutputs]
-          }
-    | RespUTXOsByAddresses
-          { nextCursor :: Maybe String
-          , maddressUTXOs :: [AddressOutputs]
-          }
-    | RespUTXOsByScriptHash
-          { nextCursor :: Maybe String
-          , sscriptUTXOs :: [ScriptOutputs]
-          }
-    | RespUTXOsByScriptHashes
-          { nextCursor :: Maybe String
-          , mscriptUTXOs :: [ScriptOutputs]
-          }
-    | RespMerkleBranchByTxID
-          { merkleBranch :: [MerkleBranchNode']
-          }
-    | RespAllegoryNameBranch
-          { nameBranch :: [(OutPoint', [MerkleBranchNode'])]
-          }
-    | RespRelayTx
-          { rrTx :: Bool
-          }
-    | RespPartiallySignedAllegoryTx
-          { psaTx :: ByteString
-          }
-    | RespTxOutputSpendStatus
-          { spendStatus :: Maybe TxOutputSpendStatus
-          }
-    | RespUser
-          { user :: Maybe User
-          }
+data RPCResponseBody =
+    GetMiningCandidateResp
+        { rgmcId :: String
+        , rgmcPrevHash :: String
+        , rgmcCoinbase :: Maybe String
+        , rgmcVersion :: Int32
+        , rgmcCoinbaseValue :: Int64
+        , rgmcnBits :: Int32
+        , rgmcTime :: Int32
+        , rgmcHeight :: Int32
+        , rgmcMerkleProof :: [String]
+        }
     deriving (Generic, Show, Hashable, Eq, Serialise)
 
 instance ToJSON RPCResponseBody where
-    toJSON (AuthenticateResp a) = object ["auth" .= a]
-    toJSON (RespAddUser usr) = object ["user" .= usr]
-    toJSON (RespBlockByHeight b) = object ["block" .= b]
-    toJSON (RespBlocksByHeight bs) = object ["blocks" .= bs]
-    toJSON (RespBlockByHash b) = object ["block" .= b]
-    toJSON (RespBlocksByHashes bs) = object ["blocks" .= bs]
-    toJSON (RespChainInfo ci) = object ["chainInfo" .= ci]
-    toJSON (RespChainHeaders chs) = object ["blockHeaders" .= chs]
-    toJSON (RespTxIDsByBlockHash txids) = object ["txids" .= txids]
-    toJSON (RespTransactionByTxID tx) = object ["tx" .= tx]
-    toJSON (RespTransactionsByTxIDs txs) = object ["txs" .= txs]
-    toJSON (RespRawTransactionByTxID tx) = object ["rawTx" .= tx]
-    toJSON (RespRawTransactionsByTxIDs txs) = object ["rawTxs" .= txs]
-    toJSON (RespOutputsByAddress nc sa) = object ["nextCursor" .= nc, "outputs" .= sa]
-    toJSON (RespOutputsByAddresses nc ma) = object ["nextCursor" .= nc, "outputs" .= ma]
-    toJSON (RespOutputsByScriptHash nc sa) = object ["nextCursor" .= nc, "outputs" .= sa]
-    toJSON (RespOutputsByScriptHashes nc ma) = object ["nextCursor" .= nc, "outputs" .= ma]
-    toJSON (RespUTXOsByAddress nc sa) = object ["nextCursor" .= nc, "utxos" .= sa]
-    toJSON (RespUTXOsByAddresses nc ma) = object ["nextCursor" .= nc, "utxos" .= ma]
-    toJSON (RespUTXOsByScriptHash nc sa) = object ["nextCursor" .= nc, "utxos" .= sa]
-    toJSON (RespUTXOsByScriptHashes nc ma) = object ["nextCursor" .= nc, "utxos" .= ma]
-    toJSON (RespMerkleBranchByTxID mb) = object ["merkleBranch" .= mb]
-    toJSON (RespAllegoryNameBranch nb) = object ["nameBranch" .= nb]
-    toJSON (RespRelayTx rrTx) = object ["txBroadcast" .= rrTx]
-    toJSON (RespPartiallySignedAllegoryTx ps) =
-        object ["psaTx" .= (T.decodeUtf8 . BL.toStrict . B64L.encode . GZ.compress . BL.fromStrict $ ps)]
-    toJSON (RespTxOutputSpendStatus ss) = object ["spendStatus" .= ss]
-    toJSON (RespUser u) = object ["user" .= u]
-
-data UpdateUserByUsername' =
-    UpdateUserByUsername'
-        { uuPassword :: Maybe String
-        , uuFirstName :: Maybe String
-        , uuLastName :: Maybe String
-        , uuEmail :: Maybe String
-        , uuApiQuota :: Maybe Int32
-        , uuRoles :: Maybe [String]
-        , uuApiExpiryTime :: Maybe UTCTime
-        }
-    deriving (Generic, Show, Hashable, Eq, Serialise, ToJSON)
-
-instance FromJSON UpdateUserByUsername' where
-    parseJSON (Object o) =
-        (UpdateUserByUsername' <$> o .:? "password" <*> o .:? "firstName" <*> o .:? "lastName" <*> o .:? "email" <*>
-         o .:? "apiQuota" <*>
-         o .:? "roles" <*>
-         o .:? "apiExpiryTime")
-
-data AuthResp =
-    AuthResp
-        { sessionKey :: Maybe String
-        , callsUsed :: Int
-        , callsRemaining :: Int
-        }
-    deriving (Generic, Show, Hashable, Eq, Serialise, ToJSON)
-
-data AddUserResp =
-    AddUserResp
-        { aurUser :: User
-        , aurPassword :: String
-        }
-    deriving (Generic, Show, Hashable, Eq, Serialise)
-
-instance ToJSON AddUserResp where
-    toJSON (AddUserResp (User uname _ fname lname email roles apiQuota _ apiExpTime _ _) pwd) =
+    toJSON (GetMiningCandidateResp id ph cb vr cv nb tm ht mp) =
         object
-            [ "username" .= uname
-            , "password" .= pwd
-            , "firstName" .= fname
-            , "lastName" .= lname
-            , "email" .= email
-            , "roles" .= roles
-            , "apiQuota" .= apiQuota
-            , "apiExpiryTime" .= apiExpTime
-            ]
-
-data User =
-    User
-        { uUsername :: String
-        , uHashedPassword :: String
-        , uFirstName :: String
-        , uLastName :: String
-        , uEmail :: String
-        , uRoles :: [String]
-        , uApiQuota :: Int
-        , uApiUsed :: Int
-        , uApiExpiryTime :: UTCTime
-        , uSessionKey :: String
-        , uSessionKeyExpiry :: UTCTime
-        }
-    deriving (Generic, Show, Hashable, Eq, Serialise)
-
-instance ToJSON User where
-    toJSON (User uname _ fname lname email roles apiQuota apiUsed apiExpTime sKey sKeyExp) =
-        object
-            [ "username" .= uname
-            , "firstName" .= fname
-            , "lastName" .= lname
-            , "email" .= email
-            , "roles" .= roles
-            , "callsRemaining" .= (apiQuota - apiUsed)
-            , "callsUsed" .= apiUsed
-            , "apiExpiryTime" .= apiExpTime
-            , "sessionKey" .= sKey
-            , "sessionKeyExpiry" .= sKeyExp
+            [ "id" .= id
+            , "prevHash" .= ph
+            , "coinbase" .= cb
+            , "version" .= vr
+            , "coinbaseValue" .= cv
+            , "nBits" .= nb
+            , "time" .= tm
+            , "height" .= ht
+            , "merkleProof" .= mp
             ]
 
 data ChainInfo =
@@ -1078,16 +774,6 @@ txOutputDataToOutput :: TxOutputData -> TxOutput
 txOutputDataToOutput (TxOutputData {..}) = TxOutput txind (T.unpack address) spendInfo value ""
 
 -}
-fromResultWithCursor :: ResultWithCursor r c -> r
-fromResultWithCursor = (\(ResultWithCursor res cur) -> res)
-
 reverse2 :: String -> String
 reverse2 (x:y:xs) = reverse2 xs ++ [x, y]
 reverse2 x = x
-
-maxBoundOutput :: (T.Text, Int32)
-maxBoundOutput = (T.pack "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", maxBound)
-
-encodeResp :: ToJSON a => Bool -> a -> C.ByteString
-encodeResp True = AP.encodePretty
-encodeResp False = A.encode

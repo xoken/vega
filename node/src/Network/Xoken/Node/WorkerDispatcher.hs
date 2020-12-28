@@ -53,6 +53,7 @@ import Network.Socket
 import Network.Socket.ByteString as SB (recv, sendAll)
 import qualified Network.TLS as NTLS
 import Network.Xoken.Block.Common
+import Network.Xoken.Block.Headers
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
@@ -124,11 +125,57 @@ zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
                     throw mex
     return ()
 
-zRPCDispatchGetOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> m (Word64)
+zRPCDispatchGetOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> Maybe BlockHash -> m (Word64, [BlockHash], Word32)
 zRPCDispatchGetOutpoint outPoint bhash = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
+    debug lg $ LG.msg $ val "[dag] zRPCDispatchGetOutpoint"
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    let opIndex = outPointIndex $ outPoint
+        lexKey = getTxShortHash (outPointHash outPoint) 8
+        bhash' =
+            case bhash of
+                Nothing -> DS.empty
+                Just bh -> DS.singleton bh
+    worker <- getRemoteWorker lexKey GetOutpoint
+    case worker of
+        Nothing
+            -- liftIO $ print "zRPCDispatchGetOutpoint - SELF"
+         -> do
+            debug lg $ LG.msg $ val "[dag] zRPCDispatchGetOutpoint: Worker Nothing"
+            val <-
+                validateOutpoint
+                    (outPoint)
+                    (bhash') -- TODO: needs to contains more predecessors
+                    bhash
+                    (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
+            return val
+        Just wrk
+            -- liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
+         -> do
+            debug lg $ LG.msg $ "[dag] zRPCDispatchGetOutpoint: Worker: " ++ show wrk
+            let mparam = ZGetOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash (bhash')
+            resp <- zRPCRequestDispatcher mparam wrk
+            -- liftIO $ print $ "zRPCDispatchGetOutpoint - RESPONSE " ++ show resp
+            case zrsPayload resp of
+                Right spl -> do
+                    case spl of
+                        Just pl ->
+                            case pl of
+                                ZGetOutpointResp val scr bsh ht -> return (val, bsh, ht)
+                        Nothing -> throw InvalidMessageTypeException
+                Left er -> do
+                    err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
+                    let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
+                    throw mex
+
+zRPCDispatchUpdateOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Word32)
+zRPCDispatchUpdateOutpoint outPoint bhash height = do
+    dbe' <- getDB
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    debug lg $ LG.msg $ val "[dag] zRPCDispatchUpdateOutpoint"
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let opIndex = outPointIndex $ outPoint
         lexKey = getTxShortHash (outPointHash outPoint) 8
@@ -137,17 +184,18 @@ zRPCDispatchGetOutpoint outPoint bhash = do
         Nothing
             -- liftIO $ print "zRPCDispatchGetOutpoint - SELF"
          -> do
+            debug lg $ LG.msg $ val "[dag] zRPCDispatchGetOutpoint: Worker Nothing"
             val <-
-                validateOutpoint
-                    (outPoint)
-                    (DS.singleton bhash) -- TODO: needs to contains more predecessors
+                updateOutpoint
+                    outPoint
                     bhash
-                    (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
+                    height
             return val
         Just wrk
             -- liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
          -> do
-            let mparam = ZGetOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash (DS.singleton bhash)
+            debug lg $ LG.msg $ "[dag] zRPCDispatchGetOutpoint: Worker: " ++ show wrk
+            let mparam = ZUpdateOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash height
             resp <- zRPCRequestDispatcher mparam wrk
             -- liftIO $ print $ "zRPCDispatchGetOutpoint - RESPONSE " ++ show resp
             case zrsPayload resp of
@@ -155,12 +203,13 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     case spl of
                         Just pl ->
                             case pl of
-                                ZGetOutpointResp val scr -> return (val)
+                                ZUpdateOutpointResp upd -> return upd
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
-                    err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
+                    err lg $ LG.msg $ "decoding Tx updation error resp : " ++ show er
                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
                     throw mex
+
 
 zRPCDispatchBlocksTxsOutputs :: (HasXokenNodeEnv env m, MonadIO m) => [BlockHash] -> m ()
 zRPCDispatchBlocksTxsOutputs blockHashes = do
@@ -215,8 +264,8 @@ zRPCDispatchBlocksTxsOutputs blockHashes = do
 --                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
 --                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
 --                     throw mex
-zRPCDispatchNotifyNewBlockHeader :: (HasXokenNodeEnv env m, MonadIO m) => [ZBlockHeader] -> m ()
-zRPCDispatchNotifyNewBlockHeader headers = do
+zRPCDispatchNotifyNewBlockHeader :: (HasXokenNodeEnv env m, MonadIO m) => [ZBlockHeader] -> BlockNode -> m ()
+zRPCDispatchNotifyNewBlockHeader headers bn = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
@@ -227,7 +276,7 @@ zRPCDispatchNotifyNewBlockHeader headers = do
              case wrk of
                  SelfWorker {..} -> return ()
                  RemoteWorker {..} -> do
-                     let mparam = ZNotifyNewBlockHeader headers
+                     let mparam = ZNotifyNewBlockHeader headers bn
                      resp <- zRPCRequestDispatcher mparam wrk
                      case zrsPayload resp of
                          Right spl -> do
@@ -243,8 +292,7 @@ zRPCDispatchNotifyNewBlockHeader headers = do
         (wrkrs)
 
 --
-zRPCDispatchUnconfirmedTxValidate ::
-       (HasXokenNodeEnv env m, MonadIO m) => (Tx -> m (([BlockHash], [TxHash]))) -> Tx -> m (([BlockHash], [TxHash]))
+zRPCDispatchUnconfirmedTxValidate :: (HasXokenNodeEnv env m, MonadIO m) => (Tx -> m ([TxHash])) -> Tx -> m ([TxHash])
 zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
@@ -255,6 +303,7 @@ zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
         Nothing
             -- liftIO $ print "zRPCDispatchUnconfirmedTxValidate - SELF"
          -> do
+            debug lg $ LG.msg $ "zRPCDispatchUnconfirmedTxValidate Nothing: " ++ (show $ txHash tx)
             res <- LE.try $ selfFunc tx
             case res of
                 Right val -> do
@@ -265,6 +314,7 @@ zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
         Just wrk
             -- liftIO $ print $ "zRPCDispatchUnconfirmedTxValidate - " ++ show wrk
          -> do
+            debug lg $ LG.msg $ "zRPCDispatchUnconfirmedTxValidate (Just): " ++ (show $ txHash tx)
             let mparam = ZValidateUnconfirmedTx tx
             resp <- zRPCRequestDispatcher mparam wrk
             -- liftIO $ print $ "zRPCRequestDispatcher - RESPONSE " ++ show resp
@@ -273,7 +323,7 @@ zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
                     case spl of
                         Just pl ->
                             case pl of
-                                ZValidateUnconfirmedTxResp prntBlk dpTx -> return (prntBlk, dpTx)
+                                ZValidateUnconfirmedTxResp dpTx -> return (dpTx)
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
                     err lg $ LG.msg $ "decoding Unconfirmed Tx validation error resp : " ++ show er
@@ -296,7 +346,7 @@ zRPCRequestDispatcher param wrk = do
                      else return (a + 1, a + 1))
     -- liftIO $ print $ "=====> " ++ (show mid)
     let msg = ZRPCRequest mid param
-    -- debug lg $ LG.msg $ "dispatching to worker 1: " ++ (show wrk)
+    debug lg $ LG.msg $ "zRPCRequestDispatcher dispatching to worker: " ++ (show param)
     liftIO $ TSH.insert (woMsgMultiplexer wrk) mid sem
     -- debug lg $ LG.msg $ "dispatching to worker 2: " ++ (show wrk)
     liftIO $ sendMessage (woSocket wrk) (woWriteLock wrk) (CBOR.serialise msg)
@@ -406,13 +456,22 @@ getRemoteWorker shardingLex role = do
 --     let ch = hashIndex ci
 --     return $ (M.lookup x ch) < (M.lookup y ch)
 validateOutpoint ::
-       (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => OutPoint -> DS.Set BlockHash -> BlockHash -> Int -> m (Word64)
+       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+    => OutPoint
+    -> DS.Set BlockHash
+    -> Maybe BlockHash
+    -> Int
+    -> m (Word64, [BlockHash], Word32)
 validateOutpoint outPoint predecessors curBlkHash wait = do
     dbe <- getDB
     let rkdb = rocksDB dbe
         cfs = rocksCF dbe
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
+    debug lg $
+        LG.msg $
+        "[dag] validateOutpoint called for (Outpoint,Set BlkHash, Maybe BlkHash, Int) " ++
+        (show (outPoint, predecessors, curBlkHash, wait))
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         txSync = txSynchronizer bp2pEnv
         opindx = fromIntegral $ outPointIndex outPoint
@@ -433,11 +492,15 @@ validateOutpoint outPoint predecessors curBlkHash wait = do
                         -- eagerly mark spent, in the unlikely scenario script stack eval fails, mark unspent
                     let vx = spendZtxiUtxo curBlkHash (optxid) (opindx) zu
                     liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) vx
-                    return $ zuSatoshiValue zu
+                    return $ (zuSatoshiValue zu, zuBlockHash zu, zuBlockHeight zu)
                 Nothing -> do
                     debug lg $
                         LG.msg $
                         "Tx not found: " ++ (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
+                    debug lg $
+                        LG.msg $
+                        "[dag] validateOutpoint: Tx not found: " ++
+                        (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
                     valx <- liftIO $ TSH.lookup txSync (outPointHash outPoint)
                     event <-
                         case valx of
@@ -447,14 +510,67 @@ validateOutpoint outPoint predecessors curBlkHash wait = do
                     tofl <- liftIO $ waitTimeout (event) (fromIntegral (wait * 1000000))
                     if tofl == False
                         then do
+                            err lg $
+                                LG.msg $
+                                "[dag] validateOutpoint: Error: tofl False for outPoint: " ++
+                                (show $ outPointHash outPoint)
                             liftIO $ TSH.delete txSync (outPointHash outPoint)
                             throw TxIDNotFoundException
                         else do
                             debug lg $
                                 LG.msg $ "event received _available_: " ++ (show $ txHashToHex $ outPointHash outPoint)
+                            debug lg $
+                                LG.msg $
+                                "[dag] validateOutpoint: event received _available_: " ++
+                                (show $ txHashToHex $ outPointHash outPoint)
                             validateOutpoint outPoint predecessors curBlkHash 0
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
+            err lg $ LG.msg $ "[dag] validateOutpoint: Error: Fetching from " ++ (show cf) ++ ": " ++ show e
+            throw KeyValueDBInsertException
+
+updateOutpoint ::
+       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+    => OutPoint
+    -> BlockHash
+    -> Word32
+    -> m (Word32)
+updateOutpoint outPoint bhash bht = do
+    dbe <- getDB
+    let rkdb = rocksDB dbe
+        cfs = rocksCF dbe
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    debug lg $
+        LG.msg $
+        "[dag] updateOutpoint called for (Outpoint,blkHash,blkHeight) " ++
+        (show (outPoint, bhash, bht))
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        opindx = fromIntegral $ outPointIndex outPoint :: Word32
+        optxid = outPointHash outPoint
+    cf <- liftIO $ TSH.lookup cfs ("outputs")
+    res <- liftIO $ try $ getDBCF rkdb (fromJust cf) (optxid, opindx)
+    case res of
+        Right (op :: Maybe ZtxiUtxo) -> do
+            case op of
+                Just zu -> do
+                    debug lg $ LG.msg $ " ZUT entry found : " ++ (show zu)
+                    let bhashes = replaceProvisionals bhash $ zuBlockHash zu
+                        zu' = zu {zuBlockHash = bhashes, zuBlockHeight = bht}
+                    liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) zu'
+                    return $ zuOpCount zu
+                Nothing -> do
+                    debug lg $
+                        LG.msg $
+                        "Tx not found: " ++ (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
+                    debug lg $
+                        LG.msg $
+                        "[dag] validateOutpoint: Tx not found: " ++
+                        (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
+                    return 0
+        Left (e :: SomeException) -> do
+            err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
+            err lg $ LG.msg $ "[dag] validateOutpoint: Error: Fetching from " ++ (show cf) ++ ": " ++ show e
             throw KeyValueDBInsertException
 
 pruneBlocksTxnsOutputs :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => [BlockHash] -> m ()
@@ -487,17 +603,21 @@ pruneBlocksTxnsOutputs blockHashes = do
         blockHashes
     return ()
 
-spendZtxiUtxo :: BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
-spendZtxiUtxo bh tsh ind zu =
-    ZtxiUtxo
-        { zuTxHash = zuTxHash zu
-        , zuOpIndex = zuOpIndex zu
-        , zuBlockHash = zuBlockHash zu
-        , zuBlockHeight = zuBlockHeight zu
-        , zuInputs = zuInputs zu
-        , zuSpending = (zuSpending zu) ++ [Spending bh tsh ind]
-        , zuSatoshiValue = zuSatoshiValue zu
-        }
+spendZtxiUtxo :: Maybe BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
+spendZtxiUtxo mbh tsh ind zu =
+    case mbh of
+        Nothing -> zu
+        Just bh ->
+            ZtxiUtxo
+                { zuTxHash = zuTxHash zu
+                , zuOpIndex = zuOpIndex zu
+                , zuBlockHash = zuBlockHash zu
+                , zuBlockHeight = zuBlockHeight zu
+                , zuInputs = zuInputs zu
+                , zuSpending = (zuSpending zu) ++ [Spending bh tsh ind]
+                , zuSatoshiValue = zuSatoshiValue zu
+                , zuOpCount = zuOpCount zu
+                }
 
 unSpendZtxiUtxo :: BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
 unSpendZtxiUtxo bh tsh ind zu =
@@ -509,4 +629,5 @@ unSpendZtxiUtxo bh tsh ind zu =
         , zuInputs = zuInputs zu
         , zuSpending = L.delete (Spending bh tsh ind) (zuSpending zu)
         , zuSatoshiValue = zuSatoshiValue zu
+        , zuOpCount = zuOpCount zu
         }

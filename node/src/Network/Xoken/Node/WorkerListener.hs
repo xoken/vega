@@ -51,13 +51,16 @@ import Network.Socket as NS
 import Network.Socket.ByteString.Lazy as SB (recv, sendAll)
 import qualified Network.TLS as NTLS
 import Network.Xoken.Block.Common
+import Network.Xoken.Block.Headers
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Node.P2P.UnconfTxSync
 import Network.Xoken.Node.Service.Chain
 import Network.Xoken.Node.WorkerDispatcher
 import Network.Xoken.Transaction.Common
@@ -96,6 +99,8 @@ requestHandler sock writeLock msg = do
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     let rkdb = rocksDB dbe'
+        cf = rocksCF dbe'
+        net = bitcoinNetwork $ nodeConfig bp2pEnv
     resp <-
         case (deserialiseOrFail msg) of
             Right ms ->
@@ -116,19 +121,44 @@ requestHandler sock writeLock msg = do
                                 -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
                              -> do
                                 zz <-
-                                    LE.try $
-                                    validateOutpoint
-                                        (OutPoint txId index)
-                                        (DS.singleton bhash) -- TODO: needs to contains more predecessors
-                                        bhash
-                                        (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
+                                    do let bhash' =
+                                               case bhash of
+                                                   Nothing -> DS.empty
+                                                   Just bh -> (DS.singleton bh) -- TODO: needs to contains more predecessors
+                                       LE.try $
+                                           validateOutpoint
+                                               (OutPoint txId index)
+                                               bhash'
+                                               bhash
+                                               (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                 case zz of
-                                    Right val
+                                    Right (val, bhs, ht)
                                         -- liftIO $
                                         --     print $
                                         --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
                                      -> do
-                                        return $ successResp mid $ ZGetOutpointResp val B.empty
+                                        return $ successResp mid $ ZGetOutpointResp val B.empty bhs ht
+                                    Left (e :: SomeException) -> do
+                                        return $ errorResp mid (show e)
+                            -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
+                            --     ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
+                            --     return $ successResp mid $ ZTraceOutputsResp ret
+                            ZUpdateOutpoint txId index bhash ht
+                                -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
+                             -> do
+                                zz <-
+                                    LE.try $
+                                        updateOutpoint
+                                            (OutPoint txId index)
+                                            bhash
+                                            ht
+                                case zz of
+                                    Right upd
+                                        -- liftIO $
+                                        --     print $
+                                        --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
+                                     -> do
+                                        return $ successResp mid $ ZUpdateOutpointResp upd
                                     Left (e :: SomeException) -> do
                                         return $ errorResp mid (show e)
                             -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
@@ -137,7 +167,7 @@ requestHandler sock writeLock msg = do
                             ZValidateTx bhash blkht txind tx
                                 -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
                              -> do
-                                debug lg $ LG.msg $ "decoded ZValidateTx : " ++ (show $ txHash tx)
+                                debug lg $ LG.msg $ "decoded ZValidateTx (Conf) : " ++ (show $ txHash tx)
                                 res <-
                                     LE.try $ processConfTransaction tx bhash (fromIntegral blkht) (fromIntegral txind)
                                 case res of
@@ -159,12 +189,21 @@ requestHandler sock writeLock msg = do
                                             outpts
                                         return $ successResp mid (ZValidateTxResp True)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
+                            ZValidateUnconfirmedTx tx
+                                -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
+                             -> do
+                                debug lg $ LG.msg $ "decoded ZValidateTx (Unconf) : " ++ (show $ txHash tx)
+                                res <- LE.try $ processUnconfTransaction tx
+                                case res of
+                                    Right (txs) -> do
+                                        return $ successResp mid (ZValidateUnconfirmedTxResp txs)
+                                    Left (e :: SomeException) -> return $ errorResp mid (show e)
                             ZPruneBlockTxOutputs blockHashes
                                 -- liftIO $ print $ "ZPruneBlockTxOutputs - REQUEST " ++ (show blockHashes)
                              -> do
                                 pruneBlocksTxnsOutputs blockHashes
                                 return $ successResp mid $ ZPruneBlockTxOutputsResp
-                            ZNotifyNewBlockHeader headers
+                            ZNotifyNewBlockHeader headers bn
                                 -- liftIO $ print $ "ZNotifyNewBlockHeader - REQUEST " ++ (show $ P.head headers)
                              -> do
                                 debug lg $ LG.msg $ "decoded ZNotifyNewBlockHeader : " ++ (show $ P.head headers)
@@ -172,32 +211,32 @@ requestHandler sock writeLock msg = do
                                     LE.try $
                                     mapM_
                                         (\(ZBlockHeader header blkht) -> do
-                                             let hdrHash = blockHashToHex $ headerHash header
-                                             resp <-
-                                                 liftIO $
-                                                 try $ do
-                                                     putDB rkdb blkht (hdrHash, header)
-                                                     putDB rkdb hdrHash (blkht, header)
-                                             case resp of
-                                                 Right () -> return ()
-                                                 Left (e :: SomeException) ->
-                                                     liftIO $ do
-                                                         err lg $
-                                                             LG.msg ("Error: INSERT into 'ROCKSDB' failed: " ++ show e)
-                                                         throw KeyValueDBInsertException
-                                             liftIO $
-                                                 TSH.insert
-                                                     (blockTree bp2pEnv)
-                                                     (headerHash header)
-                                                     (fromIntegral blkht, header))
+                                             tm <- liftIO $ floor <$> getPOSIXTime
+                                             bnm <- liftIO $ atomically $ stateTVar
+                                                                    (blockTree bp2pEnv)
+                                                                    (\hm -> case connectBlock hm net tm header of
+                                                                                    Right (hm',bn) -> (Just bn,hm')
+                                                                                    Left _ -> (Nothing,hm))
+                                             case bnm of
+                                                Just b -> putHeaderMemoryElem b
+                                                Nothing -> return ())
+                                             --liftIO $
+                                             --    TSH.insert
+                                             --        (blockTree bp2pEnv)
+                                             --        (headerHash header)
+                                             --        (fromIntegral blkht, header))
                                         headers
                                 case res of
                                     Right () -> do
+                                        putBestBlockNode bn
                                         liftIO $
                                             print $
                                             "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show $ P.head headers)
                                         return $ successResp mid (ZNotifyNewBlockHeaderResp)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
+                            otherwise -> do
+                                err lg $ LG.msg $ "requestHandler unknown handler: " ++ (show param)
+                                return $ errorResp mid (show ZUnknownHandler)
             Left e -> do
                 err lg $ LG.msg $ "Error: deserialise Failed (requestHandler) : " ++ (show e)
                 return $ errorResp (0) "Deserialise failed"

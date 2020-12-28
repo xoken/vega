@@ -18,22 +18,25 @@ import Control.Concurrent.STM.TVar
 import Control.Monad.Catch
 import Control.Monad.Reader
 import Control.Monad.Trans.Control
+import Crypto.MAC.SipHash as SH
 import Crypto.Secp256k1
 import qualified Data.ByteString.Char8 as C
 import qualified Data.HashMap.Strict as HM
-import qualified Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
 import Data.Hashable
+import Data.IORef
 import Data.Int
 import qualified Data.Map.Strict as M
 import Data.Sequence
 import Data.Text
 import Data.Time.Clock
+import Data.UUID
 import Data.Word
 import qualified Database.RocksDB as R
 import GHC.Generics
 import Network.Socket hiding (send)
 import Network.Xoken.Block.Common
+import Network.Xoken.Block.Headers
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
@@ -88,15 +91,19 @@ data BitcoinP2P =
         , maxTMTBuilderThreadLock :: !(MSem Int)
         , indexUnconfirmedTx :: !(TVar Bool)
         , userDataCache :: !(HashTable Text (Text, Int32, Int32, UTCTime, [Text])) -- (name, quota, used, expiry time, roles)
-        , blockTree :: !(TSH.TSHashTable BlockHash (BlockHeight, BlockHeader))
+        --, blockTree :: !(TSH.TSHashTable BlockHash (BlockHeight, BlockHeader))
+        , blockTree :: !(TVar HeaderMemory)
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
-        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64))
+        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64 BranchComputeState))
+        , compactBlocks :: !(TSH.TSHashTable BlockHash (CompactBlock, [TxHash]))
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
-        , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( Seq Word64
+        , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( SipKey
+                                                                     , Seq Word64
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
+        , candidatesByUuid :: !(TSH.TSHashTable UUID (Int32, TxHash))
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
 
