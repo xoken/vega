@@ -108,27 +108,44 @@ generateUuid =
 
 getMiningCandidate :: (HasXokenNodeEnv env m, MonadIO m) => m RPCResponseBody
 getMiningCandidate = do
+    lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     nodeCfg <- nodeConfig <$> getBitcoinP2P
     net <- (NC.bitcoinNetwork . nodeConfig) <$> getBitcoinP2P
     rkdb <- rocksDB <$> getDB
     (bestSyncedBlockHash, bestSyncedBlockHeight) <- fetchBestSyncedBlock rkdb net
+    debug lg $
+        LG.msg $ "getMiningCandidate: got best-synced block: " <> (show (bestSyncedBlockHash, bestSyncedBlockHeight))
     hm <- (liftIO . readTVarIO) $ blockTree bp2pEnv
+    debug lg $ LG.msg $ show "getMiningCandidate: got header memory"
     let candidateBlocksTsh = candidateBlocks bp2pEnv
-        coinbaseAddress =
-            case stringToAddr (NC.bitcoinNetwork nodeCfg) (DT.pack $ NC.coinbaseTxAddress nodeCfg) of
-                Nothing -> throw KeyValueDBLookupException
-                Just a -> a
-        cbByUuidTSH = candidatesByUuid bp2pEnv
+    coinbaseAddress <-
+        case stringToAddr (NC.bitcoinNetwork nodeCfg) (DT.pack $ NC.coinbaseTxAddress nodeCfg) of
+            Nothing -> do
+                err lg $
+                    LG.msg $
+                    "Error: Failed to decode supplied Coinbase address " <>
+                    (show $ DT.pack $ NC.coinbaseTxAddress nodeCfg)
+                debug lg $
+                    LG.msg $
+                    "getMiningCandidate: Failed to decode supplied Coinbase address " <>
+                    (show $ DT.pack $ NC.coinbaseTxAddress nodeCfg)
+                throw KeyValueDBLookupException
+            Just a -> return a
+    let cbByUuidTSH = candidatesByUuid bp2pEnv
     candidateBlock <- liftIO $ TSH.lookup candidateBlocksTsh bestSyncedBlockHash
     case candidateBlock of
-        Nothing -> throw KeyValueDBLookupException
+        Nothing -> do
+            err lg $
+                LG.msg $
+                "Error: Failed to fetch candidate block, previous block: " <>
+                (show (bestSyncedBlockHash, bestSyncedBlockHeight))
+            throw KeyValueDBLookupException
         Just blk -> do
             (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
             uuid <- liftIO generateUuid
             let (merkleBranch, merkleRoot) =
-                    (\(b, r) -> (txHashToHex <$> b, fromJust r)) $
-                    computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
+                    (\(b, r) -> (txHashToHex <$> b, fromJust r)) $ computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
                 coinbaseTx =
                     DT.unpack $
                     encodeHex $
@@ -148,6 +165,7 @@ getMiningCandidate = do
                     (toString uuid)
                     (DT.unpack $ blockHashToHex bestSyncedBlockHash)
                     (Just coinbaseTx)
+                    (fromIntegral txCount)
                     0x37ffe000
                     (fromIntegral satVal)
                     (fromIntegral nextWorkRequired)

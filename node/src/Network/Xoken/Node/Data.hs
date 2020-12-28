@@ -309,6 +309,7 @@ data RPCResponseBody =
         { rgmcId :: String
         , rgmcPrevHash :: String
         , rgmcCoinbase :: Maybe String
+        , rgmcNumTx :: Int32
         , rgmcVersion :: Int32
         , rgmcCoinbaseValue :: Int64
         , rgmcnBits :: Int32
@@ -319,11 +320,12 @@ data RPCResponseBody =
     deriving (Generic, Show, Hashable, Eq, Serialise)
 
 instance ToJSON RPCResponseBody where
-    toJSON (GetMiningCandidateResp id ph cb vr cv nb tm ht mp) =
+    toJSON (GetMiningCandidateResp id ph cb ntx vr cv nb tm ht mp) =
         object
             [ "id" .= id
-            , "prevHash" .= ph
+            , "prevhash" .= ph
             , "coinbase" .= cb
+            , "num_tx" .= ntx
             , "version" .= vr
             , "coinbaseValue" .= cv
             , "nBits" .= nb
