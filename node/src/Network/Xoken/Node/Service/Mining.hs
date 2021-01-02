@@ -143,9 +143,14 @@ getMiningCandidate = do
             throw KeyValueDBLookupException
         Just blk -> do
             (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
+            pts <- liftIO $ DAG.getPrimaryTopologicalSorted blk
+            let sibling =
+                    if length pts <= 2
+                        then Just $ txHashToHex $ pts !! 1
+                        else Nothing
             uuid <- liftIO generateUuid
-            let (merkleBranch, merkleRoot) =
-                    (\(b, r) -> (txHashToHex <$> b, fromJust r)) $ computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
+            let (merkleBranch', merkleRoot) =
+                    (\(b, r) -> (txHashToHex . TxHash <$> b, TxHash $ fromJust r)) $ getProof bcState
                 coinbaseTx =
                     DT.unpack $
                     encodeHex $
@@ -154,6 +159,10 @@ getMiningCandidate = do
                         (1 + fromIntegral bestSyncedBlockHeight)
                         coinbaseAddress
                         (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
+                merkleBranch =
+                    case sibling of
+                        Just s -> (s : merkleBranch')
+                        Nothing -> merkleBranch'
             -- persist generated UUID and txCount in memory
             liftIO $ TSH.insert cbByUuidTSH uuid (fromIntegral txCount, merkleRoot)
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)

@@ -194,11 +194,11 @@ isNotConfirmed :: TxHash -> IO Bool
 isNotConfirmed txHash = return False
 
 coalesceUnconfTransaction ::
-       (TSDirectedAcyclicGraph TxHash Word64 BranchComputeState) -> TxHash -> [TxHash] -> Word64 -> IO ()
+       (TSDirectedAcyclicGraph TxHash Word64 IncrementalBranch) -> TxHash -> [TxHash] -> Word64 -> IO ()
 coalesceUnconfTransaction dag txhash hashes sats = do
     print $ "coalesceUnconfTransaction called for tx: " ++ show (txhash)
     unconfHashes <- filterM (isNotConfirmed) hashes
-    DAG.coalesce dag txhash unconfHashes sats (+) nextBcState
+    DAG.coalesce dag txhash unconfHashes sats (+) updateMerkleBranch
 
 processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([TxHash])
 processUnconfTransaction tx = do
@@ -210,7 +210,7 @@ processUnconfTransaction tx = do
     let conn = rocksDB $ dbe'
         cf = rocksCF dbe'
     bbn <- fetchBestBlock
-    let (bsh,bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+    let (bsh, bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processUnconfTransaction: processing Unconf Tx " ++ show (txHash tx)
     cftx <- liftIO $ TSH.lookup cf ("tx")
@@ -430,7 +430,7 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
     case q of
         Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show candBlockHash)
         Just dag -> do
-            liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+) nextBcState
+            liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+) updateMerkleBranch
             dagT <- liftIO $ (DAG.getTopologicalSortedForest dag)
             dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)
             liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP

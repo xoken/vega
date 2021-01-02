@@ -316,24 +316,25 @@ runBlockCacheQueue =
                     --let !bks = map (\x -> ht + x) cacheInd
                         parc = bc - 1
                         ans = getAncestor hmem (fromIntegral bh) (memoryBestHeader hmem)
-                        op = case ans of
-                                    Nothing -> []
-                                    Just an -> L.reverse (an:getParents hmem (fromIntegral parc) an)
+                        op =
+                            case ans of
+                                Nothing -> []
+                                Just an -> L.reverse (an : getParents hmem (fromIntegral parc) an)
                     --liftIO $ print (bhash,ht,bc,bh,parc,ans,op)
                     if L.length op == 0
                         then do
                             trace lg $ LG.msg $ val "Synced fully!"
                             return (Nothing)
                         else if L.length op == (fromIntegral bc)
-                                then do
-                                    debug lg $ LG.msg $ val "Reloading cache."
-                                    let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) op
-                                    mapM (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
-                                    let e = p !! 0
-                                    return (Just $ BlockInfo (fst e) (snd $ snd e))
-                                else do
-                                    debug lg $ LG.msg $ val "Still loading block headers, try again!"
-                                    return (Nothing)
+                                 then do
+                                     debug lg $ LG.msg $ val "Reloading cache."
+                                     let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) op
+                                     mapM (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
+                                     let e = p !! 0
+                                     return (Just $ BlockInfo (fst e) (snd $ snd e))
+                                 else do
+                                     debug lg $ LG.msg $ val "Still loading block headers, try again!"
+                                     return (Nothing)
                 else do
                     mapM
                         (\(bsh, (_, ht)) -> do
@@ -404,18 +405,25 @@ runBlockCacheQueue =
                     trace lg $ LG.msg $ ("blockSyncStatusMap (list): " ++ (show syt))
                     if L.length sent == 0 &&
                        L.length unsent == 0 && L.length receiveInProgress == 0 && L.length recvComplete == 0
-                        then do
                             --let !lelm = last $ L.sortOn (snd . snd) (syt)
-                            let !(lhash,(_,lht)) = last $ syt
+                        then do
+                            let !(lhash, (_, lht)) = last $ syt
                             debug lg $ LG.msg $ ("marking best synced " ++ show (blockHashToHex $ lhash))
                             markBestSyncedBlock (blockHashToHex $ lhash) (fromIntegral $ lht)
                             --
                             lp <- getDB' rkdb ("last-pruned" :: B.ByteString)
-                            let (lpht,lphs) = fromMaybe (0,headerHash $ getGenesisHeader net) lp :: (BlockHeight,BlockHash)
-                            debug lg $ LG.msg $ ("Last pruned: " ++ show (lpht,blockHashToHex $ lphs) ++ "; for best synced: " ++ show (lht, blockHashToHex lhash))
+                            let (lpht, lphs) =
+                                    fromMaybe (0, headerHash $ getGenesisHeader net) lp :: (BlockHeight, BlockHash)
+                            debug lg $
+                                LG.msg $
+                                ("Last pruned: " ++
+                                 show (lpht, blockHashToHex $ lphs) ++
+                                 "; for best synced: " ++ show (lht, blockHashToHex lhash))
                             if lht - lpht <= 11
                                 then do
-                                    debug lg $ LG.msg $ ("Last pruned too close. Skipping pruning. " ++ show (lht, lpht, lht - lpht))
+                                    debug lg $
+                                        LG.msg $
+                                        ("Last pruned too close. Skipping pruning. " ++ show (lht, lpht, lht - lpht))
                                     return ()
                                 else do
                                     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
@@ -423,7 +431,9 @@ runBlockCacheQueue =
                                     case bnm of
                                         Nothing -> return ()
                                         Just bn -> do
-                                            let anc = fmap (\x -> (nodeHeight x, headerHash $ nodeHeader x)) $ drop 10 $ getParents hm (fromIntegral $ lht - lpht - 1) bn
+                                            let anc =
+                                                    fmap (\x -> (nodeHeight x, headerHash $ nodeHeader x)) $
+                                                    drop 10 $ getParents hm (fromIntegral $ lht - lpht - 1) bn
                                             debug lg $ LG.msg $ ("Pruning " ++ show ((fmap blockHashToHex) <$> anc))
                                             debug lg $ LG.msg $ ("Marking Last Pruned: " ++ show (head anc))
                                             putDB rkdb ("last-pruned" :: B.ByteString) (head anc)
@@ -752,8 +762,8 @@ processCompactBlock cmpct peer = do
                              -- TODO: lock the previous dag and insert into a NEW dag!!
                           -> do
                              case rt of
-                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+) nextBcState
-                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+) nextBcState)
+                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+) updateMerkleBranch
+                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+) updateMerkleBranch)
                 mpShortTxIDList
             --    lastIndex <- liftIO $ newIORef 0
             --    mtxIndexes <-
@@ -861,7 +871,7 @@ processBlockTransactions blockTxns = do
     olddag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash'
     case olddag of
         Just dag -> do
-            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 emptyBranchComputeState 16 16 (+) (nextBcState)
+            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 EmptyBranch 16 16 (+) (updateMerkleBranch)
             liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash newdag
         Nothing -> do
             newCandidateBlock bhash
@@ -920,7 +930,7 @@ sendCompactBlockGetData pr hash = do
 newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
 newCandidateBlock hash = do
     bp2pEnv <- getBitcoinP2P
-    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) EmptyBranch 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 
 newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
@@ -932,7 +942,7 @@ newCandidateBlockChainTip = do
         conn = rocksDB dbe'
     bbn <- fetchBestBlock
     let hash = headerHash $ nodeHeader bbn
-    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) EmptyBranch 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 
 defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"
