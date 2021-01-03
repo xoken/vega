@@ -145,7 +145,7 @@ getMiningCandidate = do
             (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
             pts <- liftIO $ DAG.getPrimaryTopologicalSorted blk
             let sibling =
-                    if length pts <= 2
+                    if length pts >= 2
                         then Just $ txHashToHex $ pts !! 1
                         else Nothing
             uuid <- liftIO generateUuid
