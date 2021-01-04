@@ -955,7 +955,8 @@ mineBlockFromCandidate = do
                     --mapM_ (\bp -> if bpConnected bp then processCompactBlock cb bp else return ()) peerMap
                     newCandidateBlock bhsh
                     broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
-                    mapM_ (\x -> updateZtxiUtxo x bhsh $ fromIntegral $ ht + 1) top
+                    --mapM_ (\x -> updateZtxiUtxo x bhsh $ fromIntegral $ ht + 1) top
+                    zRPCDispatchProvisionalBlockHash bhsh (mkProvisionalBlockHash bhash)
                     return $ Just $ cb
 
 generateHeaderHash :: Network -> BlockHeader -> (BlockHash, Word32)

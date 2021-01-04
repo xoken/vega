@@ -106,6 +106,7 @@ data BlockSyncException
     | InvalidTxSatsValueException
     | InvalidDAGEdgeException
     | ZUnknownHandler
+    | ZInvalidColumnFamily
     deriving (Show, Read)
 
 instance Exception BlockSyncException

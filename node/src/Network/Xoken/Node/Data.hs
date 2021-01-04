@@ -129,6 +129,10 @@ data ZRPCRequestParam
           , clusterID :: !ByteString
           }
     | ZPing -- M =>> C | C =>> M | C =>> C
+    | ZProvisionalBlockHash
+          { zpBlockHash :: !BlockHash
+          , zpProvisionalBlockHash :: !BlockHash
+          }
     deriving (Show, Generic, Eq, Serialise)
 
 data ZBlockHeader =
@@ -206,6 +210,9 @@ data ZRPCResponseBody
           }
     | ZOk
     | ZPong
+    | ZProvisionalBlockHashResp
+          {
+          }
     deriving (Show, Generic, Hashable, Eq, Serialise)
 
 --

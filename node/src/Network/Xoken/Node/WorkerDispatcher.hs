@@ -125,6 +125,41 @@ zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
                     throw mex
     return ()
 
+zRPCDispatchProvisionalBlockHash :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> BlockHash -> m ()
+zRPCDispatchProvisionalBlockHash bh pbh = do
+    dbe' <- getDB
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        rkdb = rocksDB dbe'
+    mapM_
+        (\wrk -> do
+             case wrk of
+                 SelfWorker {..} -> do
+                     pcf <- liftIO $ TSH.lookup (rocksCF dbe') "provisional_blockhash"
+                     case pcf of
+                         Just pc -> do
+                             putDBCF rkdb pc bh pbh
+                             putDBCF rkdb pc pbh bh
+                             return ()
+                         Nothing -> return ()
+                 RemoteWorker {..} -> do
+                     let mparam = ZProvisionalBlockHash bh pbh
+                     resp <- zRPCRequestDispatcher mparam wrk
+                     case zrsPayload resp of
+                         Right spl -> do
+                             case spl of
+                                 Just pl ->
+                                     case pl of
+                                         ZProvisionalBlockHashResp -> return ()
+                                 Nothing -> throw InvalidMessageTypeException
+                         Left er -> do
+                             err lg $ LG.msg $ "decoding zRPCDispatchProvisionalBlockHash error resp : " ++ show er
+                             let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
+                             throw mex)
+        (wrkrs)
+
 zRPCDispatchGetOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> Maybe BlockHash -> m (Word64, [BlockHash], Word32)
 zRPCDispatchGetOutpoint outPoint bhash = do
     dbe' <- getDB

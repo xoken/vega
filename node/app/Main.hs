@@ -174,7 +174,7 @@ defaultConfig = do
 conf :: R.Config
 conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = True, R.prefixLength = Just 3}
 
-cfStr = ["outputs", "ep_outputs_odd", "ep_outputs_even", "ep_transactions_odd", "ep_transactions_even", "transactions", "tx", "blocktree"]
+cfStr = ["outputs", "ep_outputs_odd", "ep_outputs_even", "ep_transactions_odd", "ep_transactions_even", "tx", "blocktree", "provisional_blockhash"]
 
 columnFamilies = fmap (\x -> (x, conf)) cfStr
 

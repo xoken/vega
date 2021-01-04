@@ -234,6 +234,14 @@ requestHandler sock writeLock msg = do
                                             "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show $ P.head headers)
                                         return $ successResp mid (ZNotifyNewBlockHeaderResp)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
+                            ZProvisionalBlockHash bh pbh -> do
+                                pcf <- liftIO $ TSH.lookup (cf) "provisional_blockhash"
+                                case pcf of
+                                    Just pc -> do
+                                        putDBCF rkdb pc bh pbh
+                                        putDBCF rkdb pc pbh bh
+                                        return $ successResp mid (ZProvisionalBlockHashResp)
+                                    Nothing -> return $ errorResp mid (show ZInvalidColumnFamily)
                             otherwise -> do
                                 err lg $ LG.msg $ "requestHandler unknown handler: " ++ (show param)
                                 return $ errorResp mid (show ZUnknownHandler)
