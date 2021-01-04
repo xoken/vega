@@ -413,7 +413,7 @@ runBlockCacheQueue =
                             lp <- getDB' rkdb ("last-pruned" :: B.ByteString)
                             let (lpht,lphs) = fromMaybe (0,headerHash $ getGenesisHeader net) lp :: (BlockHeight,BlockHash)
                             debug lg $ LG.msg $ ("Last pruned: " ++ show (lpht,blockHashToHex $ lphs) ++ "; for best synced: " ++ show (lht, blockHashToHex lhash))
-                            if lht - lpht <= 11
+                            if lht - lpht <= (fromIntegral $ pruneLag nc)
                                 then do
                                     debug lg $ LG.msg $ ("Last pruned too close. Skipping pruning. " ++ show (lht, lpht, lht - lpht))
                                     return ()
@@ -423,7 +423,7 @@ runBlockCacheQueue =
                                     case bnm of
                                         Nothing -> return ()
                                         Just bn -> do
-                                            let anc = fmap (\x -> (nodeHeight x, headerHash $ nodeHeader x)) $ drop 10 $ getParents hm (fromIntegral $ lht - lpht - 1) bn
+                                            let anc = fmap (\x -> (nodeHeight x, headerHash $ nodeHeader x)) $ drop (fromIntegral $ (pruneLag nc) - 1) $ getParents hm (fromIntegral $ lht - lpht - 1) bn
                                             debug lg $ LG.msg $ ("Pruning " ++ show ((fmap blockHashToHex) <$> anc))
                                             debug lg $ LG.msg $ ("Marking Last Pruned: " ++ show (head anc))
                                             putDB rkdb ("last-pruned" :: B.ByteString) (head anc)
