@@ -67,6 +67,7 @@ data NodeConfig =
         , maxTxProcessingThreads :: Int
         , maxTxProcessingBuffer :: Int
         , coinbaseTxAddress :: String
+        , pruneLag :: Int
         }
     deriving (Show, Generic)
 
