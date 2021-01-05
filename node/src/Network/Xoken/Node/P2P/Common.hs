@@ -353,6 +353,17 @@ sendMessage sock writeLock payload = do
                  LB.sendAll sock prefix
                  LB.sendAll sock payload)
 
+mkProvisionalBlockHashR :: BlockHash -> IO BlockHash
+mkProvisionalBlockHashR b = do
+    ng <- newStdGen
+    r64 <- randomRIO (minBound , maxBound :: Word64)  
+    let bh = S.runGet S.get $ B.append (B.take 16 $ S.runPut $ S.put b) (B.append (S.encode r64) "\255\255\255\255\255\255\255\255")  :: Either String BlockHash
+    return $ either (const b) (Prelude.id) bh
+
+
+isProvisionalBlockHashR :: BlockHash -> Bool
+isProvisionalBlockHashR = (== "\255\255\255\255\255\255\255\255") . (B.drop 24 . S.runPut . S.put)
+
 mkProvisionalBlockHash :: BlockHash -> BlockHash
 mkProvisionalBlockHash b = let bh = S.runGet S.get $ B.append (B.take 16 $ S.runPut $ S.put b) "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255"  :: Either String BlockHash
                            in either (const b) (Prelude.id) bh
