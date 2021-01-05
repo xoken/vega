@@ -16,6 +16,7 @@ import Control.Concurrent.STM.TVar
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
+import Control.Monad.Extra (concatMapM)
 import Control.Monad.Logger
 import Control.Monad.Reader
 import Control.Monad.STM
@@ -363,3 +364,28 @@ replaceProvisionals :: BlockHash -> [BlockHash] -> [BlockHash]
 replaceProvisionals bh [] = [bh]
 replaceProvisionals bh (pbh:bhs) | isProvisionalBlockHash pbh = (bh:filter (not . isProvisionalBlockHash) bhs)
                                  | otherwise = pbh:(replaceProvisionals bh bhs)
+
+updatePredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+updatePredecessors = do
+    bp2pEnv <- getBitcoinP2P
+    pr <- fetchPredecessors
+    liftIO $ atomically $ swapTVar (predecessors bp2pEnv) pr
+    return ()
+
+fetchPredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m [BlockHash]
+fetchPredecessors = do
+    lg <- getLogger
+    dbe <- getDB
+    bp2pEnv <- getBitcoinP2P
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    let rkdb = rocksDB dbe
+        cf = rocksCF dbe
+    pcfm <- liftIO $ TSH.lookup cf "provisional_blockhash"
+    case pcfm of
+        Nothing -> return []
+        Just pcf -> concatMapM (\x -> do
+                                            let hash = headerHash $ nodeHeader x
+                                            ph <- getDBCF rkdb pcf hash
+                                            case (ph :: Maybe BlockHash) of
+                                                Nothing -> return [hash]
+                                                Just p -> return [hash,p]) $ getParents hm (10) (memoryBestHeader hm)

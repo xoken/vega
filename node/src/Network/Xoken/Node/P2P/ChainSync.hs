@@ -11,6 +11,7 @@
 module Network.Xoken.Node.P2P.ChainSync
     ( runEgressChainSync
     , processHeaders
+    , updatePredecessors
     ) where
 
 import Control.Concurrent (threadDelay)
@@ -22,7 +23,7 @@ import Control.Error.Util (hush)
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
-import Control.Monad.Extra (mapMaybeM)
+import Control.Monad.Extra (mapMaybeM, concatMapM)
 import Control.Monad.Logger
 import Control.Monad.Reader
 import Control.Monad.STM

@@ -104,6 +104,7 @@ data BitcoinP2P =
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
         , candidatesByUuid :: !(TSH.TSHashTable UUID (Int32, TxHash))
+        , predecessors :: !(TVar [BlockHash])
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
 

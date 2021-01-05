@@ -92,7 +92,7 @@ data ZRPCRequestParam
           { goTxID :: !TxHash
           , goIndex :: !Word32
           , goBlockHash :: !(Maybe BlockHash)
-          , goPredecessors :: !(DS.Set BlockHash)
+          --, goPredecessors :: !(DS.Set BlockHash)
           }
     | ZUpdateOutpoint -- C =>> C | C =>> M  | M =>> C 
           { uoTxID :: !TxHash

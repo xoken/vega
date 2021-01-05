@@ -142,7 +142,7 @@ zRPCDispatchProvisionalBlockHash bh pbh = do
                          Just pc -> do
                              putDBCF rkdb pc bh pbh
                              putDBCF rkdb pc pbh bh
-                             return ()
+                             updatePredecessors
                          Nothing -> return ()
                  RemoteWorker {..} -> do
                      let mparam = ZProvisionalBlockHash bh pbh
@@ -169,10 +169,6 @@ zRPCDispatchGetOutpoint outPoint bhash = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let opIndex = outPointIndex $ outPoint
         lexKey = getTxShortHash (outPointHash outPoint) 8
-        bhash' =
-            case bhash of
-                Nothing -> DS.empty
-                Just bh -> DS.singleton bh
     worker <- getRemoteWorker lexKey GetOutpoint
     case worker of
         Nothing
@@ -182,7 +178,6 @@ zRPCDispatchGetOutpoint outPoint bhash = do
             val <-
                 validateOutpoint
                     (outPoint)
-                    (bhash') -- TODO: needs to contains more predecessors
                     bhash
                     (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
             return val
@@ -190,7 +185,7 @@ zRPCDispatchGetOutpoint outPoint bhash = do
             -- liftIO $ print $ "zRPCDispatchGetOutpoint - " ++ show wrk
          -> do
             debug lg $ LG.msg $ "[dag] zRPCDispatchGetOutpoint: Worker: " ++ show wrk
-            let mparam = ZGetOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash (bhash')
+            let mparam = ZGetOutpoint (outPointHash outPoint) (outPointIndex outPoint) bhash
             resp <- zRPCRequestDispatcher mparam wrk
             -- liftIO $ print $ "zRPCDispatchGetOutpoint - RESPONSE " ++ show resp
             case zrsPayload resp of
@@ -493,16 +488,17 @@ getRemoteWorker shardingLex role = do
 validateOutpoint ::
        (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
     => OutPoint
-    -> DS.Set BlockHash
     -> Maybe BlockHash
     -> Int
     -> m (Word64, [BlockHash], Word32)
-validateOutpoint outPoint predecessors curBlkHash wait = do
+validateOutpoint outPoint curBlkHash wait = do
     dbe <- getDB
     let rkdb = rocksDB dbe
         cfs = rocksCF dbe
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
+    predecessors <- liftIO $ readTVarIO (predecessors bp2pEnv)
+    -- TODO get predecessors
     debug lg $
         LG.msg $
         "[dag] validateOutpoint called for (Outpoint,Set BlkHash, Maybe BlkHash, Int) " ++
@@ -520,7 +516,7 @@ validateOutpoint outPoint predecessors curBlkHash wait = do
                     debug lg $ LG.msg $ " ZUT entry found : " ++ (show zu)
                     mapM_
                         (\s ->
-                             if (spBlockHash s) `DS.member` predecessors
+                             if (spBlockHash s) `L.elem` predecessors
                                  then return () -- throw OutputAlreadySpentException -- predecessors to be passed correctly
                                  else return ())
                         (zuSpending zu)
@@ -558,7 +554,7 @@ validateOutpoint outPoint predecessors curBlkHash wait = do
                                 LG.msg $
                                 "[dag] validateOutpoint: event received _available_: " ++
                                 (show $ txHashToHex $ outPointHash outPoint)
-                            validateOutpoint outPoint predecessors curBlkHash 0
+                            validateOutpoint outPoint curBlkHash 0
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
             err lg $ LG.msg $ "[dag] validateOutpoint: Error: Fetching from " ++ (show cf) ++ ": " ++ show e

@@ -309,6 +309,7 @@ defBitcoinP2P nodeCnf = do
     cmpct <- TSH.new 1
     pftx <- TSH.new 10
     cbu <- TSH.new 1
+    pr <- newTVarIO []
     return $
         BitcoinP2P
             nodeCnf
@@ -335,6 +336,7 @@ defBitcoinP2P nodeCnf = do
             cmpct
             pftx
             cbu
+            pr
 
 initVega :: IO ()
 initVega = do

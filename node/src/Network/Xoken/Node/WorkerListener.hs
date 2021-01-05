@@ -117,18 +117,13 @@ requestHandler sock writeLock msg = do
                                         return $ successResp mid ZOk
                             ZPing -> do
                                 return $ successResp mid ZPong
-                            ZGetOutpoint txId index bhash pred
+                            ZGetOutpoint txId index bhash
                                 -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
                              -> do
                                 zz <-
-                                    do let bhash' =
-                                               case bhash of
-                                                   Nothing -> DS.empty
-                                                   Just bh -> (DS.singleton bh) -- TODO: needs to contains more predecessors
-                                       LE.try $
+                                    do LE.try $
                                            validateOutpoint
                                                (OutPoint txId index)
-                                               bhash'
                                                bhash
                                                (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                 case zz of
@@ -240,6 +235,7 @@ requestHandler sock writeLock msg = do
                                     Just pc -> do
                                         putDBCF rkdb pc bh pbh
                                         putDBCF rkdb pc pbh bh
+                                        updatePredecessors
                                         return $ successResp mid (ZProvisionalBlockHashResp)
                                     Nothing -> return $ errorResp mid (show ZInvalidColumnFamily)
                             otherwise -> do
