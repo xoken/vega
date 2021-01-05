@@ -73,6 +73,7 @@ import Data.Time.Calendar
 import Data.Time.Clock
 import Data.Time.Clock.POSIX
 import Data.UUID
+import qualified Data.UUID as UUID (fromString)
 import Data.Word
 import Data.Yaml
 import qualified Database.Bolt as BT
@@ -97,6 +98,7 @@ import System.Logger as LG
 import System.Logger.Message
 import System.Random
 import Text.Read
+import Text.Show
 import Xoken
 import qualified Xoken.NodeConfig as NC
 
@@ -165,7 +167,10 @@ getMiningCandidate = do
                         Nothing -> merkleBranch'
             -- persist generated UUID and txCount in memory
             liftIO $
-                TSH.insert cbByUuidTSH uuid (fromIntegral txCount, merkleRoot, fromJust . hexToTxHash <$> merkleBranch)
+                TSH.insert
+                    cbByUuidTSH
+                    uuid
+                    (bestSyncedBlockHash, fromIntegral txCount, merkleRoot, fromJust . hexToTxHash <$> merkleBranch)
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
             let parentBlock = memoryBestHeader hm
                 candidateHeader = BlockHeader 0 (BlockHash "") "" (round timestamp) 0 0
@@ -184,11 +189,36 @@ getMiningCandidate = do
                     (DT.unpack <$> merkleBranch)
 
 submitMiningSolution ::
-       (HasXokenNodeEnv env m, MonadIO m)
-    => String
-    -> Int32
-    -> Maybe String
-    -> Maybe Int32
-    -> Maybe Int32
-    -> m (Either String Bool)
-submitMiningSolution id nonce coinbase time version = return $ Right True
+       (HasXokenNodeEnv env m, MonadIO m) => String -> Int32 -> Maybe String -> Maybe Int32 -> Maybe Int32 -> m Bool
+submitMiningSolution id nonce coinbase time version = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    nodeCfg <- nodeConfig <$> getBitcoinP2P
+    net <- (NC.bitcoinNetwork . nodeConfig) <$> getBitcoinP2P
+    rkdb <- rocksDB <$> getDB
+    let candidateBlocksByUuid = candidatesByUuid bp2pEnv
+        mbUuid = UUID.fromString id
+    uuid <-
+        case mbUuid of
+            Nothing -> do
+                throw UuidFormatException
+            Just u' -> return u'
+    mbCandidateBlockState <- liftIO $ TSH.lookup candidateBlocksByUuid uuid
+    (blockHash, txCount, merkleRoot, merkleBranch) <-
+        case mbCandidateBlockState of
+            Nothing -> do
+                throw BlockCandidateIdNotFound
+            Just cb -> return cb
+    return True
+
+data SubmitMiningSolutionException
+    = UuidFormatException
+    | BlockCandidateIdNotFound
+    deriving (Eq)
+
+instance Exception SubmitMiningSolutionException
+
+instance Show SubmitMiningSolutionException where
+    show UuidFormatException = "UUID formatted incorrectly (use RFC-4122 version 4 UUIDs)"
+    show BlockCandidateIdNotFound =
+        "Required ID was not found, the ID supplied does not correspond to any candidate block"
