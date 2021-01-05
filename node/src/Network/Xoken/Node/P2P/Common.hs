@@ -372,6 +372,15 @@ updatePredecessors = do
     liftIO $ atomically $ swapTVar (predecessors bp2pEnv) pr
     return ()
 
+fetchPredecessorsIO :: (MonadIO m) => R.DB -> R.ColumnFamily -> HeaderMemory -> m [BlockHash]
+fetchPredecessorsIO rkdb pcf hm = concatMapM
+                                        (\x -> do
+                                            let hash = headerHash $ nodeHeader x
+                                            ph <- getDBCF rkdb pcf hash
+                                            case (ph :: Maybe BlockHash) of
+                                                Nothing -> return [hash]
+                                                Just p -> return [hash,p]) $ getParents hm (10) (memoryBestHeader hm)
+
 fetchPredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m [BlockHash]
 fetchPredecessors = do
     lg <- getLogger
@@ -383,9 +392,4 @@ fetchPredecessors = do
     pcfm <- liftIO $ TSH.lookup cf "provisional_blockhash"
     case pcfm of
         Nothing -> return []
-        Just pcf -> concatMapM (\x -> do
-                                            let hash = headerHash $ nodeHeader x
-                                            ph <- getDBCF rkdb pcf hash
-                                            case (ph :: Maybe BlockHash) of
-                                                Nothing -> return [hash]
-                                                Just p -> return [hash,p]) $ getParents hm (10) (memoryBestHeader hm)
+        Just pcf -> fetchPredecessorsIO rkdb pcf hm

@@ -185,10 +185,13 @@ runThreads config nodeConf bp2p lg certPaths = do
     withDBCF "xdb" $ \rkdb -> do
         let cfZip = zip cfStr (R.columnFamilies rkdb)
             btcf = snd $ fromJust $ Data.List.find ((== "blocktree") . fst) cfZip
+            pcf = snd $ fromJust $ Data.List.find ((== "provisional_blockhash") . fst) cfZip
         hm <- repopulateBlockTree (bitcoinNetwork nodeConf) rkdb btcf
         nh <- case hm of
                 Just h -> CMS.atomically $ swapTVar (blockTree bp2p) h
                 Nothing -> readTVarIO (blockTree bp2p) -- TODO: handled Nothing due to errors
+        pred <- fetchPredecessorsIO rkdb pcf nh
+        CMS.atomically $ swapTVar (predecessors bp2p) pred
         cfM <- TSH.fromList 1 $ cfZip
         let dbh = DatabaseHandles rkdb cfM
         let allegoryEnv = AllegoryEnv $ allegoryVendorSecretKey nodeConf

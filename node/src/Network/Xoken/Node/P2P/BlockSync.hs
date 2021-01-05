@@ -409,6 +409,7 @@ runBlockCacheQueue =
                             let !(lhash,(_,lht)) = last $ syt
                             debug lg $ LG.msg $ ("marking best synced " ++ show (blockHashToHex $ lhash))
                             markBestSyncedBlock (blockHashToHex $ lhash) (fromIntegral $ lht)
+                            updatePredecessors
                             --
                             lp <- getDB' rkdb ("last-pruned" :: B.ByteString)
                             let (lpht,lphs) = fromMaybe (0,headerHash $ getGenesisHeader net) lp :: (BlockHeight,BlockHash)
