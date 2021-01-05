@@ -164,7 +164,8 @@ getMiningCandidate = do
                         Just s -> (s : merkleBranch')
                         Nothing -> merkleBranch'
             -- persist generated UUID and txCount in memory
-            liftIO $ TSH.insert cbByUuidTSH uuid (fromIntegral txCount, merkleRoot)
+            liftIO $
+                TSH.insert cbByUuidTSH uuid (fromIntegral txCount, merkleRoot, fromJust . hexToTxHash <$> merkleBranch)
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
             let parentBlock = memoryBestHeader hm
                 candidateHeader = BlockHeader 0 (BlockHash "") "" (round timestamp) 0 0
@@ -181,3 +182,13 @@ getMiningCandidate = do
                     (round timestamp)
                     (1 + fromIntegral bestSyncedBlockHeight)
                     (DT.unpack <$> merkleBranch)
+
+submitMiningSolution ::
+       (HasXokenNodeEnv env m, MonadIO m)
+    => String
+    -> Int32
+    -> Maybe String
+    -> Maybe Int32
+    -> Maybe Int32
+    -> m (Either String Bool)
+submitMiningSolution id nonce coinbase time version = return $ Right True

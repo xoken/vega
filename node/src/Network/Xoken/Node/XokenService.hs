@@ -132,4 +132,17 @@ goGetResource msg net = do
                                 then r'
                                 else r' {rgmcCoinbase = Nothing}
                 _ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_PARAMS Nothing
+        "SUBMIT_MINING_SOLUTION" -> do
+            case rqParams msg of
+                SubmitMiningSolutionRequest id nonce coinbase time version -> do
+                    resp <- LE.try $ submitMiningSolution id nonce coinbase time version
+                    case resp of
+                        Left (e :: SomeException) -> do
+                            err lg $ LG.msg $ "Error: SUBMIT_MINING_SOLUTION: " <> (show e)
+                            return $ RPCResponse 400 $ Left $ RPCError INTERNAL_ERROR Nothing
+                        Right r' ->
+                            case r' of
+                                Right b -> return $ RPCResponse 200 $ Right $ Just $ SubmitMiningSolutionResp b
+                                Left s -> return $ RPCResponse 400 $ Left $ RPCError INTERNAL_ERROR Nothing
+                _ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_PARAMS Nothing
         _____ -> return $ RPCResponse 400 $ Left $ RPCError INVALID_METHOD Nothing

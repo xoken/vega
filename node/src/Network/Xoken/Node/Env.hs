@@ -103,7 +103,7 @@ data BitcoinP2P =
                                                                      , Seq Word64
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
-        , candidatesByUuid :: !(TSH.TSHashTable UUID (Int32, TxHash))
+        , candidatesByUuid :: !(TSH.TSHashTable UUID (Int32, TxHash, [TxHash]))
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
 
