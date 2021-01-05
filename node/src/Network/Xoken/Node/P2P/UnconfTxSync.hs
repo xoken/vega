@@ -211,6 +211,15 @@ processUnconfTransaction tx = do
         cf = rocksCF dbe'
     bbn <- fetchBestBlock
     let (bsh,bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+    prb <- liftIO $ mkProvisionalBlockHashR bsh
+    pcf' <- liftIO $ TSH.lookup cf (getEpochTxOutCF epoch)
+    case pcf' of
+        Just pcf -> do
+            putDBCF conn pcf bsh prb
+            putDBCF conn pcf prb bsh
+            updatePredecessors
+        Nothing -> do
+            return ()
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processUnconfTransaction: processing Unconf Tx " ++ show (txHash tx)
     cftx <- liftIO $ TSH.lookup cf ("tx")
@@ -284,7 +293,7 @@ processUnconfTransaction tx = do
                          ZtxiUtxo
                              (txHash tx)
                              (oindex)
-                             [mkProvisionalBlockHash bsh] -- if already present then ADD to the existing list of BlockHashes
+                             [prb] -- if already present then ADD to the existing list of BlockHashes
                              (fromIntegral 9999999)
                              outpoints
                              []
