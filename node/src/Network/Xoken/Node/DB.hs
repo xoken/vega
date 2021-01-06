@@ -6,6 +6,7 @@ module Network.Xoken.Node.DB where
 import Control.Monad.Trans
 import qualified Database.RocksDB as R
 import Data.ByteString as B
+import Data.Default
 import Data.Serialize as S
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
@@ -13,6 +14,15 @@ import Network.Xoken.Node.P2P.Types
 import Xoken.NodeConfig
 import Network.Xoken.Block.Headers
 import Network.Xoken.Block.Common
+
+conf :: R.Config
+conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = True, R.prefixLength = Just 3}
+
+cfStr = ["outputs", "ep_outputs_odd", "ep_outputs_even", "ep_transactions_odd", "ep_transactions_even", "tx", "blocktree", "provisional_blockhash"]
+
+columnFamilies = fmap (\x -> (x, conf)) cfStr
+
+withDBCF path = R.withDBCF path conf columnFamilies
 
 putHeaderMemoryElem :: (HasXokenNodeEnv env m, MonadIO m) => BlockNode -> m ()
 putHeaderMemoryElem b = do

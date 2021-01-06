@@ -61,7 +61,6 @@ import qualified Data.ByteString.Lazy.Char8 as CL
 import qualified Data.ByteString.Short as BSS
 import Data.Char
 import Data.Default
-import Data.Default
 import Data.Function
 import Data.Functor.Identity
 import Data.HashMap.Strict as HM
@@ -170,15 +169,6 @@ defaultConfig = do
     let config =
             Config.Config 5678 5678 sk [bootstrapPeer] (generateNodeId sk) "127.0.0.1" (T.pack "./arivi.log") 20 5 3
     Config.makeConfig config "./arivi-config.yaml"
-
-conf :: R.Config
-conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = True, R.prefixLength = Just 3}
-
-cfStr = ["outputs", "ep_outputs_odd", "ep_outputs_even", "ep_transactions_odd", "ep_transactions_even", "tx", "blocktree", "provisional_blockhash"]
-
-columnFamilies = fmap (\x -> (x, conf)) cfStr
-
-withDBCF path = R.withDBCF path conf columnFamilies
 
 runThreads :: Config.Config -> NC.NodeConfig -> BitcoinP2P -> LG.Logger -> [FilePath] -> IO ()
 runThreads config nodeConf bp2p lg certPaths = do
