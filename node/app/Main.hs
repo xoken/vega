@@ -209,7 +209,7 @@ defBitcoinP2P nodeCnf = do
     hl <- newMVar True
     st <- TSH.new 1
     tl <- TSH.new 1
-    ep <- newTVarIO False
+    ep <- newTVarIO Epoch0
     tc <- TSH.new 1
     rpf <- newEmptyMVar
     rpc <- newTVarIO 0

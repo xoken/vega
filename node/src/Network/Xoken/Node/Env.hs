@@ -66,6 +66,19 @@ data AllegoryEnv =
         { allegorySecretKey :: !SecKey
         }
 
+data Epoch = Epoch0 | Epoch1 | Epoch2
+    deriving (Show, Eq)
+
+nextEpoch :: Epoch -> Epoch
+nextEpoch Epoch0 = Epoch1
+nextEpoch Epoch1 = Epoch2
+nextEpoch Epoch2 = Epoch0
+
+prevEpoch :: Epoch -> Epoch
+prevEpoch Epoch0 = Epoch2
+prevEpoch Epoch1 = Epoch0
+prevEpoch Epoch2 = Epoch1
+
 data BitcoinP2P =
     BitcoinP2P
         { nodeConfig :: !NodeConfig
@@ -75,7 +88,7 @@ data BitcoinP2P =
         , headersWriteLock :: !(MVar Bool)
         , blockSyncStatusMap :: !(TSH.TSHashTable BlockHash (BlockSyncStatus, BlockHeight))
         , blockTxProcessingLeftMap :: !(TSH.TSHashTable BlockHash ((TSH.TSHashTable TxHash Int), Int))
-        , epochType :: !(TVar Bool)
+        , epochType :: !(TVar Epoch)
         , unconfirmedTxCache :: !(TSH.TSHashTable TxShortHash (Bool, TxHash))
         , peerReset :: !(MVar Bool, TVar Int)
         , merkleQueueMap :: !(TSH.TSHashTable BlockHash (TQueue (TxHash, Bool)))

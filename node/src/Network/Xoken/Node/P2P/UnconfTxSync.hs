@@ -11,7 +11,7 @@
 module Network.Xoken.Node.P2P.UnconfTxSync
     ( processUnconfTransaction
     , processTxGetData
-    , runEpochSwitcher
+    --, runEpochSwitcher
     , addTxCandidateBlocks
     ) where
 
@@ -112,7 +112,7 @@ sendTxGetData pr txHash = do
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
             debug lg $ LG.msg $ "[dag] sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
-
+{-
 runEpochSwitcher :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEpochSwitcher =
     forever $ do
@@ -123,16 +123,14 @@ runEpochSwitcher =
         let hour = todHour $ timeToTimeOfDay $ utctDayTime tm
             minute = todMin $ timeToTimeOfDay $ utctDayTime tm
             epoch =
-                case hour `mod` 2 of
-                    0 -> True
-                    1 -> False
+                case hour `mod` 3 of
+                    0 -> Epoch0
+                    1 -> Epoch1
+                    2 -> Epoch2
         liftIO $ atomically $ writeTVar (epochType bp2pEnv) epoch
         if minute == 0
             then do
-                let (op_cf, tx_cf) =
-                        case epoch of
-                            True -> ("ep_outputs_odd", "ep_transactions_odd")
-                            False -> ("ep_outputs_even", "ep_transactions_even")
+                let delcf = 
                 --R.dropCF rkdb op_cf
                 --R.dropCF rkdb tx_cf
                 --o_ptr <- R.createCF rkdb config op_cf
@@ -150,6 +148,7 @@ coalesceUnconfTransaction dag txhash hashes sats = do
     print $ "coalesceUnconfTransaction called for tx: " ++ show (txhash)
     unconfHashes <- filterM (isNotConfirmed) hashes
     DAG.coalesce dag txhash unconfHashes sats (+) nextBcState
+-}
 
 processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([TxHash])
 processUnconfTransaction tx = do

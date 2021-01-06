@@ -73,6 +73,7 @@ data BlockSyncException
     | InvalidTxSatsValueException
     | InvalidDAGEdgeException
     | ZUnknownHandler
+    | ColumnFamilyNotFoundException
     | ZInvalidColumnFamily
     deriving (Show, Read)
 

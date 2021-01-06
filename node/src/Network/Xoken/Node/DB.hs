@@ -33,8 +33,9 @@ conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = T
 
 cfStr =
     [ "outputs"
-    , "ep_transactions_odd"
-    , "ep_transactions_even"
+    , "ep_transactions_0"
+    , "ep_transactions_1"
+    , "ep_transactions_2"
     , "blocktree"
     , "provisional_blockhash"
     ]
@@ -42,6 +43,38 @@ cfStr =
 columnFamilies = fmap (\x -> (x, conf)) cfStr
 
 withDBCF path = R.withDBCF path conf columnFamilies
+
+getTxEpochCF :: Epoch -> String
+getTxEpochCF Epoch0 = "ep_transactions_0"
+getTxEpochCF Epoch1 = "ep_transactions_1"
+getTxEpochCF Epoch2 = "ep_transactions_2"
+
+withCF :: (HasXokenNodeEnv env m, MonadIO m) => String -> (R.ColumnFamily -> m a) -> m a
+withCF cfs f = do
+    cf <- getCF cfs
+    case cf of
+        Nothing -> throw ColumnFamilyNotFoundException
+        Just c -> f c
+
+getCF :: (HasXokenNodeEnv env m, MonadIO m) => String -> m (Maybe R.ColumnFamily)
+getCF cfs = do
+    dbe <- getDB
+    liftIO $ TSH.lookup (rocksCF dbe) cfs
+
+putTx :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> Tx -> m ()
+putTx txh tx = do
+    bp2pEnv <- getBitcoinP2P
+    epoch <- liftIO $ readTVarIO (epochType bp2pEnv)
+    putX (getTxEpochCF epoch) txh tx
+
+getTx :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> m (Maybe Tx)
+getTx txh = do
+    bp2pEnv <- getBitcoinP2P
+    epoch <- liftIO $ readTVarIO (epochType bp2pEnv)
+    epc <- getX (getTxEpochCF epoch) txh
+    if epc == Nothing
+        then getX (getTxEpochCF $ prevEpoch epoch) txh
+        else return $ epc
 
 txFromHash conn cf txh = do
     cftx <- liftIO $ TSH.lookup cf ("tx")
@@ -148,26 +181,17 @@ fetchPredecessors = do
 putX :: (HasXokenNodeEnv env m, MonadIO m, Store a, Store b) => String -> a -> b -> m ()
 putX cfs k v = do
     dbe' <- getDB
-    cf' <- liftIO $ TSH.lookup (rocksCF dbe') cfs
-    case cf' of
-        Just cf -> putIO (rocksDB dbe') cf k v
-        Nothing -> return ()
+    withCF cfs $ \cf -> putIO (rocksDB dbe') cf k v
 
 getX :: (HasXokenNodeEnv env m, MonadIO m, Store a, Store b) => String -> a -> m (Maybe b)
 getX cfs k = do
     dbe' <- getDB
-    cf' <- liftIO $ TSH.lookup (rocksCF dbe') cfs
-    case cf' of
-        Just cf -> getIO (rocksDB dbe') cf k
-        Nothing -> return Nothing
+    withCF cfs $ \cf -> getIO (rocksDB dbe') cf k
 
 deleteX :: (HasXokenNodeEnv env m, MonadIO m, Store a) => String -> a -> m ()
 deleteX cfs k = do
     dbe' <- getDB
-    cf' <- liftIO $ TSH.lookup (rocksCF dbe') cfs
-    case cf' of
-        Just cf -> deleteIO (rocksDB dbe') cf k
-        Nothing -> return ()
+    withCF cfs $ \cf -> deleteIO (rocksDB dbe') cf k
 
 scanX cfs = do
     dbe' <- getDB
