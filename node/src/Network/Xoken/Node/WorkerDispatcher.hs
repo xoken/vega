@@ -443,6 +443,7 @@ validateOutpoint ::
     -> m (Word64, [BlockHash], Word32)
 validateOutpoint outPoint curBlkHash wait = do
     bp2pEnv <- getBitcoinP2P
+    dbe <- getDB
     lg <- getLogger
     predecessors <- liftIO $ readTVarIO (predecessors bp2pEnv)
     -- TODO get predecessors
@@ -454,7 +455,7 @@ validateOutpoint outPoint curBlkHash wait = do
         txSync = txSynchronizer bp2pEnv
         opindx = fromIntegral $ outPointIndex outPoint
         optxid = outPointHash outPoint
-    res <- liftIO $ try $ getOutput outPoint
+    res <- LE.try $ getOutput outPoint
     case res of
         Right op -> do
             case op of
@@ -515,7 +516,7 @@ updateOutpoint outPoint bhash bht = do
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         opindx = fromIntegral $ outPointIndex outPoint :: Word32
         optxid = outPointHash outPoint
-    res <- liftIO $ try $ getOutput outPoint
+    res <- LE.try $ getOutput outPoint
     case res of
         Right (op :: Maybe ZtxiUtxo) -> do
             case op of
@@ -543,6 +544,8 @@ pruneBlocksTxnsOutputs :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => [Bl
 pruneBlocksTxnsOutputs blockHashes = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
+    dbe <- getDB
+    cf <- liftIO $ TSH.lookup (rocksCF dbe) "outputs"
     mapM_
         (\bhash -> do
              opqueue <- liftIO $ TSH.lookup (pruneUtxoQueue bp2pEnv) bhash
@@ -553,7 +556,7 @@ pruneBlocksTxnsOutputs blockHashes = do
                          TSH.mapM_
                              (\(op@(OutPoint txId opIndex), ()) -> do
                                   debug lg $ LG.msg $ "Pruning spent-TXO : " ++ show (txId, opIndex)
-                                  res <- try $ deleteOutput op
+                                  res <- try $ deleteIO (rocksDB dbe) (fromJust cf) op
                                   case res of
                                       Right () -> return ()
                                       Left (e :: SomeException) -> do

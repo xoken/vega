@@ -64,6 +64,7 @@ import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
@@ -342,7 +343,7 @@ runBlockCacheQueue =
                             markBestSyncedBlock (blockHashToHex $ lhash) (fromIntegral $ lht)
                             updatePredecessors
                             --
-                            lp <- getDB' rkdb ("last-pruned" :: B.ByteString)
+                            lp <- getDefault rkdb ("last-pruned" :: B.ByteString)
                             let (lpht, lphs) =
                                     fromMaybe (0, headerHash $ getGenesisHeader net) lp :: (BlockHeight, BlockHash)
                             debug lg $
@@ -368,7 +369,7 @@ runBlockCacheQueue =
                                                     getParents hm (fromIntegral $ lht - lpht - 1) bn
                                             debug lg $ LG.msg $ ("Pruning " ++ show ((fmap blockHashToHex) <$> anc))
                                             debug lg $ LG.msg $ ("Marking Last Pruned: " ++ show (head anc))
-                                            putDB rkdb ("last-pruned" :: B.ByteString) (head anc)
+                                            putDefault rkdb ("last-pruned" :: B.ByteString) (head anc)
                                             _ <- LA.async $ zRPCDispatchBlocksTxsOutputs $ fmap snd anc -- (fst $ unzip syt)
                                             return ()
                             --
@@ -490,11 +491,11 @@ processConfTransaction tx bhash blkht txind = do
                              []
                              (fromIntegral $ outValue opt)
                              opCount
-                 res <- liftIO $ try $ putOutput (Outpoint (txHash tx) oindex) zut
+                 res <- LE.try $ putOutput (OutPoint (txHash tx) oindex) zut
                  case res of
                      Right _ -> return (zut)
                      Left (e :: SomeException) -> do
-                         err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf') ++ ": " ++ show e
+                         err lg $ LG.msg $ "Error: INSERTing into outputs: " ++ show e
                          throw KeyValueDBInsertException)
             outputs
     --

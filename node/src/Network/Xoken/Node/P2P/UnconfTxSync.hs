@@ -40,6 +40,7 @@ import Network.Xoken.Network.Common
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
@@ -229,7 +230,7 @@ processUnconfTransaction tx = do
                              []
                              (fromIntegral $ outValue opt)
                              opCount
-                 res <- liftIO $ try $ putOutput (Outpoint (txHash tx) oindex) zut
+                 res <- LE.try $ putOutput (OutPoint (txHash tx) oindex) zut
                  case res of
                      Right _ -> return (zut)
                      Left (e :: SomeException) -> do

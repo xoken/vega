@@ -226,7 +226,7 @@ processHeaders hdrs = do
                                                                      " versus point of re-org: " <>
                                                                      (show $ (headPrevHash, matchBHt)) <>
                                                                      ", re-syncing from thereon"
-                                                                 NXB.markBestSyncedBlock headPrevHash $
+                                                                 markBestSyncedBlock headPrevHash $
                                                                      fromIntegral matchBHt
                                                                  return reOrgDiff
                                                              else return reOrgDiff

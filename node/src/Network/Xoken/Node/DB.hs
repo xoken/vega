@@ -47,7 +47,7 @@ txFromHash conn cf txh = do
     cftx <- liftIO $ TSH.lookup cf ("tx")
     case cftx of
         Just cftx' -> do
-            tx' <- getDBCF conn cftx' (txh)
+            tx' <- getIO conn cftx' (txh)
             return tx'
         Nothing -> do
             return Nothing -- ideally should be unreachable
@@ -124,7 +124,7 @@ fetchPredecessorsIO rkdb pcf hm =
     concatMapM
         (\x -> do
              let hash = headerHash $ nodeHeader x
-             ph <- getDBCF rkdb pcf hash
+             ph <- getIO rkdb pcf hash
              case (ph :: Maybe BlockHash) of
                  Nothing -> return [hash]
                  Just p -> return [hash, p]) $
@@ -150,8 +150,7 @@ putX cfs k v = do
     dbe' <- getDB
     cf' <- liftIO $ TSH.lookup (rocksCF dbe') cfs
     case cf' of
-        Just cf -> do
-            R.putCF (rocksDB dbe') cf (DS.encode k) (DS.encode v)
+        Just cf -> putIO (rocksDB dbe') cf k v
         Nothing -> return ()
 
 getX :: (HasXokenNodeEnv env m, MonadIO m, Store a, Store b) => String -> a -> m (Maybe b)
@@ -159,14 +158,7 @@ getX cfs k = do
     dbe' <- getDB
     cf' <- liftIO $ TSH.lookup (rocksCF dbe') cfs
     case cf' of
-        Just cf -> do
-            res <- R.getCF (rocksDB dbe') cf (DS.encode k)
-            case DS.decode <$> res of
-                Just (Left e) -> do
-                    liftIO $ print $ "getDBCF ERROR" ++ show e
-                    throw KeyValueDBLookupException
-                Just (Right m) -> return $ Just m
-                Nothing -> return Nothing
+        Just cf -> getIO (rocksDB dbe') cf k
         Nothing -> return Nothing
 
 deleteX :: (HasXokenNodeEnv env m, MonadIO m, Store a) => String -> a -> m ()
@@ -174,8 +166,7 @@ deleteX cfs k = do
     dbe' <- getDB
     cf' <- liftIO $ TSH.lookup (rocksCF dbe') cfs
     case cf' of
-        Just cf -> do
-            R.deleteCF (rocksDB dbe') cf (DS.encode k)
+        Just cf -> deleteIO (rocksDB dbe') cf k
         Nothing -> return ()
 
 scanX cfs = do
@@ -208,11 +199,11 @@ scanCF db cf =
             else return []
 
 
-putDB :: (Store a, Store b, MonadIO m) => R.DB -> a -> b -> m ()
-putDB rkdb k v = R.put rkdb (DS.encode k) (DS.encode v)
+putDefault :: (Store a, Store b, MonadIO m) => R.DB -> a -> b -> m ()
+putDefault rkdb k v = R.put rkdb (DS.encode k) (DS.encode v)
 
-getDB' :: (Store a, Store b, MonadIO m) => R.DB -> a -> m (Maybe b)
-getDB' rkdb k = do
+getDefault :: (Store a, Store b, MonadIO m) => R.DB -> a -> m (Maybe b)
+getDefault rkdb k = do
     res <- R.get rkdb (DS.encode k)
     case DS.decode <$> res of
         Just (Left e) -> do
@@ -221,8 +212,14 @@ getDB' rkdb k = do
         Just (Right m) -> return $ Just m
         Nothing -> return Nothing
 
-getDBCF :: (Store a, Store b, MonadIO m) => R.DB -> R.ColumnFamily -> a -> m (Maybe b)
-getDBCF rkdb cf k = do
+deleteDefault :: (Store a, MonadIO m) => R.DB -> a -> m ()
+deleteDefault rkdb k = R.delete rkdb (DS.encode k)
+
+putIO :: (Store a, Store b, MonadIO m) => R.DB -> R.ColumnFamily -> a -> b -> m ()
+putIO rkdb cf k v = R.putCF rkdb cf (DS.encode k) (DS.encode v)
+
+getIO :: (Store a, Store b, MonadIO m) => R.DB -> R.ColumnFamily -> a -> m (Maybe b)
+getIO rkdb cf k = do
     res <- R.getCF rkdb cf (DS.encode k)
     case DS.decode <$> res of
         Just (Left e) -> do
@@ -230,6 +227,9 @@ getDBCF rkdb cf k = do
             throw KeyValueDBLookupException
         Just (Right m) -> return $ Just m
         Nothing -> return Nothing
+
+deleteIO :: (Store a, MonadIO m) => R.DB -> R.ColumnFamily -> a -> m ()
+deleteIO rkdb cf k = R.deleteCF rkdb cf (DS.encode k)
 
 markBestSyncedBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Text -> Int32 -> m ()
 markBestSyncedBlock hash height = do
