@@ -15,10 +15,6 @@ module Network.Xoken.Node.P2P.BlockSync
     , processBlockTransactions
     , processConfTransaction
     , peerBlockSync
-    , fetchBestSyncedBlock
-    , markBestSyncedBlock
-    , checkBlocksFullySynced
-    , checkBlocksFullySynced_
     , runPeerSync
     , runBlockCacheQueue
     , sendRequestMessages
@@ -199,27 +195,6 @@ runPeerSync =
                         (connPeers)
             else liftIO $ threadDelay (60 * 1000000)
 
-markBestSyncedBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Text -> Int32 -> m ()
-markBestSyncedBlock hash height = do
-    rkdb <- rocksDB <$> getDB
-    R.put rkdb "best_synced_hash" $ DTE.encodeUtf8 hash
-    R.put rkdb "best_synced_height" $ C.pack $ show height
-    -- liftIO $ print "MARKED BEST SYNCED INTO ROCKS DB"
-
-checkBlocksFullySynced :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Bool
-checkBlocksFullySynced net = do
-    rkdb <- rocksDB <$> getDB
-    bestBlock <- fetchBestBlock
-    bestSynced <- fetchBestSyncedBlock rkdb net
-    return $ (headerHash $ nodeHeader bestBlock, fromIntegral $ nodeHeight bestBlock) == bestSynced
-
-checkBlocksFullySynced_ :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Int32
-checkBlocksFullySynced_ net = do
-    rkdb <- rocksDB <$> getDB
-    bestBlock <- fetchBestBlock
-    bestSynced <- fetchBestSyncedBlock rkdb net
-    return $ (fromIntegral $ nodeHeight bestBlock) - (snd bestSynced)
-
 getBatchSizeMainnet :: Int32 -> Int32 -> [Int32]
 getBatchSizeMainnet peerCount n
     | n < 200000 =
@@ -263,7 +238,7 @@ runBlockCacheQueue =
         retn <-
             if sysz == 0
                 then do
-                    (bhash, ht') <- fetchBestSyncedBlock rkdb net
+                    (bhash, ht') <- fetchBestSyncedBlock
                     hmem <- liftIO $ readTVarIO (blockTree bp2pEnv)
                     let ht = fromIntegral ht'
                         bc = last $ getBatchSize net (fromIntegral $ L.length connPeers) ht
@@ -459,25 +434,6 @@ sortPeers peers = do
             peers
     return $ snd $ unzip $ L.sortBy (\(a, _) (b, _) -> compare b a) (zip ts peers)
 
-fetchBestSyncedBlock :: (HasLogger m, MonadIO m) => R.DB -> Network -> m ((BlockHash, Int32))
-fetchBestSyncedBlock rkdb net = do
-    lg <- getLogger
-    hash <- liftIO $ R.get rkdb "best_synced_hash"
-    height <- liftIO $ R.get rkdb "best_synced_height"
-    case (hash, height) of
-        (Just hs, Just ht)
-            -- liftIO $
-            --     print $
-            --     "FETCHED BEST SYNCED FROM ROCKS DB: " ++
-            --     (T.unpack $ DTE.decodeUtf8 hs) ++ " " ++ (T.unpack . DTE.decodeUtf8 $ ht)
-         -> do
-            case hexToBlockHash $ DTE.decodeUtf8 hs of
-                Nothing -> throw InvalidBlockHashException
-                Just hs' -> return (hs', read . T.unpack . DTE.decodeUtf8 $ ht :: Int32)
-        _ -> do
-            debug lg $ LG.msg $ val "Bestblock is genesis."
-            return ((headerHash $ getGenesisHeader net), 0)
-
 processConfTransaction ::
        (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ([OutPoint])
 processConfTransaction tx bhash blkht txind = do
@@ -486,8 +442,6 @@ processConfTransaction tx bhash blkht txind = do
     epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let conn = rocksDB $ dbe'
-        cf = rocksCF dbe'
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processing Tx " ++ show (txHash tx)
     let inputs = zip (txIn tx) [0 :: Word32 ..]
@@ -521,7 +475,6 @@ processConfTransaction tx bhash blkht txind = do
                                  throw e)
             (inputs)
     -- insert UTXO/s
-    cf' <- liftIO $ TSH.lookup cf ("outputs")
     let opCount = fromIntegral $ L.length outputs
     ovs <-
         mapM
@@ -537,7 +490,7 @@ processConfTransaction tx bhash blkht txind = do
                              []
                              (fromIntegral $ outValue opt)
                              opCount
-                 res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
+                 res <- liftIO $ try $ putOutput (Outpoint (txHash tx) oindex) zut
                  case res of
                      Right _ -> return (zut)
                      Left (e :: SomeException) -> do
@@ -875,9 +828,7 @@ newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => 
 newCandidateBlockChainTip = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    dbe' <- getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-        conn = rocksDB dbe'
     bbn <- fetchBestBlock
     let hash = headerHash $ nodeHeader bbn
     tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16

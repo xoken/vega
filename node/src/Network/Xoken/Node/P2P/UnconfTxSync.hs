@@ -119,8 +119,7 @@ runEpochSwitcher =
         bp2pEnv <- getBitcoinP2P
         dbe' <- getDB
         tm <- liftIO $ getCurrentTime
-        let conn = rocksDB $ dbe'
-            hour = todHour $ timeToTimeOfDay $ utctDayTime tm
+        let hour = todHour $ timeToTimeOfDay $ utctDayTime tm
             minute = todMin $ timeToTimeOfDay $ utctDayTime tm
             epoch =
                 case hour `mod` 2 of
@@ -158,21 +157,13 @@ processUnconfTransaction tx = do
     epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let conn = rocksDB $ dbe'
-        cf = rocksCF dbe'
     bbn <- fetchBestBlock
     let (bsh, bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
     prb <- liftIO $ mkProvisionalBlockHashR bsh
-    pcf' <- liftIO $ TSH.lookup cf "provisional_blockhash"
-    case pcf' of
-        Just pcf -> do
-            putDBCF conn pcf bsh prb
-            putDBCF conn pcf prb bsh
-            updatePredecessors
-        Nothing -> do
-            return ()
+    putProvisionalBlockHash prb bsh
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processUnconfTransaction: processing Unconf Tx " ++ show (txHash tx)
+    {- TODO: Use Epoch for it
     cftx <- liftIO $ TSH.lookup cf ("tx")
     case cftx of
         Just cftx' -> do
@@ -181,6 +172,7 @@ processUnconfTransaction tx = do
         Nothing -> do
             debug lg $ LG.msg $ val "[dag] insert tx: Error: cf Nothing"
             return () -- ideally should be unreachable
+    -}
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
  --
@@ -221,7 +213,6 @@ processUnconfTransaction tx = do
                                  throw e)
             (inputs)
     -- insert UTXO/s
-    cf' <- liftIO $ TSH.lookup cf ("outputs")
     let opCount = fromIntegral $ L.length outputs
     ovs <-
         mapM
@@ -238,11 +229,11 @@ processUnconfTransaction tx = do
                              []
                              (fromIntegral $ outValue opt)
                              opCount
-                 res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
+                 res <- liftIO $ try $ putOutput (Outpoint (txHash tx) oindex) zut
                  case res of
                      Right _ -> return (zut)
                      Left (e :: SomeException) -> do
-                         err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf') ++ ": " ++ show e
+                         err lg $ LG.msg $ "Error: INSERTing into outputs: " ++ show e
                          throw KeyValueDBInsertException)
             outputs
     -- TODO : cleanup this!!
@@ -359,13 +350,10 @@ convertToScriptHash net s = do
 
 addTxCandidateBlocks :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TxHash -> [BlockHash] -> [TxHash] -> m ()
 addTxCandidateBlocks txHash candBlockHashes depTxHashes = do
-    dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     --epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let conn = rocksDB $ dbe'
-        cfs = rocksCF dbe'
     debug lg $
         LG.msg $ "Appending to candidate blocks Tx " ++ show (txHash) ++ " with parent Tx's: " ++ show depTxHashes
     mapM_ (\bhash -> addTxCandidateBlock txHash bhash depTxHashes) candBlockHashes

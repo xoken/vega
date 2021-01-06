@@ -12,9 +12,7 @@ module Network.Xoken.Node.P2P.Common where
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TVar
 import Control.Exception
-import Control.Monad.Extra (concatMapM)
 import Control.Monad.Reader
-import Control.Monad.STM
 import Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Base16 as B16
@@ -26,11 +24,9 @@ import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.Int
 import Data.Serialize
 import Data.Serialize as S
-import Data.Store as DS
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word
-import qualified Database.RocksDB as R
 import Network.Socket
 import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
 import Network.Xoken.Block.Common
@@ -39,9 +35,7 @@ import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common -- (GetData(..), MessageCommand(..), NetworkAddress(..))
 import Network.Xoken.Network.Message
-import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Util
 import System.Random
 
@@ -212,74 +206,6 @@ splitList xs = (f 1 xs, f 0 xs)
   where
     f n a = map fst . filter (odd . snd) . zip a $ [n ..]
 
-fetchBestBlock :: (HasXokenNodeEnv env m, MonadIO m) => m (BlockNode)
-fetchBestBlock = do
-    bp2pEnv <- getBitcoinP2P
-    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
-    return $ memoryBestHeader hm
-    {-
-    case (hash, height) of
-        (Just hs, Just ht)
-            -- liftIO $
-            --     print $
-            --     "FETCHED BEST BLOCK FROM DB: " ++
-            --     (T.unpack $ DTE.decodeUtf8 hs) ++ " " ++ (T.unpack . DTE.decodeUtf8 $ ht)
-         -> do
-            case hexToBlockHash $ DTE.decodeUtf8 hs of
-                Nothing -> throw InvalidBlockHashException
-                Just hs' -> return (hs', read . T.unpack . DTE.decodeUtf8 $ ht :: Int32)
-        _ -> do
-            debug lg $ LG.msg $ val "Bestblock is genesis."
-            return ((headerHash $ getGenesisHeader net), 0)
-    -}
-
--- getTxShortCode :: TxHash -> Word8
--- getTxShortCode txh = sum $ map (\(x, p) -> (fromIntegral x) * (16 ^ p)) list
---   where
---     list = zip (BSS.unpack $ getTxShortHash txh 2) [0 ..] -- 0xff = 255
--- getTxMidCode :: TxHash -> Word32
--- getTxMidCode txh = sum $ map (\(x, p) -> (fromIntegral x) * (16 ^ p)) list
---   where
---     list = zip (BSS.unpack $ getTxShortHash txh 8) [0 ..] -- 0xffffffff = 4294967295
-putDB :: (Store a, Store b, MonadIO m) => R.DB -> a -> b -> m ()
-putDB rkdb k v = R.put rkdb (DS.encode k) (DS.encode v)
-
-putDBCF :: (Store a, Store b, MonadIO m) => R.DB -> R.ColumnFamily -> a -> b -> m ()
-putDBCF rkdb cf k v = R.putCF rkdb cf (DS.encode k) (DS.encode v)
-
-deleteDBCF :: (Store a, MonadIO m) => R.DB -> R.ColumnFamily -> a -> m ()
-deleteDBCF rkdb cf k = R.deleteCF rkdb cf (DS.encode k)
-
-getDB' :: (Store a, Store b, MonadIO m) => R.DB -> a -> m (Maybe b)
-getDB' rkdb k = do
-    res <- R.get rkdb (DS.encode k)
-    case DS.decode <$> res of
-        Just (Left e) -> do
-            liftIO $ print $ "getDB' ERROR: " ++ show e
-            throw KeyValueDBLookupException
-        Just (Right m) -> return $ Just m
-        Nothing -> return Nothing
-
-getDBCF :: (Store a, Store b, MonadIO m) => R.DB -> R.ColumnFamily -> a -> m (Maybe b)
-getDBCF rkdb cf k = do
-    res <- R.getCF rkdb cf (DS.encode k)
-    case DS.decode <$> res of
-        Just (Left e) -> do
-            liftIO $ print $ "getDBCF ERROR" ++ show e
-            throw KeyValueDBLookupException
-        Just (Right m) -> return $ Just m
-        Nothing -> return Nothing
-
-getDBCF_ :: (Store a, Store b) => R.DB -> R.ColumnFamily -> a -> IO (Maybe b)
-getDBCF_ rkdb cf k = do
-    res <- R.getCF rkdb cf (DS.encode k)
-    case DS.decode <$> res of
-        Just (Left e) -> do
-            print $ "getDBCF_ ERROR" ++ show e
-            throw KeyValueDBLookupException
-        Just (Right m) -> return $ Just m
-        Nothing -> return Nothing
-
 getEpochTxCF :: Bool -> String
 getEpochTxCF True = "ep_transactions_odd"
 getEpochTxCF False = "ep_transactions_even"
@@ -348,34 +274,3 @@ replaceProvisionals bh [] = [bh]
 replaceProvisionals bh (pbh:bhs)
     | isProvisionalBlockHash pbh = (bh : filter (not . isProvisionalBlockHash) bhs)
     | otherwise = pbh : (replaceProvisionals bh bhs)
-
-updatePredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
-updatePredecessors = do
-    bp2pEnv <- getBitcoinP2P
-    pr <- fetchPredecessors
-    liftIO $ atomically $ swapTVar (predecessors bp2pEnv) pr
-    return ()
-
-fetchPredecessorsIO :: (MonadIO m) => R.DB -> R.ColumnFamily -> HeaderMemory -> m [BlockHash]
-fetchPredecessorsIO rkdb pcf hm =
-    concatMapM
-        (\x -> do
-             let hash = headerHash $ nodeHeader x
-             ph <- getDBCF rkdb pcf hash
-             case (ph :: Maybe BlockHash) of
-                 Nothing -> return [hash]
-                 Just p -> return [hash, p]) $
-    getParents hm (10) (memoryBestHeader hm)
-
-fetchPredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m [BlockHash]
-fetchPredecessors = do
-    lg <- getLogger
-    dbe <- getDB
-    bp2pEnv <- getBitcoinP2P
-    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
-    let rkdb = rocksDB dbe
-        cf = rocksCF dbe
-    pcfm <- liftIO $ TSH.lookup cf "provisional_blockhash"
-    case pcfm of
-        Nothing -> return []
-        Just pcf -> fetchPredecessorsIO rkdb pcf hm

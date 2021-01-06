@@ -71,8 +71,6 @@ requestHandler sock writeLock msg = do
     lg <- getLogger
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
-    let rkdb = rocksDB dbe'
-        cf = rocksCF dbe'
         net = bitcoinNetwork $ nodeConfig bp2pEnv
     resp <-
         case (deserialiseOrFail msg) of
@@ -205,8 +203,7 @@ requestHandler sock writeLock msg = do
                                 pcf <- liftIO $ TSH.lookup (cf) "provisional_blockhash"
                                 case pcf of
                                     Just pc -> do
-                                        putDBCF rkdb pc bh pbh
-                                        putDBCF rkdb pc pbh bh
+                                        putProvisionalBlockHashIO (rocksDB dbe') cf pbh bh
                                         updatePredecessors
                                         return $ successResp mid (ZProvisionalBlockHashResp)
                                     Nothing -> return $ errorResp mid (show ZInvalidColumnFamily)

@@ -26,6 +26,7 @@ import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Node.Data
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
@@ -97,18 +98,10 @@ zRPCDispatchProvisionalBlockHash bh pbh = do
     lg <- getLogger
     wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-        rkdb = rocksDB dbe'
     mapM_
         (\wrk -> do
              case wrk of
-                 SelfWorker {..} -> do
-                     pcf <- liftIO $ TSH.lookup (rocksCF dbe') "provisional_blockhash"
-                     case pcf of
-                         Just pc -> do
-                             putDBCF rkdb pc bh pbh
-                             putDBCF rkdb pc pbh bh
-                             updatePredecessors
-                         Nothing -> return ()
+                 SelfWorker {..} -> putProvisionalBlockHash pbh bh
                  RemoteWorker {..} -> do
                      let mparam = ZProvisionalBlockHash bh pbh
                      resp <- zRPCRequestDispatcher mparam wrk
@@ -449,9 +442,6 @@ validateOutpoint ::
     -> Int
     -> m (Word64, [BlockHash], Word32)
 validateOutpoint outPoint curBlkHash wait = do
-    dbe <- getDB
-    let rkdb = rocksDB dbe
-        cfs = rocksCF dbe
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     predecessors <- liftIO $ readTVarIO (predecessors bp2pEnv)
@@ -464,8 +454,7 @@ validateOutpoint outPoint curBlkHash wait = do
         txSync = txSynchronizer bp2pEnv
         opindx = fromIntegral $ outPointIndex outPoint
         optxid = outPointHash outPoint
-    cf <- liftIO $ TSH.lookup cfs ("outputs")
-    res <- liftIO $ try $ getDBCF rkdb (fromJust cf) (optxid, opindx)
+    res <- liftIO $ try $ getOutput outPoint
     case res of
         Right op -> do
             case op of
@@ -479,7 +468,8 @@ validateOutpoint outPoint curBlkHash wait = do
                         (zuSpending zu)
                         -- eagerly mark spent, in the unlikely scenario script stack eval fails, mark unspent
                     let vx = spendZtxiUtxo curBlkHash (optxid) (opindx) zu
-                    liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) vx
+                    putOutput outPoint vx
+                    --liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) vx
                     return $ (zuSatoshiValue zu, zuBlockHash zu, zuBlockHeight zu)
                 Nothing -> do
                     debug lg $
@@ -513,23 +503,19 @@ validateOutpoint outPoint curBlkHash wait = do
                                 (show $ txHashToHex $ outPointHash outPoint)
                             validateOutpoint outPoint curBlkHash 0
         Left (e :: SomeException) -> do
-            err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
-            err lg $ LG.msg $ "[dag] validateOutpoint: Error: Fetching from " ++ (show cf) ++ ": " ++ show e
+            err lg $ LG.msg $ "Error: (validateOutpoint) Fetching from outputs: " ++ show e
             throw KeyValueDBInsertException
 
 updateOutpoint :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Word32)
 updateOutpoint outPoint bhash bht = do
     dbe <- getDB
-    let rkdb = rocksDB dbe
-        cfs = rocksCF dbe
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     debug lg $ LG.msg $ "[dag] updateOutpoint called for (Outpoint,blkHash,blkHeight) " ++ (show (outPoint, bhash, bht))
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
         opindx = fromIntegral $ outPointIndex outPoint :: Word32
         optxid = outPointHash outPoint
-    cf <- liftIO $ TSH.lookup cfs ("outputs")
-    res <- liftIO $ try $ getDBCF rkdb (fromJust cf) (optxid, opindx)
+    res <- liftIO $ try $ getOutput outPoint
     case res of
         Right (op :: Maybe ZtxiUtxo) -> do
             case op of
@@ -537,7 +523,8 @@ updateOutpoint outPoint bhash bht = do
                     debug lg $ LG.msg $ " ZUT entry found : " ++ (show zu)
                     let bhashes = replaceProvisionals bhash $ zuBlockHash zu
                         zu' = zu {zuBlockHash = bhashes, zuBlockHeight = bht}
-                    liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) zu'
+                    putOutput outPoint zu'
+                    --liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) zu'
                     return $ zuOpCount zu
                 Nothing -> do
                     debug lg $
@@ -549,18 +536,13 @@ updateOutpoint outPoint bhash bht = do
                         (show $ txHashToHex $ outPointHash outPoint) ++ " _waiting_ for event"
                     return 0
         Left (e :: SomeException) -> do
-            err lg $ LG.msg $ "Error: Fetching from " ++ (show cf) ++ ": " ++ show e
-            err lg $ LG.msg $ "[dag] validateOutpoint: Error: Fetching from " ++ (show cf) ++ ": " ++ show e
+            err lg $ LG.msg $ "Error: Fetching from outputs: " ++ show e
             throw KeyValueDBInsertException
 
 pruneBlocksTxnsOutputs :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => [BlockHash] -> m ()
 pruneBlocksTxnsOutputs blockHashes = do
     bp2pEnv <- getBitcoinP2P
-    dbe <- getDB
-    let rkdb = rocksDB dbe
-        cfs = rocksCF dbe
     lg <- getLogger
-    cf <- liftIO $ TSH.lookup cfs ("outputs")
     mapM_
         (\bhash -> do
              opqueue <- liftIO $ TSH.lookup (pruneUtxoQueue bp2pEnv) bhash
@@ -569,13 +551,13 @@ pruneBlocksTxnsOutputs blockHashes = do
                  Just opq -> do
                      liftIO $
                          TSH.mapM_
-                             (\(OutPoint txId opIndex, ()) -> do
+                             (\(op@(OutPoint txId opIndex), ()) -> do
                                   debug lg $ LG.msg $ "Pruning spent-TXO : " ++ show (txId, opIndex)
-                                  res <- try $ deleteDBCF rkdb (fromJust cf) (txId, opIndex)
+                                  res <- try $ deleteOutput op
                                   case res of
-                                      Right _ -> return ()
+                                      Right () -> return ()
                                       Left (e :: SomeException) -> do
-                                          err lg $ LG.msg $ "Error: Deleting from " ++ (show cf) ++ ": " ++ show e
+                                          err lg $ LG.msg $ "Error: Deleting from outputs: " ++ show e
                                           throw KeyValueDBInsertException)
                              opq
                  Nothing -> debug lg $ LG.msg $ "BlockHash not found, nothing to prune! " ++ (show bhash)

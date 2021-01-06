@@ -26,8 +26,8 @@ import Network.Xoken.Block.Headers (computeSubsidy)
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.P2P.BlockSync (fetchBestSyncedBlock)
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
@@ -51,7 +51,7 @@ getMiningCandidate = do
     nodeCfg <- nodeConfig <$> getBitcoinP2P
     net <- (NC.bitcoinNetwork . nodeConfig) <$> getBitcoinP2P
     rkdb <- rocksDB <$> getDB
-    (bestSyncedBlockHash, bestSyncedBlockHeight) <- fetchBestSyncedBlock rkdb net
+    (bestSyncedBlockHash, bestSyncedBlockHeight) <- fetchBestSyncedBlock
     debug lg $
         LG.msg $ "getMiningCandidate: got best-synced block: " <> (show (bestSyncedBlockHash, bestSyncedBlockHeight))
     hm <- (liftIO . readTVarIO) $ blockTree bp2pEnv

@@ -649,15 +649,6 @@ messageHandler peer (mm, ingss) = do
             err lg $ LG.msg $ val "Error, invalid message"
             throw InvalidMessageTypeException
 
-txFromHash conn cf txh = do
-    cftx <- liftIO $ TSH.lookup cf ("tx")
-    case cftx of
-        Just cftx' -> do
-            tx' <- getDBCF conn cftx' (txh)
-            return tx'
-        Nothing -> do
-            return Nothing -- ideally should be unreachable
-
 processTxBatch :: (HasXokenNodeEnv env m, MonadIO m) => [Tx] -> IngressStreamState -> m ()
 processTxBatch txns iss = do
     bp2pEnv <- getBitcoinP2P

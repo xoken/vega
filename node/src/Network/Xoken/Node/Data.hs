@@ -136,6 +136,8 @@ deriving instance Store Hash256
 
 deriving instance Store BlockHeader
 
+deriving instance Store BlockNode
+
 deriving instance Serialise BlockNode
 
 data ZRPCError =

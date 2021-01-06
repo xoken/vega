@@ -170,7 +170,6 @@ runSyncStatusChecker :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runSyncStatusChecker = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    rkdb <- rocksDB <$> getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     newCandidateBlockChainTip
     -- wait 300 seconds before first check

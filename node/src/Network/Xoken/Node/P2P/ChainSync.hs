@@ -44,7 +44,6 @@ import Network.Xoken.Network.Message
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Env
-import qualified Network.Xoken.Node.P2P.BlockSync as NXB (fetchBestSyncedBlock, markBestSyncedBlock)
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.WorkerDispatcher
@@ -60,8 +59,7 @@ produceGetHeadersMessage = do
     LA.race (liftIO $ threadDelay (15 * 1000000)) (liftIO $ takeMVar (bestBlockUpdated bp2pEnv))
     dbe <- getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-        rkdb = rocksDB dbe
-    bl <- getBlockLocator rkdb net
+    bl <- getBlockLocator net
     let gh =
             GetHeaders
                 { getHeadersVersion = myVersion
@@ -132,14 +130,8 @@ validateChainedBlockHeaders hdrs = do
         pairs = zip xs (drop 1 xs)
     L.foldl' (\ac x -> ac && (headerHash $ fst (fst x)) == (prevBlock $ fst (snd x))) True pairs
 
-markBestBlock :: (HasLogger m, MonadIO m) => R.DB -> Text -> Int32 -> m ()
-markBestBlock rkdb hash height = do
-    R.put rkdb "best_chain_tip_hash" $ DTE.encodeUtf8 hash
-    R.put rkdb "best_chain_tip_height" $ C.pack $ show height
-    --liftIO $ print "MARKED BEST BLOCK FROM ROCKS DB"
-
-getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> Network -> m (BlockLocator)
-getBlockLocator rkdb net = do
+getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m (BlockLocator)
+getBlockLocator net = do
     bp2pEnv <- getBitcoinP2P
     bn <- fetchBestBlock
     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
@@ -181,8 +173,6 @@ processHeaders hdrs = do
         True -> do
             let net = bitcoinNetwork $ nodeConfig bp2pEnv
                 genesisHash = blockHashToHex $ headerHash $ getGenesisHeader net
-                rkdb = rocksDB dbe'
-                cf = rocksCF dbe'
                 headPrevBlockHash = prevBlock $ fst $ head $ headersList hdrs
                 headPrevHash = blockHashToHex headPrevBlockHash
                 hdrHash y = headerHash $ fst y
@@ -207,7 +197,7 @@ processHeaders hdrs = do
                                          debug lg $ LG.msg $ LG.val ("Does not match best-block, redundant Headers msg")
                                          return [] -- already synced
                                      else do
-                                         res <- fetchMatchBlockOffset rkdb headPrevBlockHash
+                                         res <- fetchMatchBlockOffset headPrevBlockHash
                                          case res of
                                              Just matchBHt -> do
                                                  unless (validate matchBHt) $ throw InvalidBlocksException
@@ -226,7 +216,7 @@ processHeaders hdrs = do
                                                              LG.val
                                                                  "Does not match best-block, potential block re-org..."
                                                          let reOrgDiff = zip [(matchBHt + 1) ..] (headersList hdrs)
-                                                         bestSynced <- NXB.fetchBestSyncedBlock rkdb net
+                                                         bestSynced <- fetchBestSyncedBlock
                                                          if snd bestSynced >= (fromIntegral matchBHt)
                                                              then do
                                                                  debug lg $
@@ -275,8 +265,8 @@ processHeaders hdrs = do
             err lg $ LG.msg $ val "Error: BlocksNotChainedException"
             throw BlocksNotChainedException
 
-fetchMatchBlockOffset :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => R.DB -> BlockHash -> m (Maybe BlockHeight)
-fetchMatchBlockOffset rkdb hash = do
+fetchMatchBlockOffset :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m (Maybe BlockHeight)
+fetchMatchBlockOffset hash = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
