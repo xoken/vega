@@ -14,79 +14,18 @@ module Network.Xoken.Node.P2P.MerkleBuilder
     , importTxHash
     ) where
 
-import qualified Codec.Serialise as CBOR
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (mapConcurrently)
-import Control.Concurrent.Async.Lifted as LA (async, cancel, concurrently_, race, wait, waitAnyCatch, withAsync)
-import qualified Control.Concurrent.MSem as MS
-import qualified Control.Concurrent.MSemN as MSN
-import Control.Concurrent.MVar
-import Control.Concurrent.QSem
-import Control.Concurrent.STM.TBQueue
-import Control.Concurrent.STM.TQueue
-import Control.Concurrent.STM.TSem
-import Control.Concurrent.STM.TVar
 import Control.Exception
-import qualified Control.Exception.Extra as EX
-import qualified Control.Exception.Lifted as LE (try)
-import Control.Monad.Logger
-import Control.Monad.Loops
-import Control.Monad.Reader
-import Control.Monad.STM
-import Control.Monad.State.Strict
-import Control.Monad.Trans.Control
-import Crypto.MAC.SipHash as SH
-import qualified Data.Aeson as A (decode, encode)
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Char8 as C
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Lazy.Char8 as LC
-import Data.ByteString.Short as BSS
-import Data.Char
-import Data.Default
-import Data.Function ((&))
-import Data.Functor.Identity
-import Data.IORef
 import Data.Int
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Pool
 import Data.Serialize as DS
-import Data.String.Conversions
 import qualified Data.Text as T
-import Data.Time.Clock.POSIX
-import Data.Word
-import qualified Database.Bolt as BT
-import GHC.Natural
-import Network.Socket
-import qualified Network.Socket.ByteString as SB (recv)
-import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
-import Network.Xoken.Address
-import Network.Xoken.Block
-import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
-import Network.Xoken.Network.Common
-import Network.Xoken.Network.CompactBlock
-import Network.Xoken.Network.Message
-import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
-import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.Env
-import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
-import Network.Xoken.Node.WorkerDispatcher
 import Network.Xoken.Transaction
-import Network.Xoken.Util
-import StmContainers.Map as SM
-import StmContainers.Set as SS
-import Streamly as S
-import Streamly.Prelude ((|:), drain, each, nil)
-import qualified Streamly.Prelude as S
-import System.Logger as LG
-import System.Logger.Message
-import System.Random
-import Xoken.NodeConfig as NC
 
 hashPair :: Hash256 -> Hash256 -> Hash256
 hashPair a b = doubleSHA256 $ encode a `B.append` encode b

@@ -12,49 +12,27 @@ module Network.Xoken.Node.Data where
 
 import Codec.Compression.GZip as GZ
 import Codec.Serialise
-import Conduit
 import Control.Applicative
-import Control.Arrow (first)
-import Control.Monad
-import Control.Monad.Trans.Maybe
 import Data.Aeson as A
-import qualified Data.Aeson.Encoding as A
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as B
 import Data.ByteString.Base64.Lazy as B64L
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as C
 import Data.ByteString.Short (ShortByteString)
 import qualified Data.ByteString.Short as B.Short
 import Data.Char (ord)
-import Data.Default
 import Data.Foldable
-import Data.Functor.Identity
 import Data.Hashable
-import Data.Hashable.Time
 import Data.Int
-import qualified Data.IntMap as I
-import Data.IntMap.Strict (IntMap)
-import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Serialize as S
-import qualified Data.Set as DS
 import Data.Store
-import Data.String.Conversions
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.Text.Lazy as T.Lazy
-import Data.Time.Clock (UTCTime)
 import Data.Word
 import GHC.Generics
-import Network.Socket (SockAddr(SockAddrUnix))
-import Network.Xoken.Address.Base58
-import Paths_vega as P
 import Prelude as P
 import Text.Regex.TDFA
-import UnliftIO
-import UnliftIO.Exception
-import qualified Web.Scotty.Trans as Scotty
 import Xoken as H
 import Xoken.NodeConfig
 

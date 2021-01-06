@@ -6,8 +6,6 @@
 module Xoken.NodeConfig
     ( module Xoken.NodeConfig
     ) where
-
-import Arivi.P2P.Kademlia.Types
 import Codec.Serialise
 import Control.Exception
 import Control.Monad (guard)
@@ -16,7 +14,6 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import Data.ByteString.Char8 as C
 import Data.Hashable
-import Data.Int
 import Data.Maybe
 import Data.Text as T
 import qualified Data.Text.Encoding as E
@@ -24,7 +21,6 @@ import Data.Word
 import Data.Yaml
 import GHC.Generics
 import Network.Socket
-import Network.Xoken.Constants
 import Network.Xoken.Constants
 import System.Logger
 

@@ -9,19 +9,12 @@
 
 module Network.Xoken.Node.P2P.Common where
 
-import Control.Concurrent.Async (mapConcurrently)
-import Control.Concurrent.Async.Lifted as LA (async)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TVar
 import Control.Exception
-import qualified Control.Exception.Lifted as LE (try)
-import Control.Monad
 import Control.Monad.Extra (concatMapM)
-import Control.Monad.Logger
 import Control.Monad.Reader
 import Control.Monad.STM
-import Control.Monad.State.Strict
-import qualified Data.Aeson as A (decode, eitherDecode, encode)
 import Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Base16 as B16
@@ -30,48 +23,27 @@ import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as LC
-import Data.ByteString.Short as BSS
-import Data.Function ((&))
-import Data.Functor.Identity
-import Data.IORef
 import Data.Int
-import qualified Data.List as L
-import qualified Data.Map.Strict as M
-import Data.Maybe
-import Data.Pool
 import Data.Serialize
 import Data.Serialize as S
 import Data.Store as DS
-import Data.String.Conversions
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as DTE
-import Data.Time.Clock
-import Data.Time.Clock.POSIX
 import Data.Word
 import qualified Database.RocksDB as R
 import Network.Socket
-import qualified Network.Socket.ByteString as SB (recv)
 import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
-import Network.Xoken.Address.Base58 as B58
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common -- (GetData(..), MessageCommand(..), NetworkAddress(..))
 import Network.Xoken.Network.Message
-import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Types
-import Network.Xoken.Transaction.Common
 import Network.Xoken.Util
-import Streamly
-import Streamly.Prelude ((|:), nil)
-import qualified Streamly.Prelude as S
-import System.Logger as LG
 import System.Random
-import Text.Format
 
 data BlockSyncException
     = BlocksNotChainedException
@@ -298,7 +270,6 @@ getDBCF rkdb cf k = do
         Just (Right m) -> return $ Just m
         Nothing -> return Nothing
 
-
 getDBCF_ :: (Store a, Store b) => R.DB -> R.ColumnFamily -> a -> IO (Maybe b)
 getDBCF_ rkdb cf k = do
     res <- R.getCF rkdb cf (DS.encode k)
@@ -352,25 +323,31 @@ sendMessage sock writeLock payload = do
 mkProvisionalBlockHashR :: BlockHash -> IO BlockHash
 mkProvisionalBlockHashR b = do
     ng <- newStdGen
-    r64 <- randomRIO (minBound , maxBound :: Word64)  
-    let bh = S.runGet S.get $ B.append (B.take 16 $ S.runPut $ S.put b) (B.append (S.encode r64) "\255\255\255\255\255\255\255\255")  :: Either String BlockHash
+    r64 <- randomRIO (minBound, maxBound :: Word64)
+    let bh =
+            S.runGet S.get $
+            B.append (B.take 16 $ S.runPut $ S.put b) (B.append (S.encode r64) "\255\255\255\255\255\255\255\255") :: Either String BlockHash
     return $ either (const b) (Prelude.id) bh
-
 
 isProvisionalBlockHashR :: BlockHash -> Bool
 isProvisionalBlockHashR = (== "\255\255\255\255\255\255\255\255") . (B.drop 24 . S.runPut . S.put)
 
 mkProvisionalBlockHash :: BlockHash -> BlockHash
-mkProvisionalBlockHash b = let bh = S.runGet S.get $ B.append (B.take 16 $ S.runPut $ S.put b) "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255"  :: Either String BlockHash
-                           in either (const b) (Prelude.id) bh
+mkProvisionalBlockHash b =
+    let bh =
+            S.runGet S.get $
+            B.append (B.take 16 $ S.runPut $ S.put b) "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255" :: Either String BlockHash
+     in either (const b) (Prelude.id) bh
 
 isProvisionalBlockHash :: BlockHash -> Bool
-isProvisionalBlockHash = (== "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255") . (B.drop 16 . S.runPut . S.put)
+isProvisionalBlockHash =
+    (== "\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255\255") . (B.drop 16 . S.runPut . S.put)
 
 replaceProvisionals :: BlockHash -> [BlockHash] -> [BlockHash]
 replaceProvisionals bh [] = [bh]
-replaceProvisionals bh (pbh:bhs) | isProvisionalBlockHash pbh = (bh:filter (not . isProvisionalBlockHash) bhs)
-                                 | otherwise = pbh:(replaceProvisionals bh bhs)
+replaceProvisionals bh (pbh:bhs)
+    | isProvisionalBlockHash pbh = (bh : filter (not . isProvisionalBlockHash) bhs)
+    | otherwise = pbh : (replaceProvisionals bh bhs)
 
 updatePredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 updatePredecessors = do
@@ -380,13 +357,15 @@ updatePredecessors = do
     return ()
 
 fetchPredecessorsIO :: (MonadIO m) => R.DB -> R.ColumnFamily -> HeaderMemory -> m [BlockHash]
-fetchPredecessorsIO rkdb pcf hm = concatMapM
-                                        (\x -> do
-                                            let hash = headerHash $ nodeHeader x
-                                            ph <- getDBCF rkdb pcf hash
-                                            case (ph :: Maybe BlockHash) of
-                                                Nothing -> return [hash]
-                                                Just p -> return [hash,p]) $ getParents hm (10) (memoryBestHeader hm)
+fetchPredecessorsIO rkdb pcf hm =
+    concatMapM
+        (\x -> do
+             let hash = headerHash $ nodeHeader x
+             ph <- getDBCF rkdb pcf hash
+             case (ph :: Maybe BlockHash) of
+                 Nothing -> return [hash]
+                 Just p -> return [hash, p]) $
+    getParents hm (10) (memoryBestHeader hm)
 
 fetchPredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m [BlockHash]
 fetchPredecessors = do

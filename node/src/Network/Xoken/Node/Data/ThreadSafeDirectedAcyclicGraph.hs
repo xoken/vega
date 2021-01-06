@@ -22,27 +22,18 @@ module Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
     ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async.Lifted as LA (async, race)
+import Control.Concurrent.Async.Lifted as LA (race)
 import Control.Concurrent.MVar
 import Control.Exception
-import qualified Control.Exception.Extra as EX
-import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad.IO.Class
-import Control.Monad.Loops
-import Control.Monad.STM
 import Data.Foldable as FD
-import Data.Foldable as F
 import Data.Function
-import qualified Data.HashTable.IO as H
 import Data.Hashable
-import Data.IORef
 import Data.Int
 import qualified Data.List as L
 import Data.Sequence as SQ
 import Data.Set as ST
-import Data.Text as T
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Numeric as N
 
 data DAGException
     = InsertTimeoutException

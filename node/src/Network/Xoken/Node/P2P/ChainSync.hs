@@ -15,66 +15,40 @@ module Network.Xoken.Node.P2P.ChainSync
     ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async as CA (async, wait)
-import Control.Concurrent.Async.Lifted as LA (async, mapConcurrently_, race)
+import Control.Concurrent.Async.Lifted as LA (race)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TVar
-import Control.Error.Util (hush)
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
-import Control.Monad.Extra (mapMaybeM, concatMapM)
-import Control.Monad.Logger
+import Control.Monad.Extra (mapMaybeM)
 import Control.Monad.Reader
 import Control.Monad.STM
-import Control.Monad.State.Strict
-import qualified Data.Aeson as A (decode, eitherDecode, encode)
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.ByteString.Short as BSS
-import Data.Function ((&))
-import Data.Functor.Identity
 import Data.Int
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
-import Data.Maybe
 import Data.Serialize as S
-import Data.Store as DSE
-import Data.String.Conversions
 import Data.Text (Text)
-import qualified Data.Text as T
 import qualified Data.Text.Encoding as DTE
-import Data.Time.Clock
 import Data.Time.Clock.POSIX
-import Data.Word
 import qualified Database.RocksDB as R
-import Network.Socket
-import qualified Network.Socket.ByteString as SB (recv)
-import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common -- (GetData(..), MessageCommand(..), NetworkAddress(..))
 import Network.Xoken.Network.Message
-import Network.Xoken.Node.Data
-import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.DB
+import Network.Xoken.Node.Data
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.GraphDB
 import qualified Network.Xoken.Node.P2P.BlockSync as NXB (fetchBestSyncedBlock, markBestSyncedBlock)
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
-import Network.Xoken.Node.Service.Chain
 import Network.Xoken.Node.WorkerDispatcher
-import Streamly
-import Streamly.Prelude ((|:), nil)
-import qualified Streamly.Prelude as S
 import System.Logger as LG
-import System.Logger.Message
-import System.Random
 import Xoken.NodeConfig
 
 produceGetHeadersMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m (Message)
@@ -262,29 +236,34 @@ processHeaders hdrs = do
                                                                      " versus point of re-org: " <>
                                                                      (show $ (headPrevHash, matchBHt)) <>
                                                                      ", re-syncing from thereon"
-                                                                 NXB.markBestSyncedBlock headPrevHash $ fromIntegral matchBHt
+                                                                 NXB.markBestSyncedBlock headPrevHash $
+                                                                     fromIntegral matchBHt
                                                                  return reOrgDiff
                                                              else return reOrgDiff
                                              Nothing -> throw BlockHashNotFoundException
             let lenIndexed = L.length indexed
             debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)
-            bns <- mapMaybeM
-                (\y -> do
-                     let header = fst $ snd y
-                         blkht = fst y
-                     tm <- liftIO $ floor <$> getPOSIXTime
-                     bnm <- liftIO $ atomically
-                                   $ stateTVar
-                                        (blockTree bp2pEnv)
-                                        (\hm -> case connectBlock hm net tm header of
-                                                        Right (hm',bn) -> (Just bn,hm')
-                                                        Left _ -> (Nothing,hm))
-                     case bnm of
-                        Just b -> putHeaderMemoryElem b
-                        Nothing -> return ()
-                     return $ (\x -> (x,(header,blkht))) <$> bnm)
+            bns <-
+                mapMaybeM
+                    (\y -> do
+                         let header = fst $ snd y
+                             blkht = fst y
+                         tm <- liftIO $ floor <$> getPOSIXTime
+                         bnm <-
+                             liftIO $
+                             atomically $
+                             stateTVar
+                                 (blockTree bp2pEnv)
+                                 (\hm ->
+                                      case connectBlock hm net tm header of
+                                          Right (hm', bn) -> (Just bn, hm')
+                                          Left _ -> (Nothing, hm))
+                         case bnm of
+                             Just b -> putHeaderMemoryElem b
+                             Nothing -> return ()
+                         return $ (\x -> (x, (header, blkht))) <$> bnm)
                      --liftIO $ TSH.insert (blockTree bp2pEnv) (headerHash header) (fromIntegral blkht, header))
-                indexed
+                    indexed
             unless (L.null bns) $ do
                 let headers = map (\z -> ZBlockHeader (fst $ snd z) (fromIntegral $ snd $ snd z)) bns
                     bnode = fst $ last bns

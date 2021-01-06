@@ -9,11 +9,7 @@ module Network.Xoken.Node.WorkerListener
     ( module Network.Xoken.Node.WorkerListener
     ) where
 
-import Arivi.P2P.P2PEnv
-import Arivi.P2P.RPC.Fetch
-import Arivi.P2P.Types
 import Codec.Serialise
-import qualified Codec.Serialise as CBOR
 import Control.Concurrent.Async.Lifted as LA (async)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM
@@ -21,53 +17,30 @@ import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Loops
-import Control.Monad.Trans.Class
-import Data.Aeson as A
 import Data.Binary as DB
 import qualified Data.ByteString as B
 import Data.ByteString.Base64 as B64
-import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LC
-import Data.Functor (($>))
-import Data.IORef
-import Data.Int
 import Data.List as L
-import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Serialize
-import qualified Data.Serialize as S
-import qualified Data.Set as DS
-import Data.Text as T
-import Data.Time.Clock
 import Data.Time.Clock.POSIX
-import Data.Word
-import Data.X509.CertificateStore
 import GHC.Base as GHCB
-import GHC.Generics
 import Network.Socket as NS
-import Network.Socket.ByteString.Lazy as SB (recv, sendAll)
-import qualified Network.TLS as NTLS
-import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
-import Network.Xoken.Network.Message
-import Network.Xoken.Node.Data
 import Network.Xoken.Node.DB
+import Network.Xoken.Node.Data
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.UnconfTxSync
-import Network.Xoken.Node.Service.Chain
 import Network.Xoken.Node.WorkerDispatcher
 import Network.Xoken.Transaction.Common
 import Prelude as P
-import StmContainers.Map as SM
 import System.Logger as LG
-import Text.Printf
 import Xoken.NodeConfig as NC
 
 workerMessageMultiplexer :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Worker -> m ()
@@ -141,12 +114,7 @@ requestHandler sock writeLock msg = do
                             ZUpdateOutpoint txId index bhash ht
                                 -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
                              -> do
-                                zz <-
-                                    LE.try $
-                                        updateOutpoint
-                                            (OutPoint txId index)
-                                            bhash
-                                            ht
+                                zz <- LE.try $ updateOutpoint (OutPoint txId index) bhash ht
                                 case zz of
                                     Right upd
                                         -- liftIO $
@@ -207,14 +175,18 @@ requestHandler sock writeLock msg = do
                                     mapM_
                                         (\(ZBlockHeader header blkht) -> do
                                              tm <- liftIO $ floor <$> getPOSIXTime
-                                             bnm <- liftIO $ atomically $ stateTVar
-                                                                    (blockTree bp2pEnv)
-                                                                    (\hm -> case connectBlock hm net tm header of
-                                                                                    Right (hm',bn) -> (Just bn,hm')
-                                                                                    Left _ -> (Nothing,hm))
+                                             bnm <-
+                                                 liftIO $
+                                                 atomically $
+                                                 stateTVar
+                                                     (blockTree bp2pEnv)
+                                                     (\hm ->
+                                                          case connectBlock hm net tm header of
+                                                              Right (hm', bn) -> (Just bn, hm')
+                                                              Left _ -> (Nothing, hm))
                                              case bnm of
-                                                Just b -> putHeaderMemoryElem b
-                                                Nothing -> return ())
+                                                 Just b -> putHeaderMemoryElem b
+                                                 Nothing -> return ())
                                              --liftIO $
                                              --    TSH.insert
                                              --        (blockTree bp2pEnv)

@@ -16,49 +16,21 @@ module Network.Xoken.Node.P2P.UnconfTxSync
     ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (mapConcurrently, race_)
-import Control.Concurrent.Async.Lifted as LA (async)
 import Control.Concurrent.Event as EV
-import Control.Concurrent.MVar
-import Control.Concurrent.QSem
 import Control.Concurrent.STM.TVar
 import Control.Exception
-import qualified Control.Exception.Extra as EX
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
-import Control.Monad.Logger
 import Control.Monad.Reader
 import Control.Monad.STM
-import Control.Monad.State.Strict
-import qualified Data.Aeson as A (decode, encode)
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Lazy.Char8 as LC
-import Data.ByteString.Short as BSS
-import Data.Function ((&))
-import Data.Functor.Identity
-import qualified Data.HashTable.IO as H
-import Data.Int
-import qualified Data.IntMap as I
 import qualified Data.List as L
-import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Sequence ((|>))
 import Data.Serialize
-import Data.Serialize as S
-import Data.String.Conversions
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock
-import Data.Time.Clock
-import Data.Time.Clock.POSIX
 import Data.Time.LocalTime
 import Data.Word
-import qualified Database.RocksDB as R
-import qualified Network.Socket as NS
-import qualified Network.Socket.ByteString as SB (recv)
-import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
 import Network.Xoken.Address
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
@@ -66,26 +38,15 @@ import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.Message
-import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.GraphDB
-import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.WorkerDispatcher
-import Network.Xoken.Script.Standard
 import Network.Xoken.Transaction.Common
-import Network.Xoken.Util
-import StmContainers.Map as SM
-import Streamly
-import Streamly.Prelude ((|:), nil)
-import qualified Streamly.Prelude as S
 import System.Logger as LG
-import System.Logger.Message
-import System.Random
 import Xoken.NodeConfig
 
 processTxGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
@@ -200,7 +161,7 @@ processUnconfTransaction tx = do
     let conn = rocksDB $ dbe'
         cf = rocksCF dbe'
     bbn <- fetchBestBlock
-    let (bsh,bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+    let (bsh, bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
     prb <- liftIO $ mkProvisionalBlockHashR bsh
     pcf' <- liftIO $ TSH.lookup cf "provisional_blockhash"
     case pcf' of
@@ -391,7 +352,6 @@ getSatsValueFromEpochOutpoint rkdb epoch txSync lg net outPoint waitSecs cfs = d
             err lg $ LG.msg $ "Error: getSatsValueFromEpochOutpoint: " ++ show e
             throw e
 -}
-
 convertToScriptHash :: Network -> String -> Maybe String
 convertToScriptHash net s = do
     let addr = stringToAddr net (T.pack s)

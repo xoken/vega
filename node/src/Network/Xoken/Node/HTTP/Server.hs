@@ -14,8 +14,7 @@ appInit env =
         return $ App env
 
 apiRoutes :: [(B.ByteString, Handler App App ())]
-apiRoutes =[]
-
+apiRoutes = []
 {-
 apiRoutes :: [(B.ByteString, Handler App App ())]
 apiRoutes =

@@ -25,13 +25,10 @@ module Network.Xoken.Node.Data.ThreadSafeHashTable
 
 import Control.Concurrent.MVar
 import Control.Monad.IO.Class
-import Control.Monad.STM
 import qualified Data.HashTable.IO as H
 import Data.Hashable
 import Data.Int
 import qualified Data.List as L
-import Data.Text as T
-import Numeric as N
 
 type HashTable k v = H.BasicHashTable k v
 
