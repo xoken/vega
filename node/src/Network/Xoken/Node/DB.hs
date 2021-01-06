@@ -44,6 +44,23 @@ columnFamilies = fmap (\x -> (x, conf)) cfStr
 
 withDBCF path = R.withDBCF path conf columnFamilies
 
+runEpochSwitcher = forever $ do
+    (ep,sl) <- getCurrentEpoch
+    -- TODO: empty next epoch
+    atomically $ swapTVar (epochType) ep
+    threadDelay (1000000 * sl)
+
+getCurrentEpoch :: Integral a => IO (Epoch,a)
+getCurrentEpoch = do
+    tm <- ceiling <$> getPOSIXTime -- seconds since unix epoch
+    let ws = 604800 -- seconds in a week
+        (wn,sl) = fmap (ws `subtract`) $ tm `divMod` 604800 -- week number
+        ep = case wn `mod` 3 of
+            0 -> Epoch0
+            1 -> Epoch1
+            2 -> Epoch2
+    return (ep,sl)
+
 getTxEpochCF :: Epoch -> String
 getTxEpochCF Epoch0 = "ep_transactions_0"
 getTxEpochCF Epoch1 = "ep_transactions_1"
