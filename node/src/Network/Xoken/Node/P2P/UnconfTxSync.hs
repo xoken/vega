@@ -180,16 +180,6 @@ runEpochSwitcher =
             else liftIO $ threadDelay (1000000 * 60 * (60 - minute))
         return ()
 
-insertTxIdOutputs :: (HasLogger m, MonadIO m) => R.DB -> R.ColumnFamily -> (TxHash, Word32) -> TxOut -> m ()
-insertTxIdOutputs conn cf (txid, outputIndex) txOut = do
-    lg <- getLogger
-    res <- liftIO $ try $ putDBCF conn cf (txid, outputIndex) txOut
-    case res of
-        Right _ -> return ()
-        Left (e :: SomeException) -> do
-            err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
-            throw KeyValueDBInsertException
-
 isNotConfirmed :: TxHash -> IO Bool
 isNotConfirmed txHash = return False
 
@@ -212,7 +202,7 @@ processUnconfTransaction tx = do
     bbn <- fetchBestBlock
     let (bsh,bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
     prb <- liftIO $ mkProvisionalBlockHashR bsh
-    pcf' <- liftIO $ TSH.lookup cf (getEpochTxOutCF epoch)
+    pcf' <- liftIO $ TSH.lookup cf "provisional_blockhash"
     case pcf' of
         Just pcf -> do
             putDBCF conn pcf bsh prb
@@ -237,18 +227,6 @@ processUnconfTransaction tx = do
             map (\(b, _) -> ((outPointHash $ prevOutput b), fromIntegral $ outPointIndex $ prevOutput b)) (inputs)
  --
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
-    cf' <- liftIO $ TSH.lookup cf (getEpochTxOutCF epoch)
-    case cf' of
-        Just cf'' -> do
-            mapM_
-                (\(txOut, oind) -> do
-                     debug lg $ LG.msg $ "inserting output " ++ show txOut
-                     debug lg $ LG.msg $ "[dag] processUnconfTransaction: inserting output " ++ show txOut
-                     insertTxIdOutputs conn cf'' (txHash tx, oind) (txOut))
-                outputs
-        Nothing -> do
-            debug lg $ LG.msg $ val "[dag] validateOutpoint: Error: cf Nothing"
-            return () -- ideally should be unreachable
     inputValsOutpoints <-
         mapM
             (\(b, indx) -> do
@@ -371,6 +349,7 @@ processUnconfTransaction tx = do
                 inputValsOutpoints
     return (parentTxns)
 
+{-
 getSatsValueFromEpochOutpoint ::
        R.DB
     -> Bool
@@ -411,6 +390,7 @@ getSatsValueFromEpochOutpoint rkdb epoch txSync lg net outPoint waitSecs cfs = d
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: getSatsValueFromEpochOutpoint: " ++ show e
             throw e
+-}
 
 convertToScriptHash :: Network -> String -> Maybe String
 convertToScriptHash net s = do

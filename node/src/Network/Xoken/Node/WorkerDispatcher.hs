@@ -517,7 +517,7 @@ validateOutpoint outPoint curBlkHash wait = do
                     mapM_
                         (\s ->
                              if (spBlockHash s) `L.elem` predecessors
-                                 then return () -- throw OutputAlreadySpentException -- predecessors to be passed correctly
+                                 then throw OutputAlreadySpentException -- predecessors to be passed correctly
                                  else return ())
                         (zuSpending zu)
                         -- eagerly mark spent, in the unlikely scenario script stack eval fails, mark unspent

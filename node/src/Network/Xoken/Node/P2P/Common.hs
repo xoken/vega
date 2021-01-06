@@ -313,10 +313,6 @@ getEpochTxCF :: Bool -> String
 getEpochTxCF True = "ep_transactions_odd"
 getEpochTxCF False = "ep_transactions_even"
 
-getEpochTxOutCF :: Bool -> String
-getEpochTxOutCF True = "ep_outputs_odd"
-getEpochTxOutCF False = "ep_outputs_even"
-
 -- Helper Functions
 recvAll :: (MonadIO m) => Socket -> Int64 -> m BSL.ByteString
 recvAll sock len = do

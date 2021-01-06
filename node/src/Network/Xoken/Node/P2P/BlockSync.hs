@@ -512,16 +512,6 @@ fetchBestSyncedBlock rkdb net = do
             debug lg $ LG.msg $ val "Bestblock is genesis."
             return ((headerHash $ getGenesisHeader net), 0)
 
-insertTxIdOutputs :: (HasLogger m, MonadIO m) => R.DB -> R.ColumnFamily -> (TxHash, Word32) -> TxOut -> m ()
-insertTxIdOutputs conn cf (txid, outputIndex) txOut = do
-    lg <- getLogger
-    res <- liftIO $ try $ putDBCF conn cf (txid, outputIndex) txOut
-    case res of
-        Right _ -> return ()
-        Left (e :: SomeException) -> do
-            err lg $ LG.msg $ "[dag] Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
-            throw KeyValueDBInsertException
-
 processConfTransaction ::
        (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ([OutPoint])
 processConfTransaction tx bhash blkht txind = do
@@ -619,15 +609,6 @@ processConfTransaction tx bhash blkht txind = do
         Just ev -> liftIO $ EV.signal ev
         Nothing -> return ()
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
-    cf' <- liftIO $ TSH.lookup cf (getEpochTxOutCF epoch)
-    case cf' of
-        Just cf'' -> do
-            mapM_
-                (\(txOut, oind) -> do
-                     debug lg $ LG.msg $ "inserting output " ++ show txOut
-                     insertTxIdOutputs conn cf'' (txHash tx, oind) (txOut))
-                outputs
-        Nothing -> return () -- ideally should be unreachable
     let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
     return (outpts)
 
