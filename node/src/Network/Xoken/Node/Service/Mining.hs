@@ -30,7 +30,6 @@ import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
-import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Transaction (makeCoinbaseTx)
 import Network.Xoken.Util (encodeHex)
 import System.Logger as LG
@@ -50,7 +49,6 @@ getMiningCandidate = do
     bp2pEnv <- getBitcoinP2P
     nodeCfg <- nodeConfig <$> getBitcoinP2P
     net <- (NC.bitcoinNetwork . nodeConfig) <$> getBitcoinP2P
-    rkdb <- rocksDB <$> getDB
     (bestSyncedBlockHash, bestSyncedBlockHeight) <- fetchBestSyncedBlock
     debug lg $
         LG.msg $ "getMiningCandidate: got best-synced block: " <> (show (bestSyncedBlockHash, bestSyncedBlockHeight))

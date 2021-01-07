@@ -148,8 +148,7 @@ runThreads config nodeConf bp2p lg certPaths = do
         -- run vegaCluster
         runAppM
             serviceEnv
-            (do bp2pEnv <- getBitcoinP2P
-                withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
+            (withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
                     if (_nodeType node == NC.Master)
                         then do
                             withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
@@ -170,12 +169,11 @@ runSyncStatusChecker :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runSyncStatusChecker = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     newCandidateBlockChainTip
     -- wait 300 seconds before first check
     liftIO $ threadDelay (30 * 1000000)
     forever $ do
-        isSynced <- checkBlocksFullySynced net
+        isSynced <- checkBlocksFullySynced
         LG.debug lg $
             LG.msg $
             LG.val $

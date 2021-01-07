@@ -33,8 +33,7 @@ import Data.Time.Clock.POSIX
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
-import Network.Xoken.Crypto.Hash
-import Network.Xoken.Network.Common -- (GetData(..), MessageCommand(..), NetworkAddress(..))
+import Network.Xoken.Crypto.Hash -- (GetData(..), MessageCommand(..), NetworkAddress(..))
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data
@@ -52,9 +51,7 @@ produceGetHeadersMessage = do
     bp2pEnv <- getBitcoinP2P
     -- be blocked until a new best-block is updated in DB, or a set timeout.
     LA.race (liftIO $ threadDelay (15 * 1000000)) (liftIO $ takeMVar (bestBlockUpdated bp2pEnv))
-    dbe <- getDB
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    bl <- getBlockLocator net
+    bl <- getBlockLocator
     let gh =
             GetHeaders
                 { getHeadersVersion = myVersion
@@ -69,7 +66,6 @@ sendRequestMessages msg = do
     lg <- getLogger
     debug lg $ LG.msg $ val ("Chain - sendRequestMessages - called.")
     bp2pEnv <- getBitcoinP2P
-    dbe' <- getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     case msg of
         MGetHeaders hdr -> do
@@ -105,11 +101,13 @@ sendRequestMessages msg = do
                     err lg $ LG.msg ("Error, sending out data: " ++ show e)
         ___ -> undefined
 
+{- UNUSED?
 msgOrder :: Message -> Message -> Ordering
 msgOrder m1 m2 = do
     if msgType m1 == MCGetHeaders
         then LT
         else GT
+-}
 
 runEgressChainSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEgressChainSync = do
@@ -125,38 +123,15 @@ validateChainedBlockHeaders hdrs = do
         pairs = zip xs (drop 1 xs)
     L.foldl' (\ac x -> ac && (headerHash $ fst (fst x)) == (prevBlock $ fst (snd x))) True pairs
 
-getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m (BlockLocator)
-getBlockLocator net = do
+getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m (BlockLocator)
+getBlockLocator = do
     bp2pEnv <- getBitcoinP2P
     bn <- fetchBestBlock
     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
     return $ blockLocator hm bn
-    {-
-    (hash, ht) <- fetchBestBlock rkdb net
-    debug lg $ LG.msg $ val "[rdb] fetchBestBlock from getBlockLocator - after"
-    let bl = L.insert ht $ filter (> 0) $ takeWhile (< ht) $ map (\x -> ht - (2 ^ x)) [0 .. 20] -- [1,2,4,8,16,32,64,... ,262144,524288,1048576]
-    res <-
-        liftIO $
-        try $ do
-            v <- liftIO $ mapM (\key -> CA.async $ getDB' rkdb key) (bl)
-            liftIO $ mapM CA.wait v
-    case res of
-        Right vs' -> do
-            let vs :: [(Text, BlockHeader)]
-                vs = catMaybes vs'
-            if L.null vs
-                then return [headerHash $ getGenesisHeader net]
-                else do
-                    debug lg $ LG.msg $ "Best-block from ROCKS DB: " ++ show (last $ vs)
-                    return $ reverse $ catMaybes $ fmap (hexToBlockHash . fst) vs
-        Left (e :: SomeException) -> do
-            debug lg $ LG.msg $ "[Error] getBlockLocator: " ++ show e
-            throw e
-    -}
 
 processHeaders :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Headers -> m ()
 processHeaders hdrs = do
-    dbe' <- getDB
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     if (L.null $ headersList hdrs)
@@ -262,7 +237,6 @@ processHeaders hdrs = do
 
 fetchMatchBlockOffset :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m (Maybe BlockHeight)
 fetchMatchBlockOffset hash = do
-    lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
     case getBlockHeaderMemory hash hm of

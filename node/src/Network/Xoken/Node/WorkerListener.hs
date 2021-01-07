@@ -46,7 +46,6 @@ import Xoken.NodeConfig as NC
 workerMessageMultiplexer :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Worker -> m ()
 workerMessageMultiplexer worker = do
     lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
     forever $ do
         msg <- liftIO $ receiveMessage (woSocket worker)
         case (deserialiseOrFail msg) of

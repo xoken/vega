@@ -14,26 +14,18 @@ import Control.Exception
 import Control.Monad.Reader
 import Data.Bits
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Base16 as B16
-import Data.ByteString.Base64 as B64
 import Data.ByteString.Builder
-import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.Int
 import Data.Serialize
 import Data.Serialize as S
-import Data.Text (Text)
-import qualified Data.Text as T
 import Data.Word
 import Network.Socket
 import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
 import Network.Xoken.Block.Common
 import Network.Xoken.Constants
-import Network.Xoken.Crypto.Hash
-import Network.Xoken.Network.Common -- (GetData(..), MessageCommand(..), NetworkAddress(..))
-import Network.Xoken.Network.Message
-import Network.Xoken.Util
+import Network.Xoken.Network.Common
 import System.Random
 
 data BlockSyncException
@@ -124,14 +116,8 @@ buildVersion net nonce height loc rmt time =
 myVersion :: Word32
 myVersion = 70015
 
-msgOrder :: Message -> Message -> Ordering
-msgOrder m1 m2 = do
-    if msgType m1 == MCGetHeaders
-        then LT
-        else GT
-
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
-sendEncMessage writeLock sock msg = withMVar writeLock (\x -> (LB.sendAll sock msg))
+sendEncMessage writeLock sock msg = withMVar writeLock (\_ -> LB.sendAll sock msg)
 
 -- | Computes the height of a Merkle tree.
 computeTreeHeight ::
@@ -142,18 +128,7 @@ computeTreeHeight ntx
     | even ntx = 1 + computeTreeHeight (ntx `div` 2)
     | otherwise = computeTreeHeight $ ntx + 1
 
-getTextVal :: (Maybe Bool, Maybe Int32, Maybe Int64, Maybe T.Text) -> Maybe T.Text
-getTextVal (_, _, _, txt) = txt
-
-getBoolVal :: (Maybe Bool, Maybe Int32, Maybe Int64, Maybe T.Text) -> Maybe Bool
-getBoolVal (b, _, _, _) = b
-
-getIntVal :: (Maybe Bool, Maybe Int32, Maybe Int64, Maybe T.Text) -> Maybe Int32
-getIntVal (_, i, _, _) = i
-
-getBigIntVal :: (Maybe Bool, Maybe Int32, Maybe Int64, Maybe T.Text) -> Maybe Int64
-getBigIntVal (_, _, ts, _) = ts
-
+{- UNUSED?
 divide :: Int -> Int -> Float
 divide x y = (a / b)
   where
@@ -194,19 +169,16 @@ maskAfter n skey = (\x -> take n x ++ fmap (const '*') (drop n x)) skey
 stripScriptHash :: ((Text, Int32), Int32, (Text, Text, Int64)) -> ((Text, Int32), Int32, (Text, Int64))
 stripScriptHash (op, ii, (addr, scriptHash, satValue)) = (op, ii, (addr, satValue))
 
-fromBytes :: B.ByteString -> Integer
-fromBytes = B.foldl' f 0
-  where
-    f a b = a `shiftL` 8 .|. fromIntegral b
-
 splitList :: [a] -> ([a], [a])
 splitList xs = (f 1 xs, f 0 xs)
   where
     f n a = map fst . filter (odd . snd) . zip a $ [n ..]
+-}
 
-getEpochTxCF :: Bool -> String
-getEpochTxCF True = "ep_transactions_odd"
-getEpochTxCF False = "ep_transactions_even"
+fromBytes :: B.ByteString -> Integer
+fromBytes = B.foldl' f 0
+  where
+    f a b = a `shiftL` 8 .|. fromIntegral b
 
 -- Helper Functions
 recvAll :: (MonadIO m) => Socket -> Int64 -> m BSL.ByteString
@@ -240,13 +212,12 @@ sendMessage sock writeLock payload = do
     liftIO $
         withMVar
             writeLock
-            (\x -> do
+            (\_ -> do
                  LB.sendAll sock prefix
                  LB.sendAll sock payload)
 
 mkProvisionalBlockHashR :: BlockHash -> IO BlockHash
 mkProvisionalBlockHashR b = do
-    ng <- newStdGen
     r64 <- randomRIO (minBound, maxBound :: Word64)
     let bh =
             S.runGet S.get $

@@ -93,11 +93,9 @@ zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
 
 zRPCDispatchProvisionalBlockHash :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> BlockHash -> m ()
 zRPCDispatchProvisionalBlockHash bh pbh = do
-    dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     mapM_
         (\wrk -> do
              case wrk of
@@ -121,13 +119,10 @@ zRPCDispatchProvisionalBlockHash bh pbh = do
 zRPCDispatchGetOutpoint ::
        (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> Maybe BlockHash -> m (Word64, [BlockHash], Word32)
 zRPCDispatchGetOutpoint outPoint bhash = do
-    dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     debug lg $ LG.msg $ val "[dag] zRPCDispatchGetOutpoint"
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let opIndex = outPointIndex $ outPoint
-        lexKey = getTxShortHash (outPointHash outPoint) 8
+    let lexKey = getTxShortHash (outPointHash outPoint) 8
     worker <- getRemoteWorker lexKey GetOutpoint
     case worker of
         Nothing
@@ -157,13 +152,9 @@ zRPCDispatchGetOutpoint outPoint bhash = do
 
 zRPCDispatchUpdateOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Word32)
 zRPCDispatchUpdateOutpoint outPoint bhash height = do
-    dbe' <- getDB
-    bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     debug lg $ LG.msg $ val "[dag] zRPCDispatchUpdateOutpoint"
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let opIndex = outPointIndex $ outPoint
-        lexKey = getTxShortHash (outPointHash outPoint) 8
+    let lexKey = getTxShortHash (outPointHash outPoint) 8
     worker <- getRemoteWorker lexKey GetOutpoint
     case worker of
         Nothing
@@ -193,11 +184,9 @@ zRPCDispatchUpdateOutpoint outPoint bhash height = do
 
 zRPCDispatchBlocksTxsOutputs :: (HasXokenNodeEnv env m, MonadIO m) => [BlockHash] -> m ()
 zRPCDispatchBlocksTxsOutputs blockHashes = do
-    dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     mapM_
         (\wrk -> do
              case wrk of
@@ -246,11 +235,9 @@ zRPCDispatchBlocksTxsOutputs blockHashes = do
 --                     throw mex
 zRPCDispatchNotifyNewBlockHeader :: (HasXokenNodeEnv env m, MonadIO m) => [ZBlockHeader] -> BlockNode -> m ()
 zRPCDispatchNotifyNewBlockHeader headers bn = do
-    dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     wrkrs <- liftIO $ readTVarIO $ workerConns bp2pEnv
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     mapM_
         (\wrk -> do
              case wrk of
@@ -274,7 +261,6 @@ zRPCDispatchNotifyNewBlockHeader headers bn = do
 --
 zRPCDispatchUnconfirmedTxValidate :: (HasXokenNodeEnv env m, MonadIO m) => (Tx -> m ([TxHash])) -> Tx -> m ([TxHash])
 zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
-    bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     debug lg $ LG.msg $ "encoded Tx : " ++ (show $ txHash tx)
     let lexKey = getTxShortHash (txHash tx) 8
@@ -313,7 +299,6 @@ zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
 --
 zRPCRequestDispatcher :: (HasXokenNodeEnv env m, MonadIO m) => ZRPCRequestParam -> Worker -> m (ZRPCResponse)
 zRPCRequestDispatcher param wrk = do
-    bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     sem <- liftIO $ newEmptyMVar
     mid <-
@@ -443,7 +428,6 @@ validateOutpoint ::
     -> m (Word64, [BlockHash], Word32)
 validateOutpoint outPoint curBlkHash wait = do
     bp2pEnv <- getBitcoinP2P
-    dbe <- getDB
     lg <- getLogger
     predecessors <- liftIO $ readTVarIO (predecessors bp2pEnv)
     -- TODO get predecessors
@@ -451,8 +435,7 @@ validateOutpoint outPoint curBlkHash wait = do
         LG.msg $
         "[dag] validateOutpoint called for (Outpoint,Set BlkHash, Maybe BlkHash, Int) " ++
         (show (outPoint, predecessors, curBlkHash, wait))
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-        txSync = txSynchronizer bp2pEnv
+    let txSync = txSynchronizer bp2pEnv
         opindx = fromIntegral $ outPointIndex outPoint
         optxid = outPointHash outPoint
     res <- LE.try $ getOutput outPoint
@@ -509,13 +492,8 @@ validateOutpoint outPoint curBlkHash wait = do
 
 updateOutpoint :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Word32)
 updateOutpoint outPoint bhash bht = do
-    dbe <- getDB
-    bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     debug lg $ LG.msg $ "[dag] updateOutpoint called for (Outpoint,blkHash,blkHeight) " ++ (show (outPoint, bhash, bht))
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-        opindx = fromIntegral $ outPointIndex outPoint :: Word32
-        optxid = outPointHash outPoint
     res <- LE.try $ getOutput outPoint
     case res of
         Right (op :: Maybe ZtxiUtxo) -> do

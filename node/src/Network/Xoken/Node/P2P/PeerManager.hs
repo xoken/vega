@@ -16,7 +16,7 @@ module Network.Xoken.Node.P2P.PeerManager
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (mapConcurrently)
-import Control.Concurrent.Async.Lifted as LA (async, concurrently_, mapConcurrently_)
+import Control.Concurrent.Async.Lifted as LA (async, concurrently_,)
 import qualified Control.Concurrent.MSem as MS
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TQueue
@@ -136,11 +136,13 @@ setupSeedPeerConnection =
                                                       msg ("Seed peer blacklisted, ignoring.. " ++ show (addrAddress y))
                                               else do
                                                   wl <- liftIO $ newMVar ()
+                                                  {- UNUSED?
                                                   ss <- liftIO $ newTVarIO Nothing
                                                   imc <- liftIO $ newTVarIO 0
                                                   rc <- liftIO $ newTVarIO Nothing
                                                   st <- liftIO $ newTVarIO Nothing
                                                   fw <- liftIO $ newTVarIO 0
+                                                  -}
                                                   res <- LE.try $ liftIO $ createSocket y
                                                   trk <- liftIO $ getNewTracker
                                                   bfq <- liftIO $ newEmptyMVar
@@ -214,11 +216,13 @@ setupPeerConnection saddr = do
                              case res of
                                  Right (sock) -> do
                                      wl <- liftIO $ newMVar ()
+                                     {- UNUSED? 
                                      ss <- liftIO $ newTVarIO Nothing
                                      imc <- liftIO $ newTVarIO 0
                                      rc <- liftIO $ newTVarIO Nothing
                                      st <- liftIO $ newTVarIO Nothing
                                      fw <- liftIO $ newTVarIO 0
+                                     -}
                                      trk <- liftIO $ getNewTracker
                                      bfq <- liftIO $ newEmptyMVar
                                      sc <- liftIO $ newIORef False
@@ -276,7 +280,6 @@ readNextMessage ::
 readNextMessage net sock ingss = do
     p2pEnv <- getBitcoinP2P
     lg <- getLogger
-    dbe' <- getDB
     case ingss of
         Just iss -> do
             let blin = issBlockIngest iss
@@ -435,9 +438,6 @@ messageHandler peer (mm, ingss) = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
     db <- getDB
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-        conn = rocksDB db
-        cf = rocksCF db
     case mm of
         Just msg -> do
             liftIO $ print $ "MSG: " ++ (show $ msgType msg)
@@ -479,7 +479,7 @@ messageHandler peer (mm, ingss) = do
                                  InvBlock -> do
                                      let bhash = invHash x
                                      debug lg $ LG.msg ("INV - new Block: " ++ (show bhash))
-                                     unsynced <- checkBlocksFullySynced_ net
+                                     unsynced <- blocksUnsynced
                                      if unsynced <= (3 :: Int32)
                                          then do
                                              newCandidateBlock $ BlockHash bhash
@@ -847,10 +847,7 @@ sendInv inv bp = sendRequestMessages bp $ MInv inv
 mineBlockFromCandidate :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe CompactBlock)
 mineBlockFromCandidate = do
     bp2pEnv <- getBitcoinP2P
-    lg <- getLogger
-    dbe <- getDB
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-        conn = rocksDB dbe
     bbn <- fetchBestBlock
     let (bhash, ht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
     dag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
@@ -925,6 +922,7 @@ generateHeaderHash net hdr =
         then (headerHash hdr, bhNonce hdr)
         else generateHeaderHash net (hdr {bhNonce = (bhNonce hdr + 1)})
 
+{- UNUSED?
 updateZtxiUtxo :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> BlockHash -> Word32 -> m ()
 updateZtxiUtxo txh bh ht = do
     count <- zRPCDispatchUpdateOutpoint (OutPoint txh 0) bh ht
@@ -933,7 +931,7 @@ updateZtxiUtxo txh bh ht = do
         else do
             let inds = [1 .. (count - 1)]
             LA.mapConcurrently_ (\i -> zRPCDispatchUpdateOutpoint (OutPoint txh i) bh ht) inds
-{-
+
 updateZtxiUtxo' :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> BlockHash -> Word32 -> m ()
 updateZtxiUtxo' txh bh ht = updateZtxiUtxoOutpoints (OutPoint txh 0) bh ht
 

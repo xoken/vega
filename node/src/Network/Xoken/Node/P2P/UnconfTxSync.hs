@@ -25,12 +25,9 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List as L
 import Data.Maybe
 import Data.Serialize
-import qualified Data.Text as T
 import Data.Word
-import Network.Xoken.Address
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
-import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.Message
@@ -56,9 +53,7 @@ processTxGetData pr txHash = do
             debug lg $ LG.msg $ val "[dag] processTxGetData - indexUnconfirmedTx False."
             return ()
         else do
-            let net = bitcoinNetwork $ nodeConfig bp2pEnv
             debug lg $ LG.msg $ val "processTxGetData - called."
-            debug lg $ LG.msg $ val "[dag] processTxGetData - called."
             bp2pEnv <- getBitcoinP2P
             tuple <-
                 liftIO $
@@ -66,7 +61,7 @@ processTxGetData pr txHash = do
                     (unconfirmedTxCache bp2pEnv)
                     (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
             case tuple of
-                Just (st, fh) ->
+                Just (st, _) ->
                     if st == False
                         then do
                             liftIO $ threadDelay (1000000 * 30)
@@ -76,7 +71,7 @@ processTxGetData pr txHash = do
                                     (unconfirmedTxCache bp2pEnv)
                                     (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
                             case tuple2 of
-                                Just (st2, fh2) ->
+                                Just (st2, _) ->
                                     if st2 == False
                                         then sendTxGetData pr txHash
                                         else return ()
@@ -108,7 +103,7 @@ sendTxGetData pr txHash = do
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
             debug lg $ LG.msg $ "[dag] sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
-{-
+{- UNUSED?
 runEpochSwitcher :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEpochSwitcher =
     forever $ do
@@ -148,9 +143,7 @@ coalesceUnconfTransaction dag txhash hashes sats = do
 
 processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([TxHash])
 processUnconfTransaction tx = do
-    dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
-    epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     bbn <- fetchBestBlock
@@ -233,30 +226,6 @@ processUnconfTransaction tx = do
                          err lg $ LG.msg $ "Error: INSERTing into outputs: " ++ show e
                          throw KeyValueDBInsertException)
             outputs
-    -- TODO : cleanup this!!
-    --
-    -- debug lg $ LG.msg $ "[dag] BEFORE COALESCE for txid" ++ show (txHash tx)
-    -- let coalesceInp =
-    --         catMaybes $
-    --         fmap
-    --             (\(val, (_, bh, txh, _)) ->
-    --                  case bh of
-    --                      [] -> Just (txh, val)
-    --                      (x:_) -> Nothing)
-    --             inputValsOutpoints
-    --     txhs = fmap fst coalesceInp
-    --     vs = sum $ fmap snd coalesceInp
-    -- liftIO $
-    --     TSH.mapM_
-    --         (\(bsh, dag) -> do
-    --              print $ "TXHASH: " ++ show (txHash tx) ++ "; EDGES: " ++ show txhs
-    --              LA.async $ DAG.coalesce dag (txHash tx) txhs vs (+)
-    --              putStrLn "BEFORE getTopologicalSortedForest DAG: "
-    --              dagT <- DAG.getTopologicalSortedForest dag
-    --              debug lg $ LG.msg $ "DAG: " ++ show (dagT)
-    --              return ())
-    --         (candidateBlocks bp2pEnv)
-    -- debug lg $ LG.msg $ "[dag] AFTER COALESCE for txid" ++ show (txHash tx)
  --
  --
  -- mapM_
@@ -298,7 +267,7 @@ processUnconfTransaction tx = do
                 inputValsOutpoints
     return (parentTxns)
 
-{-
+{- UNUSED?
 getSatsValueFromEpochOutpoint ::
        R.DB
     -> Bool
@@ -339,18 +308,16 @@ getSatsValueFromEpochOutpoint rkdb epoch txSync lg net outPoint waitSecs cfs = d
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: getSatsValueFromEpochOutpoint: " ++ show e
             throw e
--}
+
 convertToScriptHash :: Network -> String -> Maybe String
 convertToScriptHash net s = do
     let addr = stringToAddr net (T.pack s)
     (T.unpack . txHashToHex . TxHash . sha256 . addressToScriptBS) <$> addr
+-}
 
 addTxCandidateBlocks :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TxHash -> [BlockHash] -> [TxHash] -> m ()
 addTxCandidateBlocks txHash candBlockHashes depTxHashes = do
-    bp2pEnv <- getBitcoinP2P
     lg <- getLogger
-    --epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     debug lg $
         LG.msg $ "Appending to candidate blocks Tx " ++ show (txHash) ++ " with parent Tx's: " ++ show depTxHashes
     mapM_ (\bhash -> addTxCandidateBlock txHash bhash depTxHashes) candBlockHashes

@@ -40,9 +40,7 @@ data EndPointConnection =
 
 goGetResource :: (HasXokenNodeEnv env m, MonadIO m) => RPCMessage -> Network -> m (RPCMessage)
 goGetResource msg net = do
-    dbe <- getDB
     lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
     case rqMethod msg of
         "GET_MINING_CANDIDATE" -> do
             case rqParams msg of

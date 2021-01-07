@@ -59,8 +59,8 @@ runEpochSwitcher = do
 getCurrentEpoch :: Int -> IO (Epoch, Int)
 getCurrentEpoch et = do
     tm <- ceiling <$> getPOSIXTime -- seconds since unix epoch
-    let ws = 180 * et -- 604800 -- seconds in a week
-        (wn, sl) = fmap (`subtract` ws) $ tm `divMod` ws -- week number
+    let ws = 1800 * et -- seconds in half of an epoch length
+        (wn, sl) = fmap (`subtract` ws) $ tm `divMod` ws
         ep =
             case wn `mod` 3 of
                 0 -> Epoch0
@@ -197,7 +197,6 @@ fetchPredecessorsIO rkdb pcf hm =
 
 fetchPredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m [BlockHash]
 fetchPredecessors = do
-    lg <- getLogger
     dbe <- getDB
     bp2pEnv <- getBitcoinP2P
     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
@@ -285,26 +284,23 @@ getIO rkdb cf k = do
 deleteIO :: (Store a, MonadIO m) => R.DB -> R.ColumnFamily -> a -> m ()
 deleteIO rkdb cf k = R.deleteCF rkdb cf (DS.encode k)
 
+checkBlocksFullySynced :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m Bool
+checkBlocksFullySynced = do
+    bestBlock <- fetchBestBlock
+    bestSynced <- fetchBestSyncedBlock
+    return $ (headerHash $ nodeHeader bestBlock, fromIntegral $ nodeHeight bestBlock) == bestSynced
+
+blocksUnsynced :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m Int32
+blocksUnsynced = do
+    bestBlock <- fetchBestBlock
+    bestSynced <- fetchBestSyncedBlock
+    return $ (fromIntegral $ nodeHeight bestBlock) - (snd bestSynced)
+
 markBestSyncedBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Text -> Int32 -> m ()
 markBestSyncedBlock hash height = do
     rkdb <- rocksDB <$> getDB
     R.put rkdb "best_synced_hash" $ DTE.encodeUtf8 hash
     R.put rkdb "best_synced_height" $ C.pack $ show height
-    -- liftIO $ print "MARKED BEST SYNCED INTO ROCKS DB"
-
-checkBlocksFullySynced :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Bool
-checkBlocksFullySynced net = do
-    rkdb <- rocksDB <$> getDB
-    bestBlock <- fetchBestBlock
-    bestSynced <- fetchBestSyncedBlock
-    return $ (headerHash $ nodeHeader bestBlock, fromIntegral $ nodeHeight bestBlock) == bestSynced
-
-checkBlocksFullySynced_ :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Network -> m Int32
-checkBlocksFullySynced_ net = do
-    rkdb <- rocksDB <$> getDB
-    bestBlock <- fetchBestBlock
-    bestSynced <- fetchBestSyncedBlock
-    return $ (fromIntegral $ nodeHeight bestBlock) - (snd bestSynced)
 
 fetchBestSyncedBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ((BlockHash, Int32))
 fetchBestSyncedBlock = do

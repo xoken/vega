@@ -74,7 +74,6 @@ import Xoken.NodeConfig as NC
 produceGetDataMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m (Message)
 produceGetDataMessage peer = do
     lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
     debug lg $ LG.msg $ "Block - produceGetDataMessage - called." ++ (show peer)
     bl <- liftIO $ takeMVar (blockFetchQueue peer)
     trace lg $ LG.msg $ "took mvar.. " ++ (show bl) ++ (show peer)
@@ -170,7 +169,6 @@ runPeerSync =
     forever $ do
         lg <- getLogger
         bp2pEnv <- getBitcoinP2P
-        dbe' <- getDB
         let net = bitcoinNetwork $ nodeConfig bp2pEnv
         allPeers <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
         let connPeers = L.filter (\x -> bpConnected (snd x)) (M.toList allPeers)
@@ -430,12 +428,11 @@ sortPeers peers = do
             peers
     return $ snd $ unzip $ L.sortBy (\(a, _) (b, _) -> compare b a) (zip ts peers)
 
+{- UNUSED? txind isn't used anywhere in processConfTransaction -}
 processConfTransaction ::
        (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ([OutPoint])
 processConfTransaction tx bhash blkht txind = do
-    dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
-    epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
@@ -607,7 +604,6 @@ persistDagIntoDBWith (dagList, dag) zu = do
 processBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => DefBlock -> m ()
 processBlock dblk = do
     lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
     debug lg $ LG.msg ("processing deflated Block! " ++ show dblk)
     -- liftIO $ signalQSem (blockFetchBalance bp2pEnv)
     return ()
@@ -636,7 +632,7 @@ processCompactBlock cmpct peer = do
                         (\(sid, index) -> do
                              let idx = HM.lookup sid mpShortTxIDMap
                              case idx of
-                                 Just x -> True
+                                 Just _ -> True
                                  Nothing -> False)
                         cmpctTxLst
             let usedTxnMap = HM.fromList usedTxns
@@ -644,7 +640,7 @@ processCompactBlock cmpct peer = do
                 (\(sid, (txid, rt)) -> do
                      let fd = HM.lookup sid usedTxnMap
                      case fd of
-                         Just x -> return ()
+                         Just _ -> return ()
                          Nothing
                              -- TODO: lock the previous dag and insert into a NEW dag!!
                           -> do
@@ -686,11 +682,8 @@ processBlockTransactions :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => B
 processBlockTransactions blockTxns = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    dbe <- getDB
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-        bhash = btBlockhash blockTxns
+    let bhash = btBlockhash blockTxns
         txhashes = txHash <$> (btTransactions blockTxns)
-        conn = rocksDB dbe
     bbn <- fetchBestBlock
     let bhash' = headerHash $ nodeHeader bbn
     debug lg $ LG.msg ("processing Block Transactions! " ++ show bhash)
@@ -783,16 +776,15 @@ processDeltaTx bhash tx = do
 processCompactBlockGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
 processCompactBlockGetData pr hash = do
     lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
     debug lg $ LG.msg $ val "processCompactBlockGetData - called."
     bp2pEnv <- getBitcoinP2P
     res <- liftIO $ TSH.lookup (ingressCompactBlocks bp2pEnv) (BlockHash hash)
     case res of
-        Just bh -> do
+        Just _ -> do
             liftIO $ threadDelay (1000000 * 10)
             res2 <- liftIO $ TSH.lookup (ingressCompactBlocks bp2pEnv) (BlockHash hash)
             case res2 of
-                Just bh2 -> return ()
+                Just _ -> return ()
                 Nothing -> sendCompactBlockGetData pr hash
         Nothing -> sendCompactBlockGetData pr hash
 
@@ -822,9 +814,7 @@ newCandidateBlock hash = do
 
 newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 newCandidateBlockChainTip = do
-    lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     bbn <- fetchBestBlock
     let hash = headerHash $ nodeHeader bbn
     tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
