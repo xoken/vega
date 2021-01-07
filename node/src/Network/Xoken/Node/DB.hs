@@ -16,8 +16,8 @@ import Data.Default
 import Data.Int
 import Data.Store as DS
 import Data.Text as T
-import Data.Time.Clock.POSIX
 import qualified Data.Text.Encoding as DTE
+import Data.Time.Clock.POSIX
 import qualified Database.RocksDB as R
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
@@ -47,7 +47,8 @@ runEpochSwitcher = do
         (ep, sl) <- liftIO $ getCurrentEpoch (epochLength $ nodeConfig bp2pEnv)
         emptyEpoch $ nextEpoch ep
         epo <- liftIO $ atomically $ swapTVar (epochType bp2pEnv) ep
-        liftIO $ debug lg $
+        liftIO $
+            debug lg $
             LG.msg $
             "Epoch change => Old epoch (" ++
             show epo ++
@@ -86,15 +87,14 @@ withCF cfs f = do
 emptyCF :: (HasXokenNodeEnv env m, MonadIO m) => String -> m (R.ColumnFamily)
 emptyCF cfs = do
     lg <- getLogger
-    dbe <-  getDB
+    dbe <- getDB
     let rkdb = rocksDB dbe
     withCF cfs $ \cf -> do
         liftIO $ R.dropCF rkdb cf
         newcf <- liftIO $ R.createCF rkdb conf cfs
         liftIO $ TSH.insert (rocksCF dbe) cfs newcf
         liftIO $ print $ "Epoch ColumnFamily: " ++ show (cfs, cf, newcf)
-        liftIO $ debug lg $
-            LG.msg $ "Epoch ColumnFamily: " ++ show (cfs, cf, newcf)
+        liftIO $ debug lg $ LG.msg $ "Epoch ColumnFamily: " ++ show (cfs, cf, newcf)
         return newcf
 
 getCF :: (HasXokenNodeEnv env m, MonadIO m) => String -> m (Maybe R.ColumnFamily)

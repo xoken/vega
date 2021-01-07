@@ -66,7 +66,10 @@ data AllegoryEnv =
         { allegorySecretKey :: !SecKey
         }
 
-data Epoch = Epoch0 | Epoch1 | Epoch2
+data Epoch
+    = Epoch0
+    | Epoch1
+    | Epoch2
     deriving (Show, Eq)
 
 nextEpoch :: Epoch -> Epoch

@@ -31,9 +31,9 @@ import Network.Xoken.Block.Headers
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.Message
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
@@ -103,6 +103,7 @@ sendTxGetData pr txHash = do
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
             debug lg $ LG.msg $ "[dag] sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
+
 {- UNUSED?
 runEpochSwitcher :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEpochSwitcher =
@@ -140,7 +141,6 @@ coalesceUnconfTransaction dag txhash hashes sats = do
     unconfHashes <- filterM (isNotConfirmed) hashes
     DAG.coalesce dag txhash unconfHashes sats (+) nextBcState
 -}
-
 processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([TxHash])
 processUnconfTransaction tx = do
     bp2pEnv <- getBitcoinP2P
@@ -314,7 +314,6 @@ convertToScriptHash net s = do
     let addr = stringToAddr net (T.pack s)
     (T.unpack . txHashToHex . TxHash . sha256 . addressToScriptBS) <$> addr
 -}
-
 addTxCandidateBlocks :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TxHash -> [BlockHash] -> [TxHash] -> m ()
 addTxCandidateBlocks txHash candBlockHashes depTxHashes = do
     lg <- getLogger

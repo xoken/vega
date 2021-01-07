@@ -174,7 +174,6 @@ splitList xs = (f 1 xs, f 0 xs)
   where
     f n a = map fst . filter (odd . snd) . zip a $ [n ..]
 -}
-
 fromBytes :: B.ByteString -> Integer
 fromBytes = B.foldl' f 0
   where

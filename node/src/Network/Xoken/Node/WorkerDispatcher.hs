@@ -24,9 +24,9 @@ import Data.Maybe
 import GHC.Base as GHCB
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types

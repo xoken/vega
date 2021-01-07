@@ -16,7 +16,7 @@ module Network.Xoken.Node.P2P.PeerManager
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (mapConcurrently)
-import Control.Concurrent.Async.Lifted as LA (async, concurrently_,)
+import Control.Concurrent.Async.Lifted as LA (async, concurrently_)
 import qualified Control.Concurrent.MSem as MS
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TQueue
@@ -44,9 +44,9 @@ import Network.Xoken.Constants
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.ChainSync
@@ -921,7 +921,6 @@ generateHeaderHash net hdr =
     if isValidPOW net hdr
         then (headerHash hdr, bhNonce hdr)
         else generateHeaderHash net (hdr {bhNonce = (bhNonce hdr + 1)})
-
 {- UNUSED?
 updateZtxiUtxo :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> BlockHash -> Word32 -> m ()
 updateZtxiUtxo txh bh ht = do

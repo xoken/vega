@@ -23,10 +23,10 @@ import Data.Time.Clock.POSIX
 import Data.UUID
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers (computeSubsidy)
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder

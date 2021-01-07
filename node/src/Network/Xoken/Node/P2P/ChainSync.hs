@@ -108,7 +108,6 @@ msgOrder m1 m2 = do
         then LT
         else GT
 -}
-
 runEgressChainSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEgressChainSync = do
     lg <- getLogger
