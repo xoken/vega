@@ -9,6 +9,7 @@ extra-deps:
   - ../arivi-core/p2p
   - ../arivi-core/network
   - ../xoken-core/core
+  - ../rocksdb-haskell
   - serialise-0.2.0.0
   - cborg-0.2.0.0
   - timers-updatable-0.2.0.2
@@ -45,7 +46,7 @@ extra-deps:
   - zeromq4-haskell-0.8.0
   - git: https://github.com/xoken/snap-server.git
     commit: 20d4a32b9da8c927230016b76185dff223b3907e
-  - rocksdb-haskell-jprupp-2.1.3
+  # - rocksdb-haskell-jprupp-2.1.3
   - bits-bytestring-0.1.0.1
   - siphash-1.0.3
   - smuggler-0.1.0@sha256:2d70cdb59ea8df9ba0c97d3c9c0c6603c4bb82323061d1066ec60544518e73d1,4031

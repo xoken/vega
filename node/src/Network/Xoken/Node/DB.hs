@@ -53,14 +53,14 @@ runEpochSwitcher = do
             show epo ++
             "); New Epoch (" ++
             show ep ++
-            "); Emptying Epoch (" ++ show (nextEpoch ep) ++ ") with thread delay of" ++ (show sl) ++ " seconds"
+            "); Emptying Epoch (" ++ show (nextEpoch ep) ++ ") with thread delay of " ++ (show sl) ++ " seconds"
         liftIO $ threadDelay (1000000 * sl)
 
 getCurrentEpoch :: Int -> IO (Epoch, Int)
 getCurrentEpoch et = do
     tm <- ceiling <$> getPOSIXTime -- seconds since unix epoch
-    let ws = 1800 * et -- 604800 -- seconds in a week
-        (wn, sl) = fmap (ws `subtract`) $ tm `divMod` ws -- week number
+    let ws = 180 * et -- 604800 -- seconds in a week
+        (wn, sl) = fmap (`subtract` ws) $ tm `divMod` ws -- week number
         ep =
             case wn `mod` 3 of
                 0 -> Epoch0
@@ -69,7 +69,7 @@ getCurrentEpoch et = do
     return (ep, sl)
 
 emptyEpoch :: (HasXokenNodeEnv env m, MonadIO m) => Epoch -> m ()
-emptyEpoch ep = return ()
+emptyEpoch ep = emptyCF (getTxEpochCF ep) >> return ()
 
 getTxEpochCF :: Epoch -> String
 getTxEpochCF Epoch0 = "ep_transactions_0"
@@ -82,6 +82,20 @@ withCF cfs f = do
     case cf of
         Nothing -> throw ColumnFamilyNotFoundException
         Just c -> f c
+
+emptyCF :: (HasXokenNodeEnv env m, MonadIO m) => String -> m (R.ColumnFamily)
+emptyCF cfs = do
+    lg <- getLogger
+    dbe <-  getDB
+    let rkdb = rocksDB dbe
+    withCF cfs $ \cf -> do
+        liftIO $ R.dropCF rkdb cf
+        newcf <- liftIO $ R.createCF rkdb conf cfs
+        liftIO $ TSH.insert (rocksCF dbe) cfs newcf
+        liftIO $ print $ "Epoch ColumnFamily: " ++ show (cfs, cf, newcf)
+        liftIO $ debug lg $
+            LG.msg $ "Epoch ColumnFamily: " ++ show (cfs, cf, newcf)
+        return newcf
 
 getCF :: (HasXokenNodeEnv env m, MonadIO m) => String -> m (Maybe R.ColumnFamily)
 getCF cfs = do
