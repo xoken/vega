@@ -53,7 +53,6 @@ import Network.Xoken.Node.Env
 import Network.Xoken.Node.HTTP.Server
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.ChainSync
-import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.TLSServer
@@ -159,9 +158,10 @@ runThreads config nodeConf bp2p lg certPaths = do
                                         withAsync runBlockCacheQueue $ \_ -> do
                                             withAsync (handleNewConnectionRequest epHandler) $ \_ -> do
                                                 withAsync runPeerSync $ \_ -> do
-                                                    withAsync runSyncStatusChecker $ \z -> do
-                                                        _ <- LA.wait z
-                                                        return ()
+                                                    withAsync runSyncStatusChecker $ \_ -> do
+                                                        withAsync runEpochSwitcher $ \z -> do
+                                                            _ <- LA.wait z
+                                                            return ()
                         else LA.wait y)
         liftIO $ putStrLn $ "node recovering from fatal DB connection failure!"
     return ()
@@ -209,7 +209,8 @@ defBitcoinP2P nodeCnf = do
     hl <- newMVar True
     st <- TSH.new 1
     tl <- TSH.new 1
-    ep <- newTVarIO Epoch0
+    epoch <- getCurrentEpoch (epochLength $ nodeCnf)
+    ep <- newTVarIO $ fst epoch
     tc <- TSH.new 1
     rpf <- newEmptyMVar
     rpc <- newTVarIO 0

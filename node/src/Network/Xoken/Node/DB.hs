@@ -3,8 +3,10 @@
 
 module Network.Xoken.Node.DB where
 
-import Control.Exception
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM.TVar
+import Control.Exception
+import Control.Monad (forever)
 import Control.Monad.Extra (concatMapM)
 import Control.Monad.STM
 import Control.Monad.Trans
@@ -12,9 +14,9 @@ import Data.ByteString as B
 import Data.ByteString.Char8 as C
 import Data.Default
 import Data.Int
-import Data.Serialize as S
 import Data.Store as DS
 import Data.Text as T
+import Data.Time.Clock.POSIX
 import qualified Data.Text.Encoding as DTE
 import qualified Database.RocksDB as R
 import Network.Xoken.Block.Common
@@ -31,35 +33,43 @@ import Xoken.NodeConfig as NC
 conf :: R.Config
 conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = True, R.prefixLength = Just 3}
 
-cfStr =
-    [ "outputs"
-    , "ep_transactions_0"
-    , "ep_transactions_1"
-    , "ep_transactions_2"
-    , "blocktree"
-    , "provisional_blockhash"
-    ]
+cfStr = ["outputs", "ep_transactions_0", "ep_transactions_1", "ep_transactions_2", "blocktree", "provisional_blockhash"]
 
 columnFamilies = fmap (\x -> (x, conf)) cfStr
 
 withDBCF path = R.withDBCF path conf columnFamilies
 
-runEpochSwitcher = forever $ do
-    (ep,sl) <- getCurrentEpoch
-    -- TODO: empty next epoch
-    atomically $ swapTVar (epochType) ep
-    threadDelay (1000000 * sl)
+runEpochSwitcher :: (HasXokenNodeEnv env m, MonadIO m) => m ()
+runEpochSwitcher = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    forever $ do
+        (ep, sl) <- liftIO $ getCurrentEpoch (epochLength $ nodeConfig bp2pEnv)
+        emptyEpoch $ nextEpoch ep
+        epo <- liftIO $ atomically $ swapTVar (epochType bp2pEnv) ep
+        liftIO $ debug lg $
+            LG.msg $
+            "Epoch change => Old epoch (" ++
+            show epo ++
+            "); New Epoch (" ++
+            show ep ++
+            "); Emptying Epoch (" ++ show (nextEpoch ep) ++ ") with thread delay of" ++ (show sl) ++ " seconds"
+        liftIO $ threadDelay (1000000 * sl)
 
-getCurrentEpoch :: Integral a => IO (Epoch,a)
-getCurrentEpoch = do
+getCurrentEpoch :: Int -> IO (Epoch, Int)
+getCurrentEpoch et = do
     tm <- ceiling <$> getPOSIXTime -- seconds since unix epoch
-    let ws = 604800 -- seconds in a week
-        (wn,sl) = fmap (ws `subtract`) $ tm `divMod` 604800 -- week number
-        ep = case wn `mod` 3 of
-            0 -> Epoch0
-            1 -> Epoch1
-            2 -> Epoch2
-    return (ep,sl)
+    let ws = 1800 * et -- 604800 -- seconds in a week
+        (wn, sl) = fmap (ws `subtract`) $ tm `divMod` ws -- week number
+        ep =
+            case wn `mod` 3 of
+                0 -> Epoch0
+                1 -> Epoch1
+                2 -> Epoch2
+    return (ep, sl)
+
+emptyEpoch :: (HasXokenNodeEnv env m, MonadIO m) => Epoch -> m ()
+emptyEpoch ep = return ()
 
 getTxEpochCF :: Epoch -> String
 getTxEpochCF Epoch0 = "ep_transactions_0"
@@ -117,7 +127,7 @@ putProvisionalBlockHash pbh bh = do
     pcf <- liftIO $ TSH.lookup (rocksCF dbe') "provisional_blockhash"
     case pcf of
         Just pc -> do
-            putProvisionalBlockHashIO (rocksDB dbe') pc pbh bh 
+            putProvisionalBlockHashIO (rocksDB dbe') pc pbh bh
             updatePredecessors
         Nothing -> return ()
 
@@ -194,7 +204,6 @@ fetchPredecessors = do
         Just pcf -> fetchPredecessorsIO rkdb pcf hm
 
 -- put, get and delete with XokenNodeEnv and cf input as String
-
 putX :: (HasXokenNodeEnv env m, MonadIO m, Store a, Store b) => String -> a -> b -> m ()
 putX cfs k v = do
     dbe' <- getDB
@@ -217,8 +226,8 @@ scanX cfs = do
         Just cf -> do
             scanCF (rocksDB dbe') cf
         Nothing -> return []
---
 
+--
 scanCF db cf =
     liftIO $ do
         R.withIterCF db cf $ \iter -> do
@@ -238,7 +247,6 @@ scanCF db cf =
                         Just (k, v) -> ((k, v) : sn)
                         _ -> sn
             else return []
-
 
 putDefault :: (Store a, Store b, MonadIO m) => R.DB -> a -> b -> m ()
 putDefault rkdb k v = R.put rkdb (DS.encode k) (DS.encode v)
