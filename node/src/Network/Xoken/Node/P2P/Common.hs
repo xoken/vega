@@ -95,8 +95,6 @@ data WorkerRemoteException =
 
 instance Exception WorkerRemoteException
 
---
---
 -- | Create version data structure.
 buildVersion :: Network -> Word64 -> BlockHeight -> NetworkAddress -> NetworkAddress -> Word64 -> Version
 buildVersion net nonce height loc rmt time =

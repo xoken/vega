@@ -153,22 +153,10 @@ processUnconfTransaction tx = do
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processUnconfTransaction: processing Unconf Tx " ++ show (txHash tx)
     putTx (txHash tx) tx
-    {- TODO: Use Epoch for it
-    cftx <- liftIO $ TSH.lookup cf ("tx")
-    case cftx of
-        Just cftx' -> do
-            debug lg $ LG.msg $ "inserting tx " ++ show (txHash tx)
-            putDBCF conn cftx' (txHash tx) tx
-        Nothing -> do
-            debug lg $ LG.msg $ val "[dag] insert tx: Error: cf Nothing"
-            return () -- ideally should be unreachable
-    -}
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
- --
     let outpoints =
             map (\(b, _) -> ((outPointHash $ prevOutput b), fromIntegral $ outPointIndex $ prevOutput b)) (inputs)
- --
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
     inputValsOutpoints <-
         mapM
@@ -226,8 +214,6 @@ processUnconfTransaction tx = do
                          err lg $ LG.msg $ "Error: INSERTing into outputs: " ++ show e
                          throw KeyValueDBInsertException)
             outputs
- --
- --
  -- mapM_
  --     (\(b, indx) -> do
  --          let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)

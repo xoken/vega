@@ -225,11 +225,7 @@ deleteX cfs k = do
 
 scanX cfs = do
     dbe' <- getDB
-    cf' <- liftIO $ TSH.lookup (rocksCF dbe') cfs
-    case cf' of
-        Just cf -> do
-            scanCF (rocksDB dbe') cf
-        Nothing -> return []
+    withCF cfs $ \cf -> scanCF (rocksDB dbe') cf
 
 --
 scanCF db cf =
@@ -237,7 +233,6 @@ scanCF db cf =
         R.withIterCF db cf $ \iter -> do
             R.iterFirst iter
             getNext iter
-          --getNext :: Iterator -> m [(Maybe ByteString,Maybe ByteString)]
   where
     getNext i = do
         valid <- R.iterValid i
