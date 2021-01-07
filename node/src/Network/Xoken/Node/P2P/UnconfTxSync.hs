@@ -159,6 +159,7 @@ processUnconfTransaction tx = do
     putProvisionalBlockHash prb bsh
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processUnconfTransaction: processing Unconf Tx " ++ show (txHash tx)
+    putTx (txHash tx) tx
     {- TODO: Use Epoch for it
     cftx <- liftIO $ TSH.lookup cf ("tx")
     case cftx of

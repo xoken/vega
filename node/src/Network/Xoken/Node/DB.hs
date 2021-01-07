@@ -117,15 +117,6 @@ getTx txh = do
         then getX (getTxEpochCF $ prevEpoch epoch) txh
         else return $ epc
 
-txFromHash conn cf txh = do
-    cftx <- liftIO $ TSH.lookup cf ("tx")
-    case cftx of
-        Just cftx' -> do
-            tx' <- getIO conn cftx' (txh)
-            return tx'
-        Nothing -> do
-            return Nothing -- ideally should be unreachable
-
 putOutput :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> ZtxiUtxo -> m ()
 putOutput = putX "outputs"
 

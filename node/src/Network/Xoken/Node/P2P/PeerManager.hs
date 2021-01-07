@@ -638,7 +638,7 @@ messageHandler peer (mm, ingss) = do
                                 liftIO $
                                     print $ "MGetBlockTxns: candidateBlock doesn't exist; GetBlockTxns:" ++ show gbt
                                 return (0, [])
-                    txs' <- mapM (txFromHash conn cf) bt
+                    txs' <- mapM getTx bt
                     let txs = catMaybes txs'
                         btls = fromIntegral $ L.length txs
                     sendBlockTxn (BlockTxns bh btls txs) peer
