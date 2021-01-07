@@ -10,7 +10,6 @@
 module Network.Xoken.Node.P2P.Common where
 
 import Control.Concurrent.MVar
-import Control.Concurrent.STM.TVar
 import Control.Exception
 import Control.Monad.Reader
 import Data.Bits
@@ -30,12 +29,10 @@ import Data.Word
 import Network.Socket
 import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
 import Network.Xoken.Block.Common
-import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common -- (GetData(..), MessageCommand(..), NetworkAddress(..))
 import Network.Xoken.Network.Message
-import Network.Xoken.Node.Env
 import Network.Xoken.Util
 import System.Random
 

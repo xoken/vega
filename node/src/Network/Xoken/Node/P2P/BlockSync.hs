@@ -36,7 +36,6 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.STM
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BSL
 import Data.Function ((&))
 import qualified Data.HashMap.Strict as HM
@@ -47,13 +46,9 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Sequence as SQ
 import Data.Serialize
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as DTE
 import Data.Time.Calendar
 import Data.Time.Clock
 import Data.Word
-import qualified Database.RocksDB as R
 import qualified Network.Socket as NS
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers

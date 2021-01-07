@@ -20,16 +20,12 @@ import Control.Concurrent.Event as EV
 import Control.Concurrent.STM.TVar
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
-import Control.Monad
 import Control.Monad.Reader
-import Control.Monad.STM
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List as L
 import Data.Maybe
 import Data.Serialize
 import qualified Data.Text as T
-import Data.Time.Clock
-import Data.Time.LocalTime
 import Data.Word
 import Network.Xoken.Address
 import Network.Xoken.Block.Common

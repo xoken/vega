@@ -24,17 +24,12 @@ import Control.Monad
 import Control.Monad.Extra (mapMaybeM)
 import Control.Monad.Reader
 import Control.Monad.STM
-import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BSL
 import Data.ByteString.Short as BSS
-import Data.Int
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Serialize as S
-import Data.Text (Text)
-import qualified Data.Text.Encoding as DTE
 import Data.Time.Clock.POSIX
-import qualified Database.RocksDB as R
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
