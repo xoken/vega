@@ -54,7 +54,8 @@ import Network.Xoken.Node.P2P.ChainSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.UnconfTxSync
-import Network.Xoken.Node.WorkerDispatcher
+import Network.Xoken.Node.P2P.Version
+import Network.Xoken.Node.Worker.Dispatcher
 import Network.Xoken.Transaction
 import Streamly as S
 import qualified Streamly.Prelude as S
@@ -305,8 +306,6 @@ readNextMessage net sock ingss = do
                                         -- wait for TMT threads alloc
                                 liftIO $ MS.wait (maxTMTBuilderThreadLock p2pEnv)
                                 liftIO $ TSH.insert (merkleQueueMap p2pEnv) (biBlockHash $ bf) qq
-                                -- LA.async $
-                                --    merkleTreeBuilder qq (biBlockHash $ bf) (computeTreeHeight $ binTxTotalCount blin)
                                 return qq
                             else do
                                 valx <- liftIO $ TSH.lookup (merkleQueueMap p2pEnv) (biBlockHash $ bf)

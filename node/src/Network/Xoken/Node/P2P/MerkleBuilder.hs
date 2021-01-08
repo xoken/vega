@@ -24,7 +24,6 @@ import Data.Serialize as DS
 import qualified Data.Text as T
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Node.Exception
-import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Transaction
 
@@ -118,3 +117,12 @@ computeMerkleBranch (BranchComputeState hcState txCount (Just finalTxHash)) coin
 
 importTxHash :: String -> Hash256
 importTxHash = getTxHash . fromJust . hexToTxHash . T.pack
+
+-- | Computes the height of a Merkle tree.
+computeTreeHeight ::
+       Int -- ^ number of transactions (leaf nodes)
+    -> Int8 -- ^ height of the merkle tree
+computeTreeHeight ntx
+    | ntx < 2 = 0
+    | even ntx = 1 + computeTreeHeight (ntx `div` 2)
+    | otherwise = computeTreeHeight $ ntx + 1

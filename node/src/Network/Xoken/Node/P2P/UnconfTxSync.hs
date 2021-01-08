@@ -39,7 +39,7 @@ import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
-import Network.Xoken.Node.WorkerDispatcher
+import Network.Xoken.Node.Worker.Dispatcher
 import Network.Xoken.Transaction.Common
 import System.Logger as LG
 import Xoken.NodeConfig

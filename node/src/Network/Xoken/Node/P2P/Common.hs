@@ -24,41 +24,11 @@ import Data.Word
 import Network.Socket
 import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
 import Network.Xoken.Block.Common
-import Network.Xoken.Constants
-import Network.Xoken.Network.Common
 import Network.Xoken.Node.Exception
 import System.Random
 
--- | Create version data structure.
-buildVersion :: Network -> Word64 -> BlockHeight -> NetworkAddress -> NetworkAddress -> Word64 -> Version
-buildVersion net nonce height loc rmt time =
-    Version
-        { version = myVersion
-        , services = naServices loc
-        , timestamp = time
-        , addrRecv = rmt
-        , addrSend = loc
-        , verNonce = nonce
-        , userAgent = VarString (getXokenUserAgent net)
-        , startHeight = height
-        , relay = True
-        }
-
--- | Our protocol version.
-myVersion :: Word32
-myVersion = 70015
-
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
 sendEncMessage writeLock sock msg = withMVar writeLock (\_ -> LB.sendAll sock msg)
-
--- | Computes the height of a Merkle tree.
-computeTreeHeight ::
-       Int -- ^ number of transactions (leaf nodes)
-    -> Int8 -- ^ height of the merkle tree
-computeTreeHeight ntx
-    | ntx < 2 = 0
-    | even ntx = 1 + computeTreeHeight (ntx `div` 2)
-    | otherwise = computeTreeHeight $ ntx + 1
 
 {- UNUSED?
 divide :: Int -> Int -> Float
