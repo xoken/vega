@@ -56,7 +56,7 @@ import Network.Xoken.Node.P2P.ChainSync
 import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.TLSServer
-import Network.Xoken.Node.WorkerListener
+import Network.Xoken.Node.Worker.Listener
 import Options.Applicative
 import Prelude as P
 import qualified Snap as Snap

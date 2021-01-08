@@ -42,13 +42,15 @@ executable vega
       Network.Xoken.Node.P2P.Common
       Network.Xoken.Node.P2P.MerkleBuilder
       Network.Xoken.Node.P2P.PeerManager
-      Network.Xoken.Node.WorkerListener
+      Network.Xoken.Node.P2P.Version
       Network.Xoken.Node.HTTP.Types
       Network.Xoken.Node.HTTP.Server
       Network.Xoken.Node.Service.Chain
       Network.Xoken.Node.Service.Mining
       Network.Xoken.Node.TLSServer
-      Network.Xoken.Node.WorkerDispatcher
+      Network.Xoken.Node.Worker.Common
+      Network.Xoken.Node.Worker.Dispatcher
+      Network.Xoken.Node.Worker.Listener
       Network.Xoken.Node.P2P.UnconfTxSync
       Network.Xoken.Node.XokenService
 

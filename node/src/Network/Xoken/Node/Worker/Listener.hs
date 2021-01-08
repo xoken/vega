@@ -5,8 +5,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module Network.Xoken.Node.WorkerListener
-    ( module Network.Xoken.Node.WorkerListener
+module Network.Xoken.Node.Worker.Listener
+    ( module Network.Xoken.Node.Worker.Listener
     ) where
 
 import Codec.Serialise
@@ -38,7 +38,7 @@ import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.UnconfTxSync
-import Network.Xoken.Node.WorkerDispatcher
+import Network.Xoken.Node.Worker.Common
 import Network.Xoken.Transaction.Common
 import Prelude as P
 import System.Logger as LG

@@ -93,7 +93,6 @@ emptyCF cfs = do
         liftIO $ R.dropCF rkdb cf
         newcf <- liftIO $ R.createCF rkdb conf cfs
         liftIO $ TSH.insert (rocksCF dbe) cfs newcf
-        liftIO $ print $ "Epoch ColumnFamily: " ++ show (cfs, cf, newcf)
         liftIO $ debug lg $ LG.msg $ "Epoch ColumnFamily: " ++ show (cfs, cf, newcf)
         return newcf
 
