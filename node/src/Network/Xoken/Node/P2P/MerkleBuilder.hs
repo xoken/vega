@@ -23,6 +23,7 @@ import Data.Maybe
 import Data.Serialize as DS
 import qualified Data.Text as T
 import Network.Xoken.Crypto.Hash
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Transaction

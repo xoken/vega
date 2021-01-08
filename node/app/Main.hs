@@ -89,13 +89,6 @@ instance HasLogger AppM where
 runAppM :: ServiceEnv -> AppM a -> IO a
 runAppM env (AppM app) = runReaderT app env
 
-data ConfigException
-    = ConfigParseException
-    | RandomSecretKeyException
-    deriving (Eq, Ord, Show)
-
-instance Exception ConfigException
-
 type HashTable k v = H.BasicHashTable k v
 
 defaultConfig :: IO ()

@@ -37,6 +37,7 @@ import Network.Xoken.Crypto.Hash -- (GetData(..), MessageCommand(..), NetworkAdd
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types

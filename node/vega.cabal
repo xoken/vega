@@ -35,6 +35,7 @@ executable vega
       Network.Xoken.Node.P2P.ChainSync
       Network.Xoken.Node.P2P.Types
       Network.Xoken.Node.DB
+      Network.Xoken.Node.Exception
       Network.Xoken.Node.Env
       Network.Xoken.Node.GraphDB
       Network.Xoken.Node.P2P.BlockSync
@@ -52,6 +53,7 @@ executable vega
       Network.Xoken.Node.XokenService
 
   ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N -fplugin=Smuggler.Plugin
+    -- -Wunused-matches -Wunused-binds -Wunused-imports
 
   hs-source-dirs:
       app, src

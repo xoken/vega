@@ -47,6 +47,7 @@ import Network.Xoken.Network.Message
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.ChainSync

@@ -27,8 +27,8 @@ import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Transaction (makeCoinbaseTx)
 import Network.Xoken.Util (encodeHex)

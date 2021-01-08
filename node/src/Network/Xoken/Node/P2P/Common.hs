@@ -26,74 +26,8 @@ import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
 import Network.Xoken.Block.Common
 import Network.Xoken.Constants
 import Network.Xoken.Network.Common
+import Network.Xoken.Node.Exception
 import System.Random
-
-data BlockSyncException
-    = BlocksNotChainedException
-    | MessageParsingException
-    | KeyValueDBInsertException
-    | BlockHashNotFoundException
-    | DuplicateBlockHeaderException
-    | InvalidMessageTypeException
-    | InvalidBlocksException
-    | EmptyHeadersMessageException
-    | InvalidStreamStateException
-    | InvalidBlockIngestStateException
-    | InvalidMetaDataException
-    | InvalidBlockHashException
-    | UnexpectedDuringBlockProcException String
-    | InvalidBlockSyncStatusMapException
-    | InvalidBlockInfoException
-    | OutpointAddressNotFoundException
-    | InvalidAddressException
-    | TxIDNotFoundException
-    | InvalidOutpointException
-    | DBTxParseException
-    | MerkleTreeComputeException
-    | InvalidCreateListException
-    | MerkleSubTreeAlreadyExistsException
-    | MerkleSubTreeDBInsertException
-    | ResourcePoolFetchException
-    | DBInsertTimeOutException
-    | MerkleTreeInvalidException
-    | MerkleQueueNotFoundException
-    | BlockAlreadySyncedException
-    | OutputAlreadySpentException
-    | InvalidTxSatsValueException
-    | InvalidDAGEdgeException
-    | ZUnknownHandler
-    | ColumnFamilyNotFoundException
-    | ZInvalidColumnFamily
-    deriving (Show, Read)
-
-instance Exception BlockSyncException
-
-data PeerMessageException
-    = SocketReadException
-    | SocketConnectException SockAddr
-    | DeflatedBlockParseException
-    | ConfirmedTxParseException
-    | PeerSocketNotConnectedException
-    | ZeroLengthSocketReadException
-    | NetworkMagicMismatchException
-    | UnresponsivePeerException
-    deriving (Show)
-
-instance Exception PeerMessageException
-
-data AriviServiceException
-    = KeyValueDBLookupException
-    | GraphDBLookupException
-    | InvalidOutputAddressException
-    deriving (Show)
-
-instance Exception AriviServiceException
-
-data WorkerRemoteException =
-    WorkerConnectionRejectException
-    deriving (Show, Read)
-
-instance Exception WorkerRemoteException
 
 -- | Create version data structure.
 buildVersion :: Network -> Word64 -> BlockHeight -> NetworkAddress -> NetworkAddress -> Word64 -> Version

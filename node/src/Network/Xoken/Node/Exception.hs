@@ -1,6 +1,7 @@
 module Network.Xoken.Node.Exception where
 
 import Control.Exception
+import Network.Socket
 
 data BlockSyncException
     = BlocksNotChainedException
@@ -68,3 +69,10 @@ data WorkerRemoteException =
     deriving (Show, Read)
 
 instance Exception WorkerRemoteException
+
+data ConfigException
+    = ConfigParseException
+    | RandomSecretKeyException
+    deriving (Eq, Ord, Show)
+
+instance Exception ConfigException
