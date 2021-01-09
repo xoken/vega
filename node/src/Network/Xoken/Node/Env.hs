@@ -66,22 +66,6 @@ data AllegoryEnv =
         { allegorySecretKey :: !SecKey
         }
 
-data Epoch
-    = Epoch0
-    | Epoch1
-    | Epoch2
-    deriving (Show, Eq)
-
-nextEpoch :: Epoch -> Epoch
-nextEpoch Epoch0 = Epoch1
-nextEpoch Epoch1 = Epoch2
-nextEpoch Epoch2 = Epoch0
-
-prevEpoch :: Epoch -> Epoch
-prevEpoch Epoch0 = Epoch2
-prevEpoch Epoch1 = Epoch0
-prevEpoch Epoch2 = Epoch1
-
 data BitcoinP2P =
     BitcoinP2P
         { nodeConfig :: !NodeConfig

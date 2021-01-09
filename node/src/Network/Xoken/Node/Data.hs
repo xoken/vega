@@ -20,8 +20,6 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as C
 import Data.ByteString.Short (ShortByteString)
 import qualified Data.ByteString.Short as B.Short
-import Data.Char (ord)
-import Data.Foldable
 import Data.Hashable
 import Data.Int
 import Data.Maybe
@@ -32,7 +30,6 @@ import qualified Data.Text.Encoding as T
 import Data.Word
 import GHC.Generics
 import Prelude as P
-import Text.Regex.TDFA
 import Xoken as H
 import Xoken.NodeConfig
 
@@ -704,7 +701,7 @@ getJsonRPCErrorCode err =
         INVALID_PARAMS -> -32602
         INTERNAL_ERROR -> -32603
         PARSE_ERROR -> -32700
-
+{- UNUSED?
 coinbaseTxToMessage :: C.ByteString -> String
 coinbaseTxToMessage s =
     case C.length (C.pack regex) > 6 of
@@ -739,9 +736,7 @@ mergeAddrTxOutTxOutput addr (TxOut {..}) txOutput = txOutput {lockingScript = sc
 txToTx' :: Tx -> [TxOutput] -> [TxInput] -> Tx'
 txToTx' (Tx {..}) txout txin = Tx' txVersion txout txin txLockTime
 
-{-
 type TxIdOutputs = ((T.Text, Int32, Int32), Bool, Set ((T.Text, Int32), Int32, (T.Text, Int64)), Int64, T.Text)
-
 
 genTxOutputData :: (T.Text, Int32, TxIdOutputs, Maybe TxIdOutputs) -> TxOutputData
 genTxOutputData (txId, txIndex, ((hs, ht, ind), _, inps, val, addr), Nothing) =
@@ -766,3 +761,19 @@ txOutputDataToOutput (TxOutputData {..}) = TxOutput txind (T.unpack address) spe
 reverse2 :: String -> String
 reverse2 (x:y:xs) = reverse2 xs ++ [x, y]
 reverse2 x = x
+
+data Epoch
+    = Epoch0
+    | Epoch1
+    | Epoch2
+    deriving (Show, Eq)
+
+nextEpoch :: Epoch -> Epoch
+nextEpoch Epoch0 = Epoch1
+nextEpoch Epoch1 = Epoch2
+nextEpoch Epoch2 = Epoch0
+
+prevEpoch :: Epoch -> Epoch
+prevEpoch Epoch0 = Epoch2
+prevEpoch Epoch1 = Epoch0
+prevEpoch Epoch2 = Epoch1

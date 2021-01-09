@@ -24,6 +24,7 @@ import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Exception
+import Network.Xoken.Node.Data
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Transaction.Common
