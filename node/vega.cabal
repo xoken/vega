@@ -51,10 +51,12 @@ executable vega
       Network.Xoken.Node.Worker.Common
       Network.Xoken.Node.Worker.Dispatcher
       Network.Xoken.Node.Worker.Listener
+      Network.Xoken.Node.Worker.Types
       Network.Xoken.Node.P2P.UnconfTxSync
       Network.Xoken.Node.XokenService
 
-  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N -fplugin=Smuggler.Plugin
+  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N
+    -- -fplugin=Smuggler.Plugin
     -- -Wunused-matches -Wunused-binds -Wunused-imports
 
   hs-source-dirs:

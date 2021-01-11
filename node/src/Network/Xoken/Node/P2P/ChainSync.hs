@@ -43,6 +43,7 @@ import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.Version
 import Network.Xoken.Node.Worker.Dispatcher
+import Network.Xoken.Node.Worker.Types
 import System.Logger as LG
 import Xoken.NodeConfig
 

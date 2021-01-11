@@ -26,8 +26,8 @@ import Network.Socket hiding (send)
 import Network.Xoken.Block
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network
-import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.Worker.Types
 import Network.Xoken.Transaction
 import Xoken.NodeConfig
 
