@@ -317,3 +317,18 @@ fetchBestSyncedBlock = do
             net <- (bitcoinNetwork . nodeConfig) <$> getBitcoinP2P
             debug lg $ LG.msg $ val "Bestblock is genesis."
             return ((headerHash $ getGenesisHeader net), 0)
+
+getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m BlockLocator
+getBlockLocator = do
+    bp2pEnv <- getBitcoinP2P
+    bn <- fetchBestBlock
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    return $ blockLocator hm bn
+
+fetchMatchBlockOffset :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m (Maybe BlockHeight)
+fetchMatchBlockOffset hash = do
+    bp2pEnv <- getBitcoinP2P
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    case getBlockHeaderMemory hash hm of
+        Nothing -> return Nothing
+        Just bn -> return $ Just $ nodeHeight bn

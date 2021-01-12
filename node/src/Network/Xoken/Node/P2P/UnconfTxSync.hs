@@ -80,31 +80,6 @@ processTxGetData pr txHash = do
                         else return ()
                 Nothing -> sendTxGetData pr txHash
 
-sendTxGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
-sendTxGetData pr txHash = do
-    lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let gd = GetData $ [InvVector InvTx txHash]
-        msg = MGetData gd
-    debug lg $ LG.msg $ "sendTxGetData: " ++ show gd
-    debug lg $ LG.msg $ "[dag] sendTxGetData: " ++ show gd
-    case (bpSocket pr) of
-        Just s -> do
-            let em = runPut . putMessage net $ msg
-            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
-            case res of
-                Right _ ->
-                    liftIO $
-                    TSH.insert
-                        (unconfirmedTxCache bp2pEnv)
-                        (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
-                        (False, TxHash txHash)
-                Left (e :: SomeException) -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
-            debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
-            debug lg $ LG.msg $ "[dag] sending out GetData: " ++ show (bpAddress pr)
-        Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
-
 {- UNUSED?
 runEpochSwitcher :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEpochSwitcher =

@@ -44,73 +44,10 @@ import Network.Xoken.Node.Worker.Types
 import System.Logger as LG
 import Xoken.NodeConfig
 
-produceGetHeadersMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m Message
-produceGetHeadersMessage = do
-    lg <- getLogger
-    debug lg $ LG.msg $ val "produceGetHeadersMessage - called."
-    bp2pEnv <- getBitcoinP2P
-    -- be blocked until a new best-block is updated in DB, or a set timeout.
-    LA.race (liftIO $ threadDelay (15 * 1000000)) (liftIO $ takeMVar (bestBlockUpdated bp2pEnv))
-    bl <- getBlockLocator
-    let gh =
-            GetHeaders
-                { getHeadersVersion = myVersion
-                , getHeadersBL = bl
-                , getHeadersHashStop = "0000000000000000000000000000000000000000000000000000000000000000"
-                }
-    debug lg $ LG.msg ("block-locator: " ++ show bl)
-    return (MGetHeaders gh)
-
-sendRequestMessages :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Message -> m ()
-sendRequestMessages msg = do
-    lg <- getLogger
-    debug lg $ LG.msg $ val "Chain - sendRequestMessages - called."
-    bp2pEnv <- getBitcoinP2P
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    case msg of
-        MGetHeaders hdr -> do
-            allPeers <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
-            let connPeers = L.filter (bpConnected . snd) (M.toList allPeers)
-            let fbh = getHash256 $ getBlockHash $ head (getHeadersBL hdr)
-                md = BSS.index fbh $ BSS.length fbh - 1
-                pds =
-                    map
-                        (\p -> fromIntegral (md + p) `mod` L.length connPeers)
-                        [1 .. fromIntegral (L.length connPeers)]
-                indices =
-                    case L.length (getHeadersBL hdr) of
-                        x
-                            | x >= 19 -> take 4 pds -- 2^19 = blk ht 524288
-                            | x < 19 -> take 1 pds
-            res <-
-                liftIO $
-                try $
-                mapM_
-                    (\z -> do
-                         let pr = snd $ connPeers !! z
-                         case bpSocket pr of
-                             Just q -> do
-                                 let em = runPut . putMessage net $ msg
-                                 liftIO $ sendEncMessage (bpWriteMsgLock pr) q (BSL.fromStrict em)
-                                 debug lg $ LG.msg ("sending out GetHeaders: " ++ show (bpAddress pr))
-                             Nothing -> debug lg $ LG.msg $ val "Error sending, no connections available")
-                    indices
-            case res of
-                Right () -> return ()
-                Left (e :: SomeException) -> err lg $ LG.msg ("Error, sending out data: " ++ show e)
-        ___ -> undefined
-
-{- UNUSED?
-msgOrder :: Message -> Message -> Ordering
-msgOrder m1 m2 = do
-    if msgType m1 == MCGetHeaders
-        then LT
-        else GT
--}
 runEgressChainSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEgressChainSync = do
     lg <- getLogger
-    res1 <- LE.try $ forever $ produceGetHeadersMessage >>= sendRequestMessages
+    res1 <- LE.try $ forever $ produceGetHeadersMessage >>= sendGetHeaderMessages
     case res1 of
         Right () -> return ()
         Left (e :: SomeException) -> err lg $ LG.msg $ "[ERROR] runEgressChainSync " ++ show e
@@ -229,11 +166,3 @@ processHeaders hdrs = do
         else do
             err lg $ LG.msg $ val "Error: BlocksNotChainedException"
             throw BlocksNotChainedException
-
-fetchMatchBlockOffset :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m (Maybe BlockHeight)
-fetchMatchBlockOffset hash = do
-    bp2pEnv <- getBitcoinP2P
-    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
-    case getBlockHeaderMemory hash hm of
-        Nothing -> return Nothing
-        Just bn -> return $ Just $ nodeHeight bn

@@ -27,9 +27,6 @@ import Network.Xoken.Block.Common
 import Network.Xoken.Node.Exception
 import System.Random
 
-sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
-sendEncMessage writeLock sock msg = withMVar writeLock (\_ -> LB.sendAll sock msg)
-
 {- UNUSED?
 divide :: Int -> Int -> Float
 divide x y = (a / b)

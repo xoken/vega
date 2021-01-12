@@ -17,7 +17,6 @@ module Network.Xoken.Node.P2P.BlockSync
     , peerBlockSync
     , runPeerSync
     , runBlockCacheQueue
-    , sendRequestMessages
     , processCompactBlockGetData
     , newCandidateBlock
     , newCandidateBlockChainTip
@@ -80,25 +79,6 @@ produceGetDataMessage peer = do
     let gd = GetData [InvVector InvBlock $ getBlockHash $ biBlockHash bl]
     debug lg $ LG.msg $ "GetData req: " ++ show gd
     return (MGetData gd)
-
-sendRequestMessages :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> Message -> m ()
-sendRequestMessages pr msg = do
-    lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    debug lg $ LG.msg $ val "Block - sendRequestMessages - called."
-    case (bpSocket pr) of
-        Just s -> do
-            let em = runPut . putMessage net $ msg
-            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
-            case res of
-                Right () -> return ()
-                Left (e :: SomeException) -> do
-                    case fromException e of
-                        Just (t :: AsyncCancelled) -> throw e
-                        otherwise -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
-            debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
-        Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
 
 peerBlockSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m ()
 peerBlockSync peer =
@@ -780,24 +760,6 @@ processCompactBlockGetData pr hash = do
                 Just _ -> return ()
                 Nothing -> sendCompactBlockGetData pr hash
         Nothing -> sendCompactBlockGetData pr hash
-
-sendCompactBlockGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
-sendCompactBlockGetData pr hash = do
-    lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let gd = GetData $ [InvVector InvCompactBlock hash]
-        msg = MGetData gd
-    debug lg $ LG.msg $ "sendCompactBlockGetData: " ++ show gd
-    case (bpSocket pr) of
-        Just s -> do
-            let em = runPut . putMessage net $ msg
-            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
-            case res of
-                Right _ -> liftIO $ TSH.insert (ingressCompactBlocks bp2pEnv) (BlockHash hash) True
-                Left (e :: SomeException) -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
-            debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
-        Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
 
 newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
 newCandidateBlock hash = do
