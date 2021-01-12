@@ -18,7 +18,6 @@ module Network.Xoken.Node.P2P.BlockSync
     , runPeerSync
     , runBlockCacheQueue
     , sendRequestMessages
-    , zRPCDispatchTxValidate
     , processCompactBlockGetData
     , newCandidateBlock
     , newCandidateBlockChainTip
@@ -75,10 +74,10 @@ import Xoken.NodeConfig as NC
 produceGetDataMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m (Message)
 produceGetDataMessage peer = do
     lg <- getLogger
-    debug lg $ LG.msg $ "Block - produceGetDataMessage - called." ++ (show peer)
+    debug lg $ LG.msg $ "Block - produceGetDataMessage - called." ++ show peer
     bl <- liftIO $ takeMVar (blockFetchQueue peer)
     trace lg $ LG.msg $ "took mvar.. " ++ (show bl) ++ (show peer)
-    let gd = GetData $ [InvVector InvBlock $ getBlockHash $ biBlockHash bl]
+    let gd = GetData [InvVector InvBlock $ getBlockHash $ biBlockHash bl]
     debug lg $ LG.msg $ "GetData req: " ++ show gd
     return (MGetData gd)
 
@@ -209,8 +208,8 @@ getBatchSizeTestnet peerCount n
 
 getBatchSize :: Network -> Int32 -> Int32 -> [Int32]
 getBatchSize net peerCount n
-    | (getNetworkName net == "bsvtest") = getBatchSizeTestnet peerCount n
-    | (getNetworkName net == "regtest") = [1]
+    | getNetworkName net == "bsvtest" = getBatchSizeTestnet peerCount n
+    | getNetworkName net == "regtest" = [1]
     | otherwise = getBatchSizeMainnet peerCount n
 
 runBlockCacheQueue :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
@@ -219,10 +218,10 @@ runBlockCacheQueue =
         lg <- getLogger
         bp2pEnv <- getBitcoinP2P
         dbe <- getDB
-        !tm <- liftIO $ getCurrentTime
+        !tm <- liftIO getCurrentTime
         trace lg $ LG.msg $ val "runBlockCacheQueue loop..."
         let nc = nodeConfig bp2pEnv
-            net = bitcoinNetwork $ nc
+            net = bitcoinNetwork nc
             rkdb = rocksDB dbe
         allPeers <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
         let connPeers = L.filter (\x -> bpConnected (snd x)) (M.toList allPeers)
@@ -261,7 +260,7 @@ runBlockCacheQueue =
                                      debug lg $ LG.msg $ val "Still loading block headers, try again!"
                                      return (Nothing)
                 else do
-                    mapM
+                    mapM_
                         (\(bsh, (_, ht)) -> do
                              q <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (bsh)
                              case q of
@@ -271,22 +270,20 @@ runBlockCacheQueue =
                                      trace lg $ LG.msg $ ("bsh: " ++ (show bsh) ++ " " ++ (show eee) ++ (show www)))
                         syt
                     --
-                    mapM
+                    mapM_
                         (\(bsh, (_, ht)) -> do
                              valx <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (bsh)
                              case valx of
                                  Just xv -> do
                                      siza <- liftIO $ TSH.toList (fst xv)
-                                     if ((sum $ snd $ unzip siza) == snd xv)
-                                         then do
-                                             liftIO $
+                                     when ((sum $ snd $ unzip siza) == snd xv)
+                                        $ liftIO $
                                                  TSH.insert
                                                      (blockSyncStatusMap bp2pEnv)
                                                      (bsh)
                                                      (BlockProcessingComplete, ht)
-                                         else return ()
                                  Nothing -> return ())
-                        (syt)
+                        syt
                     --
                     let unsent = L.filter (\x -> (fst $ snd x) == RequestQueued) syt
                     let sent =
@@ -390,12 +387,11 @@ runBlockCacheQueue =
                 mapM_
                     (\pr -> do
                          ltst <- liftIO $ readIORef latest
-                         if ltst
-                             then do
-                                 trace lg $ LG.msg $ "try putting mvar.. " ++ (show bbi)
-                                 fl <- liftIO $ tryPutMVar (blockFetchQueue pr) bbi
-                                 if fl
-                                     then do
+                         when ltst $
+                             do trace lg $ LG.msg $ "try putting mvar.. " ++ (show bbi)
+                                fl <- liftIO $ tryPutMVar (blockFetchQueue pr) bbi
+                                when fl $
+                                     do
                                          trace lg $ LG.msg $ "done putting mvar.. " ++ (show bbi)
                                          !tm <- liftIO $ getCurrentTime
                                          liftIO $
@@ -403,20 +399,17 @@ runBlockCacheQueue =
                                                  (blockSyncStatusMap bp2pEnv)
                                                  (biBlockHash bbi)
                                                  (RequestSent tm, biBlockHeight bbi)
-                                         liftIO $ writeIORef latest False
-                                     else return ()
-                             else return ())
-                    (sortedPeers)
-            Nothing -> do
-                trace lg $ LG.msg $ "nothing yet" ++ ""
+                                         liftIO $ writeIORef latest False)
+                    sortedPeers
+            Nothing -> trace lg $ LG.msg $ "nothing yet" ++ ""
         --
-        liftIO $ threadDelay (10000) -- 0.01 sec
+        liftIO $ threadDelay 10000 -- 0.01 sec
         return ()
   where
-    getHead l = head $ L.sortOn (snd . snd) (l)
+    getHead l = head $ L.sortOn (snd . snd) l
     mkBlkInf h = Just $ BlockInfo (fst h) (snd $ snd h)
 
-sortPeers :: [BitcoinPeer] -> IO ([BitcoinPeer])
+sortPeers :: [BitcoinPeer] -> IO [BitcoinPeer]
 sortPeers peers = do
     let longlongago = UTCTime (ModifiedJulianDay 1) 1
     ts <-
@@ -427,7 +420,7 @@ sortPeers peers = do
                      Just lr -> return lr
                      Nothing -> return longlongago)
             peers
-    return $ snd $ unzip $ L.sortBy (\(a, _) (b, _) -> compare b a) (zip ts peers)
+    return $ map snd $ L.sortBy (\(a, _) (b, _) -> compare b a) (zip ts peers)
 
 {- UNUSED? txind isn't used anywhere in processConfTransaction -}
 processConfTransaction ::
@@ -456,8 +449,7 @@ processConfTransaction tx bhash blkht txind = do
                      else do
                          zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ Just bhash
                          case zz of
-                             Right (val, _, _) -> do
-                                 return (val, (shortHash, opindx))
+                             Right (val, _, _) -> return (val, (shortHash, opindx))
                              Left (e :: SomeException) -> do
                                  err lg $
                                      LG.msg $

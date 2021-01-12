@@ -1,11 +1,8 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -18,7 +15,6 @@ import Arivi.Crypto.Utils.PublicKey.Signature as ACUPS
 import Arivi.Crypto.Utils.PublicKey.Utils
 import qualified Arivi.P2P.Config as Config
 import Arivi.P2P.Kademlia.Types
-import Control.Concurrent (threadDelay)
 import Control.Concurrent
 import Control.Concurrent.Async as A (async)
 import Control.Concurrent.Async.Lifted as LA (wait, withAsync)
@@ -59,7 +55,7 @@ import Network.Xoken.Node.TLSServer
 import Network.Xoken.Node.Worker.Listener
 import Options.Applicative
 import Prelude as P
-import qualified Snap as Snap
+import qualified Snap
 import System.Directory (doesDirectoryExist, doesFileExist)
 import qualified System.Logger as LG
 import System.Posix.Daemon
@@ -67,8 +63,8 @@ import Xoken
 import Xoken.NodeConfig as NC
 
 newtype AppM a =
-    AppM (ReaderT (ServiceEnv) (IO) a)
-    deriving (Functor, Applicative, Monad, MonadReader (ServiceEnv), MonadIO, MonadThrow, MonadCatch)
+    AppM (ReaderT ServiceEnv IO a)
+    deriving (Functor, Applicative, Monad, MonadReader ServiceEnv, MonadIO, MonadThrow, MonadCatch)
 
 deriving instance MonadBase IO AppM
 
@@ -116,7 +112,7 @@ runThreads config nodeConf bp2p lg certPaths = do
                 Nothing -> readTVarIO (blockTree bp2p) -- TODO: handled Nothing due to errors
         pred <- fetchPredecessorsIO rkdb pcf nh
         CMS.atomically $ swapTVar (predecessors bp2p) pred
-        cfM <- TSH.fromList 1 $ cfZip
+        cfM <- TSH.fromList 1 cfZip
         let dbh = DatabaseHandles rkdb cfM
         let allegoryEnv = AllegoryEnv $ allegoryVendorSecretKey nodeConf
         let xknEnv = XokenNodeEnv bp2p dbh lg allegoryEnv
@@ -136,7 +132,7 @@ runThreads config nodeConf bp2p lg certPaths = do
         -- current node
         let node = vegaNode nodeConf
             normalizedClstr =
-                sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) ([node] ++ vegaCluster nodeConf)
+                sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) (node:vegaCluster nodeConf)
         --
         -- run vegaCluster
         runAppM
@@ -192,7 +188,7 @@ runNode config nodeConf bp2p certPaths = do
                  (LG.setLogLevel (logLevel nodeConf) LG.defSettings))
     runThreads config nodeConf bp2p lg certPaths
 
-defBitcoinP2P :: NodeConfig -> IO (BitcoinP2P)
+defBitcoinP2P :: NodeConfig -> IO BitcoinP2P
 defBitcoinP2P nodeCnf = do
     g <- newTVarIO M.empty
     bp <- newTVarIO M.empty
@@ -200,7 +196,7 @@ defBitcoinP2P nodeCnf = do
     hl <- newMVar True
     st <- TSH.new 1
     tl <- TSH.new 1
-    epoch <- getCurrentEpoch (epochLength $ nodeCnf)
+    epoch <- getCurrentEpoch (epochLength nodeCnf)
     ep <- newTVarIO $ fst epoch
     tc <- TSH.new 1
     rpf <- newEmptyMVar
@@ -250,7 +246,7 @@ defBitcoinP2P nodeCnf = do
 
 initVega :: IO ()
 initVega = do
-    putStrLn $ "Starting Xoken Nexa"
+    putStrLn "Starting Xoken Nexa"
     b <- doesFileExist "arivi-config.yaml"
     unless b defaultConfig
     cnf <- Config.readConfig "arivi-config.yaml"
@@ -290,8 +286,7 @@ repopulateBlockTree net rkdb cf = do
             case bn of
                 Nothing
                     -- print "getBestBlockNodeIO returned Nothing"
-                 -> do
-                    return Nothing
+                 -> return Nothing
                 Just bn' -> do
                     putStrLn $ "Loaded " ++ show (length kv') ++ " BlockTree entries"
                     --putStrLn $ "Started scan: " ++ show t1
@@ -308,7 +303,7 @@ relaunch =
             then threadDelay (30 * 1000000)
             else do
                 runDetached (Just pid) (ToFile "vega.log") initVega
-                threadDelay (5000000)
+                threadDelay 5000000
 
 main :: IO ()
 main = do

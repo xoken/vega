@@ -2,16 +2,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TupleSections #-}
 
 module Network.Xoken.Node.P2P.ChainSync
     ( runEgressChainSync
     , processHeaders
-    , updatePredecessors
     ) where
 
 import Control.Concurrent (threadDelay)
@@ -47,7 +44,7 @@ import Network.Xoken.Node.Worker.Types
 import System.Logger as LG
 import Xoken.NodeConfig
 
-produceGetHeadersMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m (Message)
+produceGetHeadersMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m Message
 produceGetHeadersMessage = do
     lg <- getLogger
     debug lg $ LG.msg $ val "produceGetHeadersMessage - called."
@@ -67,18 +64,18 @@ produceGetHeadersMessage = do
 sendRequestMessages :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Message -> m ()
 sendRequestMessages msg = do
     lg <- getLogger
-    debug lg $ LG.msg $ val ("Chain - sendRequestMessages - called.")
+    debug lg $ LG.msg $ val "Chain - sendRequestMessages - called."
     bp2pEnv <- getBitcoinP2P
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     case msg of
         MGetHeaders hdr -> do
             allPeers <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
-            let connPeers = L.filter (\x -> bpConnected (snd x)) (M.toList allPeers)
-            let fbh = getHash256 $ getBlockHash $ (getHeadersBL hdr) !! 0
-                md = BSS.index fbh $ (BSS.length fbh) - 1
+            let connPeers = L.filter (bpConnected . snd) (M.toList allPeers)
+            let fbh = getHash256 $ getBlockHash $ head (getHeadersBL hdr)
+                md = BSS.index fbh $ BSS.length fbh - 1
                 pds =
                     map
-                        (\p -> (fromIntegral (md + p) `mod` L.length connPeers))
+                        (\p -> fromIntegral (md + p) `mod` L.length connPeers)
                         [1 .. fromIntegral (L.length connPeers)]
                 indices =
                     case L.length (getHeadersBL hdr) of
@@ -91,7 +88,7 @@ sendRequestMessages msg = do
                 mapM_
                     (\z -> do
                          let pr = snd $ connPeers !! z
-                         case (bpSocket pr) of
+                         case bpSocket pr of
                              Just q -> do
                                  let em = runPut . putMessage net $ msg
                                  liftIO $ sendEncMessage (bpWriteMsgLock pr) q (BSL.fromStrict em)
@@ -100,8 +97,7 @@ sendRequestMessages msg = do
                     indices
             case res of
                 Right () -> return ()
-                Left (e :: SomeException) -> do
-                    err lg $ LG.msg ("Error, sending out data: " ++ show e)
+                Left (e :: SomeException) -> err lg $ LG.msg ("Error, sending out data: " ++ show e)
         ___ -> undefined
 
 {- UNUSED?
@@ -114,7 +110,7 @@ msgOrder m1 m2 = do
 runEgressChainSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEgressChainSync = do
     lg <- getLogger
-    res1 <- LE.try $ forever $ do produceGetHeadersMessage >>= sendRequestMessages
+    res1 <- LE.try $ forever $ produceGetHeadersMessage >>= sendRequestMessages
     case res1 of
         Right () -> return ()
         Left (e :: SomeException) -> err lg $ LG.msg $ "[ERROR] runEgressChainSync " ++ show e
@@ -125,7 +121,7 @@ validateChainedBlockHeaders hdrs = do
         pairs = zip xs (drop 1 xs)
     L.foldl' (\ac x -> ac && (headerHash $ fst (fst x)) == (prevBlock $ fst (snd x))) True pairs
 
-getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m (BlockLocator)
+getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m BlockLocator
 getBlockLocator = do
     bp2pEnv <- getBitcoinP2P
     bn <- fetchBestBlock
@@ -136,51 +132,50 @@ processHeaders :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Headers -> 
 processHeaders hdrs = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    if (L.null $ headersList hdrs)
+    if L.null $ headersList hdrs
         then do
             debug lg $ LG.msg $ val "Nothing to process!"
             throw EmptyHeadersMessageException
         else debug lg $ LG.msg $ "Processing Headers with " ++ show (L.length $ headersList hdrs) ++ " entries."
-    case validateChainedBlockHeaders hdrs of
-        True -> do
+    if validateChainedBlockHeaders hdrs
+        then do
             let net = bitcoinNetwork $ nodeConfig bp2pEnv
                 genesisHash = blockHashToHex $ headerHash $ getGenesisHeader net
                 headPrevBlockHash = prevBlock $ fst $ head $ headersList hdrs
                 headPrevHash = blockHashToHex headPrevBlockHash
                 hdrHash y = headerHash $ fst y
-                validate m = validateWithCheckPoint net (fromIntegral m) (hdrHash <$> (headersList hdrs))
+                validate m = validateWithCheckPoint net (fromIntegral m) (hdrHash <$> headersList hdrs)
             bbn <- fetchBestBlock
             let bb = (headerHash $ nodeHeader bbn, nodeHeight bbn)
             debug lg $ LG.msg $ "Fetched best block: " ++ show bb
             -- TODO: throw exception if it's a bitcoin cash block
             indexed <-
-                if (blockHashToHex $ fst bb) == genesisHash
+                if blockHashToHex (fst bb) == genesisHash
                     then do
                         debug lg $ LG.msg $ val "First Headers set from genesis"
-                        return $ zip [((snd bb) + 1) ..] (headersList hdrs)
-                    else if (blockHashToHex $ fst bb) == headPrevHash
+                        return $ zip [snd bb + 1 ..] (headersList hdrs)
+                    else if blockHashToHex (fst bb) == headPrevHash
                              then do
                                  unless (validate (snd bb)) $ throw InvalidBlocksException
                                  debug lg $ LG.msg $ val "Building on current Best block"
-                                 return $ zip [((snd bb) + 1) ..] (headersList hdrs)
-                             else do
-                                 if ((fst bb) == (headerHash $ fst $ last $ headersList hdrs))
+                                 return $ zip [snd bb + 1 ..] (headersList hdrs)
+                             else
+                                 if fst bb == headerHash (fst $ last $ headersList hdrs)
                                      then do
-                                         debug lg $ LG.msg $ LG.val ("Does not match best-block, redundant Headers msg")
+                                         debug lg $ LG.msg $ LG.val "Does not match best-block, redundant Headers msg"
                                          return [] -- already synced
                                      else do
                                          res <- fetchMatchBlockOffset headPrevBlockHash
                                          case res of
                                              Just matchBHt -> do
                                                  unless (validate matchBHt) $ throw InvalidBlocksException
-                                                 if ((snd bb) >
+                                                 if snd bb >
                                                      (matchBHt + fromIntegral (L.length $ headersList hdrs) + 12) -- reorg limit of 12 blocks
-                                                     )
                                                      then do
                                                          debug lg $
                                                              LG.msg $
                                                              LG.val
-                                                                 ("Does not match best-block, assuming stale Headers msg")
+                                                                 "Does not match best-block, assuming stale Headers msg"
                                                          return [] -- assuming its stale/redundant and ignore
                                                      else do
                                                          debug lg $
@@ -189,14 +184,14 @@ processHeaders hdrs = do
                                                                  "Does not match best-block, potential block re-org..."
                                                          let reOrgDiff = zip [(matchBHt + 1) ..] (headersList hdrs)
                                                          bestSynced <- fetchBestSyncedBlock
-                                                         if snd bestSynced >= (fromIntegral matchBHt)
+                                                         if snd bestSynced >= fromIntegral matchBHt
                                                              then do
                                                                  debug lg $
                                                                      LG.msg $
                                                                      "Have synced blocks beyond point of re-org: synced @ " <>
-                                                                     (show bestSynced) <>
+                                                                     show bestSynced <>
                                                                      " versus point of re-org: " <>
-                                                                     (show $ (headPrevHash, matchBHt)) <>
+                                                                     show (headPrevHash, matchBHt) <>
                                                                      ", re-syncing from thereon"
                                                                  markBestSyncedBlock headPrevHash $
                                                                      fromIntegral matchBHt
@@ -204,7 +199,7 @@ processHeaders hdrs = do
                                                              else return reOrgDiff
                                              Nothing -> throw BlockHashNotFoundException
             let lenIndexed = L.length indexed
-            debug lg $ LG.msg $ "indexed " ++ show (lenIndexed)
+            debug lg $ LG.msg $ "indexed " ++ show lenIndexed
             bns <-
                 mapMaybeM
                     (\y -> do
@@ -220,10 +215,8 @@ processHeaders hdrs = do
                                       case connectBlock hm net tm header of
                                           Right (hm', bn) -> (Just bn, hm')
                                           Left _ -> (Nothing, hm))
-                         case bnm of
-                             Just b -> putHeaderMemoryElem b
-                             Nothing -> return ()
-                         return $ (\x -> (x, (header, blkht))) <$> bnm)
+                         mapM_ putHeaderMemoryElem bnm
+                         return $ (, (header, blkht)) <$> bnm)
                      --liftIO $ TSH.insert (blockTree bp2pEnv) (headerHash header) (fromIntegral blkht, header))
                     indexed
             unless (L.null bns) $ do
@@ -233,7 +226,7 @@ processHeaders hdrs = do
                 putBestBlockNode bnode
                 -- markBestBlock rkdb (blockHashToHex $ headerHash $ fst $ snd $ last $ indexed) (fst $ last indexed)
                 liftIO $ putMVar (bestBlockUpdated bp2pEnv) True
-        False -> do
+        else do
             err lg $ LG.msg $ val "Error: BlocksNotChainedException"
             throw BlocksNotChainedException
 
