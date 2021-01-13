@@ -50,6 +50,7 @@ import Network.Xoken.Node.HTTP.Server
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.ChainSync
 import Network.Xoken.Node.P2P.PeerManager
+import Network.Xoken.Node.P2P.Process.Block
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.TLSServer
 import Network.Xoken.Node.Worker.Listener

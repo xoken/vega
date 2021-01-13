@@ -36,6 +36,7 @@ import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.XokenService
 import Prelude as P
 import System.Logger as LG
+import Network.Xoken.Node.P2P.PeerManager
 import Text.Printf
 import Xoken.NodeConfig
 

@@ -1,5 +1,60 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 
+module Network.Xoken.Node.P2P.MessageSender where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async
+import Control.Concurrent.Async.Lifted as LA
+import qualified Control.Concurrent.MSem as MS
+import Control.Concurrent.MVar
+import Control.Concurrent.STM.TQueue
+import Control.Concurrent.STM.TVar
+import Control.Exception
+import qualified Control.Exception.Lifted as LE (try)
+import Control.Monad.Reader
+import Control.Monad.STM
+import Control.Monad.Trans.Control
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.Char8 as LC
+import Data.Function ((&))
+import Data.IORef
+import Data.Int
+import qualified Data.List as L
+import qualified Data.Map.Strict as M
+import Data.Maybe
+import Data.Serialize as DS
+import Data.Time.Clock.POSIX
+import Data.Word
+import Network.Socket
+import Network.Xoken.Address
+import Network.Xoken.Block
+import Network.Xoken.Constants
+import Network.Xoken.Network.Common
+import Network.Xoken.Network.CompactBlock
+import Network.Xoken.Network.Message
+import Network.Xoken.Node.DB
+import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
+import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.Exception
+import Network.Xoken.Node.Env
+import Network.Xoken.Node.P2P.Common
+import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Node.P2P.Version
+import Network.Xoken.Node.Worker.Dispatcher
+import Data.ByteString.Short as BSS
+import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
+import Network.Xoken.Transaction
+import Streamly as S
+import qualified Streamly.Prelude as S
+import System.Logger as LG
+import System.Random
+import Xoken.NodeConfig as NC
+import Network.Xoken.Crypto.Hash
 
 
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
@@ -10,14 +65,14 @@ sendRequestMessages pr msg = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    debug lg $ LG.msg $ val "Block - sendRequestMessages - called."
-    case (bpSocket pr) of
+    debug lg $ LG.msg $ val "sendRequestMessages - called."
+    case bpSocket pr of
         Just s -> do
             let em = runPut . putMessage net $ msg
             res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
             case res of
                 Right () -> return ()
-                Left (e :: SomeException) -> do
+                Left (e :: SomeException) ->
                     case fromException e of
                         Just (t :: AsyncCancelled) -> throw e
                         otherwise -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
@@ -30,7 +85,7 @@ sendCompactBlockGetData pr hash = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let gd = GetData $ [InvVector InvCompactBlock hash]
+    let gd = GetData [InvVector InvCompactBlock hash]
         msg = MGetData gd
     debug lg $ LG.msg $ "sendCompactBlockGetData: " ++ show gd
     case (bpSocket pr) of
@@ -52,8 +107,7 @@ sendTxGetData pr txHash = do
     let gd = GetData $ [InvVector InvTx txHash]
         msg = MGetData gd
     debug lg $ LG.msg $ "sendTxGetData: " ++ show gd
-    debug lg $ LG.msg $ "[dag] sendTxGetData: " ++ show gd
-    case (bpSocket pr) of
+    case bpSocket pr of
         Just s -> do
             let em = runPut . putMessage net $ msg
             res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
@@ -124,3 +178,28 @@ sendGetHeaderMessages msg = do
                 Right () -> return ()
                 Left (e :: SomeException) -> err lg $ LG.msg ("Error, sending out data: " ++ show e)
         ___ -> undefined
+
+broadcastToPeers :: (HasXokenNodeEnv env m, MonadIO m) => Message -> m ()
+broadcastToPeers msg = do
+    liftIO $ putStrLn $ "Broadcasting " ++ show (msgType msg) ++ " to peers"
+    bp2pEnv <- getBitcoinP2P
+    peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
+    mapM_
+        (\bp ->
+             if bpConnected bp
+                 then sendRequestMessages bp msg
+                 else return ())
+        peerMap
+    liftIO $ putStrLn $ "Broadcasted " ++ show (msgType msg) ++ " to peers"
+
+sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
+sendcmpt bp = sendRequestMessages bp $ MSendCompact $ SendCompact 0 1
+
+sendCmptBlock :: (HasXokenNodeEnv env m, MonadIO m) => CompactBlock -> BitcoinPeer -> m ()
+sendCmptBlock cmpt bp = sendRequestMessages bp $ MCompactBlock cmpt
+
+sendBlockTxn :: (HasXokenNodeEnv env m, MonadIO m) => BlockTxns -> BitcoinPeer -> m ()
+sendBlockTxn blktxn bp = sendRequestMessages bp $ MBlockTxns blktxn
+
+sendInv :: (HasXokenNodeEnv env m, MonadIO m) => Inv -> BitcoinPeer -> m ()
+sendInv inv bp = sendRequestMessages bp $ MInv inv

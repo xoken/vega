@@ -2,18 +2,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TupleSections #-}
 
-module Network.Xoken.Node.P2P.UnconfTxSync
-    ( processUnconfTransaction
-    , processTxGetData
-    --, runEpochSwitcher
-    , addTxCandidateBlocks
-    ) where
+module Network.Xoken.Node.P2P.Process.Tx where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Event as EV
@@ -21,6 +13,7 @@ import Control.Concurrent.STM.TVar
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad.Reader
+import Control.Monad.Extra
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List as L
 import Data.Maybe
@@ -38,6 +31,7 @@ import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
+import Network.Xoken.Node.P2P.MessageSender
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
 import Network.Xoken.Transaction.Common
@@ -49,11 +43,8 @@ processTxGetData pr txHash = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
-    if indexUnconfirmedTx == False
+    if indexUnconfirmedTx
         then do
-            debug lg $ LG.msg $ val "[dag] processTxGetData - indexUnconfirmedTx False."
-            return ()
-        else do
             debug lg $ LG.msg $ val "processTxGetData - called."
             bp2pEnv <- getBitcoinP2P
             tuple <-
@@ -63,8 +54,7 @@ processTxGetData pr txHash = do
                     (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
             case tuple of
                 Just (st, _) ->
-                    if st == False
-                        then do
+                    unless st $ do
                             liftIO $ threadDelay (1000000 * 30)
                             tuple2 <-
                                 liftIO $
@@ -73,12 +63,12 @@ processTxGetData pr txHash = do
                                     (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
                             case tuple2 of
                                 Just (st2, _) ->
-                                    if st2 == False
-                                        then sendTxGetData pr txHash
-                                        else return ()
+                                    unless st2 $ sendTxGetData pr txHash
                                 Nothing -> return ()
-                        else return ()
                 Nothing -> sendTxGetData pr txHash
+        else do
+            debug lg $ LG.msg $ val "[dag] processTxGetData - indexUnconfirmedTx False."
+            return ()
 
 {- UNUSED?
 runEpochSwitcher :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
@@ -220,14 +210,13 @@ processUnconfTransaction tx = do
         Nothing -> return ()
     -- let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
     let parentTxns =
-            catMaybes $
-            map
+            mapMaybe
                 (\(_, (_, bsh, ophs, _)) ->
                      case bsh of
                          [] -> Just ophs
                          _ -> Nothing)
                 inputValsOutpoints
-    return (parentTxns)
+    return parentTxns
 
 {- UNUSED?
 getSatsValueFromEpochOutpoint ::
@@ -297,3 +286,98 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
             dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)
             liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP
             return ()
+
+{- UNUSED? txind isn't used anywhere in processConfTransaction -}
+processConfTransaction ::
+       (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ([OutPoint])
+processConfTransaction tx bhash blkht txind = do
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
+    debug lg $ LG.msg $ "[dag] processing Tx " ++ show (txHash tx)
+    let inputs = zip (txIn tx) [0 :: Word32 ..]
+    let outputs = zip (txOut tx) [0 :: Word32 ..]
+    --
+    let outpoints =
+            map (\(b, _) -> ((outPointHash $ prevOutput b), fromIntegral $ outPointIndex $ prevOutput b)) (inputs)
+    --
+    inputValsOutpoints <-
+        mapM
+            (\(b, indx) -> do
+                 let shortHash = getTxShortHash (outPointHash $ prevOutput b) 20
+                 let opindx = fromIntegral $ outPointIndex $ prevOutput b
+                 if (outPointHash nullOutPoint) == (outPointHash $ prevOutput b)
+                     then do
+                         let sval = fromIntegral $ computeSubsidy net $ (fromIntegral blkht :: Word32)
+                         return (sval, (shortHash, opindx))
+                     else do
+                         zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ Just bhash
+                         case zz of
+                             Right (val, _, _) -> return (val, (shortHash, opindx))
+                             Left (e :: SomeException) -> do
+                                 err lg $
+                                     LG.msg $
+                                     "Error: [pCT calling gSVFO] WHILE Processing TxID " ++
+                                     show (txHashToHex $ txHash tx) ++
+                                     ", getting value for dependent input (TxID,Index): (" ++
+                                     show (txHashToHex $ outPointHash (prevOutput b)) ++
+                                     ", " ++ show (outPointIndex $ prevOutput b) ++ ")" ++ (show e)
+                                 throw e)
+            (inputs)
+    -- insert UTXO/s
+    let opCount = fromIntegral $ L.length outputs
+    ovs <-
+        mapM
+            (\(opt, oindex) -> do
+                 debug lg $ LG.msg $ "Inserting UTXO : " ++ show (txHash tx, oindex)
+                 let zut =
+                         ZtxiUtxo
+                             (txHash tx)
+                             (oindex)
+                             [bhash] -- if already present then ADD to the existing list of BlockHashes
+                             (fromIntegral blkht)
+                             outpoints
+                             []
+                             (fromIntegral $ outValue opt)
+                             opCount
+                 res <- LE.try $ putOutput (OutPoint (txHash tx) oindex) zut
+                 case res of
+                     Right _ -> return (zut)
+                     Left (e :: SomeException) -> do
+                         err lg $ LG.msg $ "Error: INSERTing into outputs: " ++ show e
+                         throw KeyValueDBInsertException)
+            outputs
+    --
+    --
+    -- mapM_
+    --     (\(b, indx) -> do
+    --          let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
+    --          predBlkHash <- getChainIndexByHeight $ fromIntegral blkht - 10
+    --          case predBlkHash of
+    --              Just pbh -> do
+    --                  _ <- zRPCDispatchTraceOutputs opt pbh True 0 -- TODO: use appropriate Stale marker blockhash
+    --                  return ()
+    --              Nothing -> do
+    --                  if blkht > 11
+    --                      then throw InvalidBlockHashException
+    --                      else return ()
+    --          return ())
+    --     (inputs)
+    --
+    let ipSum = foldl (+) 0 $ (\(val, _) -> val) <$> inputValsOutpoints
+        opSum = foldl (+) 0 $ (\o -> outValue o) <$> (txOut tx)
+    if (ipSum - opSum) < 0
+        then do
+            debug lg $ LG.msg $ " ZUT value mismatch " ++ (show ipSum) ++ " " ++ (show opSum)
+            throw InvalidTxSatsValueException
+        else return ()
+    -- signal 'done' event for tx's that were processed out of sequence 
+    --
+    vall <- liftIO $ TSH.lookup (txSynchronizer bp2pEnv) (txHash tx)
+    case vall of
+        Just ev -> liftIO $ EV.signal ev
+        Nothing -> return ()
+    debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
+    let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
+    return (outpts)

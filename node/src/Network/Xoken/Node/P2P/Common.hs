@@ -18,7 +18,6 @@ import Data.ByteString.Builder
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.Int
-import Data.Serialize
 import Data.Serialize as S
 import Data.Word
 import Network.Socket
@@ -73,12 +72,7 @@ splitList xs = (f 1 xs, f 0 xs)
   where
     f n a = map fst . filter (odd . snd) . zip a $ [n ..]
 -}
-fromBytes :: B.ByteString -> Integer
-fromBytes = B.foldl' f 0
-  where
-    f a b = a `shiftL` 8 .|. fromIntegral b
 
--- Helper Functions
 recvAll :: (MonadIO m) => Socket -> Int64 -> m BSL.ByteString
 recvAll sock len = do
     if len > 0
@@ -94,26 +88,7 @@ recvAll sock len = do
                                  else BSL.append mesg <$> recvAll sock (len - BSL.length mesg)
         else return (BSL.empty)
 
-receiveMessage :: (MonadIO m) => Socket -> m BSL.ByteString
-receiveMessage sock = do
-    lp <- recvAll sock 4
-    case runGetLazy getWord32le lp of
-        Right x -> do
-            payload <- recvAll sock (fromIntegral x)
-            return payload
-        Left e -> Prelude.error e
-
-sendMessage :: (MonadIO m) => Socket -> MVar () -> BSL.ByteString -> m ()
-sendMessage sock writeLock payload = do
-    let len = LC.length payload
-        prefix = toLazyByteString $ (word32LE $ fromIntegral len)
-    liftIO $
-        withMVar
-            writeLock
-            (\_ -> do
-                 LB.sendAll sock prefix
-                 LB.sendAll sock payload)
-
+-- ProvisionalBlockHash
 mkProvisionalBlockHashR :: BlockHash -> IO BlockHash
 mkProvisionalBlockHashR b = do
     r64 <- randomRIO (minBound, maxBound :: Word64)

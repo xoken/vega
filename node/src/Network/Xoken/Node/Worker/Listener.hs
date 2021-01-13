@@ -35,9 +35,9 @@ import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.P2P.BlockSync
+import Network.Xoken.Node.P2P.Process.Tx
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
-import Network.Xoken.Node.P2P.UnconfTxSync
 import Network.Xoken.Node.Worker.Common
 import Network.Xoken.Node.Worker.Types
 import Network.Xoken.Transaction.Common

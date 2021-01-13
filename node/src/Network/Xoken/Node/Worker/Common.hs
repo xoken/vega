@@ -31,7 +31,43 @@ import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Types
 import Network.Xoken.Transaction.Common
 import Prelude as P
+import Control.Concurrent.MVar
+import Control.Exception
+import Control.Monad.Reader
+import Data.Bits
+import qualified Data.ByteString as B
+import Data.ByteString.Builder
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.Char8 as LC
+import Data.Int
+import Data.Serialize as S
+import Data.Word
+import Network.Socket
+import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
+import Network.Xoken.Block.Common
+import Network.Xoken.Node.Exception
+import System.Random
 import System.Logger as LG
+
+receiveMessage :: (MonadIO m) => Socket -> m BSL.ByteString
+receiveMessage sock = do
+    lp <- recvAll sock 4
+    case runGetLazy getWord32le lp of
+        Right x -> do
+            payload <- recvAll sock (fromIntegral x)
+            return payload
+        Left e -> P.error e
+
+sendMessage :: (MonadIO m) => Socket -> MVar () -> BSL.ByteString -> m ()
+sendMessage sock writeLock payload = do
+    let len = LC.length payload
+        prefix = toLazyByteString $ (word32LE $ fromIntegral len)
+    liftIO $
+        withMVar
+            writeLock
+            (\_ -> do
+                 LB.sendAll sock prefix
+                 LB.sendAll sock payload)
 
 zRPCRequestDispatcher :: (HasXokenNodeEnv env m, MonadIO m) => ZRPCRequestParam -> Worker -> m (ZRPCResponse)
 zRPCRequestDispatcher param wrk = do
