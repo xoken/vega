@@ -47,9 +47,9 @@ import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.HTTP.Server
-import Network.Xoken.Node.P2P.Sync
 import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.P2P.Process.Block
+import Network.Xoken.Node.P2P.Sync
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.TLSServer
 import Network.Xoken.Node.Worker.Listener
@@ -131,26 +131,25 @@ runThreads config nodeConf bp2p lg certPaths = do
         --
         -- current node
         let node = vegaNode nodeConf
-            normalizedClstr =
-                sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) (node:vegaCluster nodeConf)
+            normalizedClstr = sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) (node : vegaCluster nodeConf)
         --
         -- run vegaCluster
         runAppM
             serviceEnv
             (withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
-                    if (_nodeType node == NC.Master)
-                        then do
-                            withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
-                                withAsync setupSeedPeerConnection $ \_ -> do
-                                    withAsync runEgressChainSync $ \_ -> do
-                                        withAsync runBlockCacheQueue $ \_ -> do
-                                            withAsync (handleNewConnectionRequest epHandler) $ \_ -> do
-                                                withAsync runPeerSync $ \_ -> do
-                                                    withAsync runSyncStatusChecker $ \_ -> do
-                                                        withAsync runEpochSwitcher $ \z -> do
-                                                            _ <- LA.wait z
-                                                            return ()
-                        else LA.wait y)
+                 if (_nodeType node == NC.Master)
+                     then do
+                         withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
+                             withAsync setupSeedPeerConnection $ \_ -> do
+                                 withAsync runEgressChainSync $ \_ -> do
+                                     withAsync runBlockCacheQueue $ \_ -> do
+                                         withAsync (handleNewConnectionRequest epHandler) $ \_ -> do
+                                             withAsync runPeerSync $ \_ -> do
+                                                 withAsync runSyncStatusChecker $ \_ -> do
+                                                     withAsync runEpochSwitcher $ \z -> do
+                                                         _ <- LA.wait z
+                                                         return ()
+                     else LA.wait y)
         liftIO $ putStrLn $ "node recovering from fatal DB connection failure!"
     return ()
 

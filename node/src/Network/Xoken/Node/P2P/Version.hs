@@ -1,4 +1,5 @@
 module Network.Xoken.Node.P2P.Version where
+
 import Data.Word
 import Network.Xoken.Block.Common
 import Network.Xoken.Constants

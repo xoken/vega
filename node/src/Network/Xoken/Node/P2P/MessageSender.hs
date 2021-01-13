@@ -15,12 +15,15 @@ import Control.Concurrent.STM.TVar
 import Control.Exception
 import Control.Monad.Reader
 import qualified Data.ByteString.Lazy as BSL
+import Data.ByteString.Short as BSS
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Serialize as DS
 import Network.Socket
+import qualified Network.Socket.ByteString.Lazy as LB (sendAll)
 import Network.Xoken.Block
 import Network.Xoken.Constants
+import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
@@ -29,15 +32,13 @@ import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.Version
-import Data.ByteString.Short as BSS
-import qualified Network.Socket.ByteString.Lazy as LB ( sendAll)
 import Network.Xoken.Transaction
 import System.Logger as LG
 import Xoken.NodeConfig as NC
-import Network.Xoken.Crypto.Hash
 
 encodeAndSendMessage :: MVar () -> Socket -> Network -> Message -> IO ()
-encodeAndSendMessage writeLock sock net msg = sendEncMessage writeLock sock (BSL.fromStrict . runPut . putMessage net $ msg)
+encodeAndSendMessage writeLock sock net msg =
+    sendEncMessage writeLock sock (BSL.fromStrict . runPut . putMessage net $ msg)
 
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
 sendEncMessage writeLock sock msg = withMVar writeLock (\_ -> LB.sendAll sock msg)
@@ -60,7 +61,6 @@ sendRequestMessages pr msg = do
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
 
-
 sendCompactBlockGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
 sendCompactBlockGetData pr hash = do
     lg <- getLogger
@@ -77,7 +77,6 @@ sendCompactBlockGetData pr hash = do
                 Left (e :: SomeException) -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
-
 
 sendTxGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
 sendTxGetData pr txHash = do
@@ -132,9 +131,7 @@ sendGetHeaderMessages msg = do
             let fbh = getHash256 $ getBlockHash $ head (getHeadersBL hdr)
                 md = BSS.index fbh $ BSS.length fbh - 1
                 pds =
-                    map
-                        (\p -> fromIntegral (md + p) `mod` L.length connPeers)
-                        [1 .. fromIntegral (L.length connPeers)]
+                    map (\p -> fromIntegral (md + p) `mod` L.length connPeers) [1 .. fromIntegral (L.length connPeers)]
                 indices =
                     case L.length (getHeadersBL hdr) of
                         x
@@ -162,9 +159,7 @@ broadcastToPeers msg = do
     liftIO $ putStrLn $ "Broadcasting " ++ show (msgType msg) ++ " to peers"
     bp2pEnv <- getBitcoinP2P
     peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
-    mapM_
-        (\bp -> when (bpConnected bp) $ sendRequestMessages bp msg)
-        peerMap
+    mapM_ (\bp -> when (bpConnected bp) $ sendRequestMessages bp msg) peerMap
     liftIO $ putStrLn $ "Broadcasted " ++ show (msgType msg) ++ " to peers"
 
 sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()

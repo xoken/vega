@@ -14,13 +14,14 @@ import Control.Concurrent.Async.Lifted as LA (async, concurrently_)
 import qualified Control.Concurrent.MSem as MS
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TQueue
-import qualified Data.ByteString as B
 import Control.Concurrent.STM.TVar
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad.Reader
 import Control.Monad.STM
 import Control.Monad.Trans.Control
+import Data.Bits
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.Function ((&))
@@ -43,14 +44,13 @@ import Network.Xoken.Network.Message
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.Exception
-import Data.Bits
 import Network.Xoken.Node.Env
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MessageSender
 import Network.Xoken.Node.P2P.Process.Block
-import Network.Xoken.Node.P2P.Process.Tx
 import Network.Xoken.Node.P2P.Process.Headers
+import Network.Xoken.Node.P2P.Process.Tx
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.Version
 import Network.Xoken.Node.Worker.Dispatcher
@@ -371,9 +371,9 @@ readNextMessage' peer readLock = do
                     return ()
             return (msg, ingressState)
         Nothing -> throw PeerSocketNotConnectedException
---
---
 
+--
+--
 fromBytes :: B.ByteString -> Integer
 fromBytes = B.foldl' f 0
   where
@@ -456,6 +456,7 @@ generateHeaderHash net hdr =
     if isValidPOW net hdr
         then (headerHash hdr, bhNonce hdr)
         else generateHeaderHash net (hdr {bhNonce = (bhNonce hdr + 1)})
+
 {- UNUSED?
 updateZtxiUtxo :: (HasXokenNodeEnv env m, MonadIO m) => TxHash -> BlockHash -> Word32 -> m ()
 updateZtxiUtxo txh bh ht = do
@@ -478,7 +479,6 @@ updateZtxiUtxoOutpoints op@(OutPoint txh ind) bh ht = do
             liftIO $ print $ "updateZtxiUtxoOutpoints: " ++ show (op,bh,ht)
             updateZtxiUtxoOutpoints (op {outPointIndex = ind + 1}) bh ht
 -}
-
 messageHandler ::
        (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
     => BitcoinPeer

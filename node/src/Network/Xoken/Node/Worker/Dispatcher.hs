@@ -7,6 +7,7 @@
 module Network.Xoken.Node.Worker.Dispatcher
     ( module Network.Xoken.Node.Worker.Dispatcher
     ) where
+
 import Control.Concurrent.STM
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
@@ -20,8 +21,8 @@ import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env as NEnv
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Common
 import Network.Xoken.Node.Worker.Types

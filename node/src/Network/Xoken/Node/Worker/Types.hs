@@ -5,6 +5,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 
 module Network.Xoken.Node.Worker.Types where
+
 import Codec.Serialise
 import Data.ByteString (ByteString)
 import Data.Hashable
@@ -100,7 +101,6 @@ data ZBlockHeader =
         , zBlockHeight :: !BlockHeight
         }
     deriving (Show, Generic, Eq, Serialise)
-
 
 data ZRPCError =
     ZRPCError

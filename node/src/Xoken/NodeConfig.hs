@@ -6,6 +6,7 @@
 module Xoken.NodeConfig
     ( module Xoken.NodeConfig
     ) where
+
 import Codec.Serialise
 import Control.Exception
 import Control.Monad (guard)

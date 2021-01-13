@@ -6,6 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Network.Xoken.Node.P2P.Common where
+
 import Control.Exception
 import Control.Monad.Reader
 import qualified Data.ByteString as B
@@ -14,7 +15,7 @@ import Data.Int
 import Data.Serialize as S
 import Data.Word
 import Network.Socket
-import qualified Network.Socket.ByteString.Lazy as LB (recv,)
+import qualified Network.Socket.ByteString.Lazy as LB (recv)
 import Network.Xoken.Block.Common
 import Network.Xoken.Node.Exception
 import System.Random
@@ -65,7 +66,6 @@ splitList xs = (f 1 xs, f 0 xs)
   where
     f n a = map fst . filter (odd . snd) . zip a $ [n ..]
 -}
-
 recvAll :: (MonadIO m) => Socket -> Int64 -> m BSL.ByteString
 recvAll sock len = do
     if len > 0

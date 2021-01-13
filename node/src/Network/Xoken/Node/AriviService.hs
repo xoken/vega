@@ -10,9 +10,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 --
-module Network.Xoken.Node.AriviService where
-
--- UNUSED?    
+module Network.Xoken.Node.AriviService where -- UNUSED?    
 -- globalHandlerRpc :: (HasService env m) => RPCMessage -> m (Maybe RPCMessage)
 -- globalHandlerRpc msg = do
 --     bp2pEnv <- getBitcoinP2P

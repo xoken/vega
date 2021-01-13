@@ -14,26 +14,26 @@ import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Binary as DB
+import Data.ByteString.Builder
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.Int
 import Data.List as L
 import Data.Maybe
+import Data.Serialize as S
 import GHC.Base as GHCB
+import Network.Socket
+import qualified Network.Socket.ByteString.Lazy as LB (sendAll)
 import Network.Xoken.Block.Common
 import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env as NEnv
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Types
 import Network.Xoken.Transaction.Common
 import Prelude as P
-import Data.ByteString.Builder
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Lazy.Char8 as LC
-import Data.Serialize as S
-import Network.Socket
-import qualified Network.Socket.ByteString.Lazy as LB ( sendAll)
 import System.Logger as LG
 
 receiveMessage :: (MonadIO m) => Socket -> m BSL.ByteString

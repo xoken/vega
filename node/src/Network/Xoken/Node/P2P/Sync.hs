@@ -9,7 +9,7 @@
 module Network.Xoken.Node.P2P.Sync where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async ( mapConcurrently_)
+import Control.Concurrent.Async (mapConcurrently_)
 import qualified Control.Concurrent.Async.Lifted as LA (async)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TVar
@@ -34,11 +34,11 @@ import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.Message
-import Network.Xoken.Node.P2P.MessageSender
 import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
+import Network.Xoken.Node.Exception
+import Network.Xoken.Node.P2P.MessageSender
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
 import System.Logger as LG
@@ -62,17 +62,17 @@ runPeerSync =
         let connPeers = L.filter (bpConnected . snd) (M.toList allPeers)
         if L.length connPeers < maxBitcoinPeerCount (nodeConfig bp2pEnv)
             then liftIO $
-                    mapConcurrently_
-                        (\(_, pr) ->
-                             case bpSocket pr of
-                                 Just s -> do
-                                     debug lg $ LG.msg ("sending GetAddr to " ++ show pr)
-                                     res <- liftIO $ try $ encodeAndSendMessage (bpWriteMsgLock pr) s net MGetAddr
-                                     case res of
-                                         Right () -> liftIO $ threadDelay (60 * 1000000)
-                                         Left (e :: SomeException) -> err lg $ LG.msg ("[ERROR] runPeerSync " ++ show e)
-                                 Nothing -> err lg $ LG.msg $ val "Error sending, no connections available")
-                        connPeers
+                 mapConcurrently_
+                     (\(_, pr) ->
+                          case bpSocket pr of
+                              Just s -> do
+                                  debug lg $ LG.msg ("sending GetAddr to " ++ show pr)
+                                  res <- liftIO $ try $ encodeAndSendMessage (bpWriteMsgLock pr) s net MGetAddr
+                                  case res of
+                                      Right () -> liftIO $ threadDelay (60 * 1000000)
+                                      Left (e :: SomeException) -> err lg $ LG.msg ("[ERROR] runPeerSync " ++ show e)
+                              Nothing -> err lg $ LG.msg $ val "Error sending, no connections available")
+                     connPeers
             else liftIO $ threadDelay (60 * 1000000)
 
 getBatchSizeMainnet :: Int32 -> Int32 -> [Int32]
@@ -162,12 +162,9 @@ runBlockCacheQueue =
                              case valx of
                                  Just xv -> do
                                      siza <- liftIO $ TSH.toList (fst xv)
-                                     when ((sum $ snd $ unzip siza) == snd xv)
-                                        $ liftIO $
-                                                 TSH.insert
-                                                     (blockSyncStatusMap bp2pEnv)
-                                                     (bsh)
-                                                     (BlockProcessingComplete, ht)
+                                     when ((sum $ snd $ unzip siza) == snd xv) $
+                                         liftIO $
+                                         TSH.insert (blockSyncStatusMap bp2pEnv) (bsh) (BlockProcessingComplete, ht)
                                  Nothing -> return ())
                         syt
                     --
@@ -257,14 +254,14 @@ runBlockCacheQueue =
                                 syt
                             return Nothing
                         else if L.null processingIncomplete
-                                then return $ mkBlkInf $ getHead processingIncomplete
-                                else if L.null recvTimedOut
-                                         then return $ mkBlkInf $ getHead recvTimedOut
-                                         else if L.null recvNotStarted
-                                                  then return $ mkBlkInf $ getHead recvNotStarted
-                                                  else if L.null unsent
-                                                           then return $ mkBlkInf $ getHead unsent
-                                                           else return Nothing
+                                 then return $ mkBlkInf $ getHead processingIncomplete
+                                 else if L.null recvTimedOut
+                                          then return $ mkBlkInf $ getHead recvTimedOut
+                                          else if L.null recvNotStarted
+                                                   then return $ mkBlkInf $ getHead recvNotStarted
+                                                   else if L.null unsent
+                                                            then return $ mkBlkInf $ getHead unsent
+                                                            else return Nothing
         case retn of
             Just bbi -> do
                 latest <- liftIO $ newIORef True
@@ -272,19 +269,18 @@ runBlockCacheQueue =
                 mapM_
                     (\pr -> do
                          ltst <- liftIO $ readIORef latest
-                         when ltst $
-                             do trace lg $ LG.msg $ "try putting mvar.. " ++ show bbi
-                                fl <- liftIO $ tryPutMVar (blockFetchQueue pr) bbi
-                                when fl $
-                                     do
-                                         trace lg $ LG.msg $ "done putting mvar.. " ++ show bbi
-                                         !tm <- liftIO getCurrentTime
-                                         liftIO $
-                                             TSH.insert
-                                                 (blockSyncStatusMap bp2pEnv)
-                                                 (biBlockHash bbi)
-                                                 (RequestSent tm, biBlockHeight bbi)
-                                         liftIO $ writeIORef latest False)
+                         when ltst $ do
+                             trace lg $ LG.msg $ "try putting mvar.. " ++ show bbi
+                             fl <- liftIO $ tryPutMVar (blockFetchQueue pr) bbi
+                             when fl $ do
+                                 trace lg $ LG.msg $ "done putting mvar.. " ++ show bbi
+                                 !tm <- liftIO getCurrentTime
+                                 liftIO $
+                                     TSH.insert
+                                         (blockSyncStatusMap bp2pEnv)
+                                         (biBlockHash bbi)
+                                         (RequestSent tm, biBlockHeight bbi)
+                                 liftIO $ writeIORef latest False)
                     sortedPeers
             Nothing -> trace lg $ LG.msg $ "nothing yet" ++ ""
         --
@@ -306,7 +302,6 @@ sortPeers peers = do
                      Nothing -> return longlongago)
             peers
     return $ map snd $ L.sortBy (\(a, _) (b, _) -> compare b a) (zip ts peers)
-
 --
 -- Get ZUT from outpoint
 -- getZUTFromOutpoint ::

@@ -29,12 +29,12 @@ import qualified Network.Simple.TCP.TLS as TLS
 import Network.Socket
 import qualified Network.TLS as NTLS
 import Network.Xoken.Node.Data
-import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env as NEnv
+import Network.Xoken.Node.Exception
+import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.XokenService
 import Prelude as P
 import System.Logger as LG
-import Network.Xoken.Node.P2P.PeerManager
 import Text.Printf
 import Xoken.NodeConfig
 

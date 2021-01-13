@@ -30,7 +30,6 @@ import GHC.Generics
 import Prelude as P
 import Xoken as H
 
-
 deriving instance Store Tx
 
 deriving instance Store TxIn
@@ -50,6 +49,7 @@ deriving instance Store BlockHeader
 deriving instance Store BlockHash
 
 deriving instance Store Hash256
+
 --
 --
 --
@@ -559,6 +559,7 @@ getJsonRPCErrorCode err =
         INVALID_PARAMS -> -32602
         INTERNAL_ERROR -> -32603
         PARSE_ERROR -> -32700
+
 {- UNUSED?
 coinbaseTxToMessage :: C.ByteString -> String
 coinbaseTxToMessage s =
