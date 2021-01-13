@@ -6,11 +6,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE BangPatterns #-}
 
-module Network.Xoken.Node.P2P.BlockSync
-    ( peerBlockSync
-    , runPeerSync
-    , runBlockCacheQueue
-    ) where
+module Network.Xoken.Node.P2P.Sync where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async ( mapConcurrently_)
@@ -48,79 +44,13 @@ import Network.Xoken.Node.Worker.Dispatcher
 import System.Logger as LG
 import Xoken.NodeConfig as NC
 
-produceGetDataMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m (Message)
-produceGetDataMessage peer = do
+runEgressChainSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+runEgressChainSync = do
     lg <- getLogger
-    debug lg $ LG.msg $ "Block - produceGetDataMessage - called." ++ show peer
-    bl <- liftIO $ takeMVar (blockFetchQueue peer)
-    trace lg $ LG.msg $ "took mvar.. " ++ (show bl) ++ (show peer)
-    let gd = GetData [InvVector InvBlock $ getBlockHash $ biBlockHash bl]
-    debug lg $ LG.msg $ "GetData req: " ++ show gd
-    return (MGetData gd)
-
-peerBlockSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m ()
-peerBlockSync peer =
-    forever $ do
-        lg <- getLogger
-        bp2pEnv <- getBitcoinP2P
-        trace lg $ LG.msg $ ("peer block sync : " ++ (show peer))
-        !tm <- liftIO $ getCurrentTime
-        let tracker = statsTracker peer
-        fw <- liftIO $ readIORef $ ptBlockFetchWindow tracker
-        recvtm <- liftIO $ readIORef $ ptLastTxRecvTime tracker
-        sendtm <- liftIO $ readIORef $ ptLastGetDataSent tracker
-        let staleTime = fromInteger $ fromIntegral (unresponsivePeerConnTimeoutSecs $ nodeConfig bp2pEnv)
-        case recvtm of
-            Just rt -> do
-                if (fw == 0) && (diffUTCTime tm rt < staleTime)
-                    then do
-                        msg <- produceGetDataMessage peer
-                        res <- LE.try $ sendRequestMessages peer msg
-                        case res of
-                            Right () -> do
-                                debug lg $ LG.msg $ val "updating state."
-                                liftIO $ writeIORef (ptLastGetDataSent tracker) $ Just tm
-                                liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z + 1)
-                            Left (e :: SomeException) -> do
-                                err lg $ LG.msg ("[ERROR] peerBlockSync " ++ show e)
-                                throw e
-                    else if (diffUTCTime tm rt > staleTime)
-                             then do
-                                 debug lg $ LG.msg ("Removing unresponsive peer. (1)" ++ show peer)
-                                 case bpSocket peer of
-                                     Just sock -> liftIO $ NS.close $ sock
-                                     Nothing -> return ()
-                                 liftIO $ atomically $ modifyTVar' (bitcoinPeers bp2pEnv) (M.delete (bpAddress peer))
-                                 throw UnresponsivePeerException
-                             else return ()
-            Nothing -> do
-                case sendtm of
-                    Just st -> do
-                        if (diffUTCTime tm st > staleTime)
-                            then do
-                                debug lg $ LG.msg ("Removing unresponsive peer. (2)" ++ show peer)
-                                case bpSocket peer of
-                                    Just sock -> liftIO $ NS.close $ sock
-                                    Nothing -> return ()
-                                liftIO $ atomically $ modifyTVar' (bitcoinPeers bp2pEnv) (M.delete (bpAddress peer))
-                                throw UnresponsivePeerException
-                            else return ()
-                    Nothing -> do
-                        if (fw == 0)
-                            then do
-                                msg <- produceGetDataMessage peer
-                                res <- LE.try $ sendRequestMessages peer msg
-                                case res of
-                                    Right () -> do
-                                        debug lg $ LG.msg $ val "updating state."
-                                        liftIO $ writeIORef (ptLastGetDataSent tracker) $ Just tm
-                                        liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z + 1)
-                                    Left (e :: SomeException) -> do
-                                        err lg $ LG.msg ("[ERROR] peerBlockSync " ++ show e)
-                                        throw e
-                            else return ()
-        liftIO $ threadDelay (10000) -- 0.01 sec
-        return ()
+    res1 <- LE.try $ forever $ produceGetHeadersMessage >>= sendGetHeaderMessages
+    case res1 of
+        Right () -> return ()
+        Left (e :: SomeException) -> err lg $ LG.msg $ "[ERROR] runEgressChainSync " ++ show e
 
 runPeerSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runPeerSync =
@@ -129,22 +59,20 @@ runPeerSync =
         bp2pEnv <- getBitcoinP2P
         let net = bitcoinNetwork $ nodeConfig bp2pEnv
         allPeers <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
-        let connPeers = L.filter (\x -> bpConnected (snd x)) (M.toList allPeers)
-        if L.length connPeers < (maxBitcoinPeerCount $ nodeConfig bp2pEnv)
-            then do
-                liftIO $
+        let connPeers = L.filter (bpConnected . snd) (M.toList allPeers)
+        if L.length connPeers < maxBitcoinPeerCount (nodeConfig bp2pEnv)
+            then liftIO $
                     mapConcurrently_
                         (\(_, pr) ->
-                             case (bpSocket pr) of
+                             case bpSocket pr of
                                  Just s -> do
-                                     let em = runPut . putMessage net $ (MGetAddr)
                                      debug lg $ LG.msg ("sending GetAddr to " ++ show pr)
-                                     res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
+                                     res <- liftIO $ try $ encodeAndSendMessage (bpWriteMsgLock pr) s net MGetAddr
                                      case res of
                                          Right () -> liftIO $ threadDelay (60 * 1000000)
                                          Left (e :: SomeException) -> err lg $ LG.msg ("[ERROR] runPeerSync " ++ show e)
                                  Nothing -> err lg $ LG.msg $ val "Error sending, no connections available")
-                        (connPeers)
+                        connPeers
             else liftIO $ threadDelay (60 * 1000000)
 
 getBatchSizeMainnet :: Int32 -> Int32 -> [Int32]

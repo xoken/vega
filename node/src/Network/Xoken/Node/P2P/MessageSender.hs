@@ -20,6 +20,7 @@ import qualified Data.Map.Strict as M
 import Data.Serialize as DS
 import Network.Socket
 import Network.Xoken.Block
+import Network.Xoken.Constants
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
@@ -35,6 +36,8 @@ import System.Logger as LG
 import Xoken.NodeConfig as NC
 import Network.Xoken.Crypto.Hash
 
+encodeAndSendMessage :: MVar () -> Socket -> Network -> Message -> IO ()
+encodeAndSendMessage writeLock sock net msg = sendEncMessage writeLock sock (BSL.fromStrict . runPut . putMessage net $ msg)
 
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
 sendEncMessage writeLock sock msg = withMVar writeLock (\_ -> LB.sendAll sock msg)
@@ -47,8 +50,7 @@ sendRequestMessages pr msg = do
     debug lg $ LG.msg $ val "sendRequestMessages - called."
     case bpSocket pr of
         Just s -> do
-            let em = runPut . putMessage net $ msg
-            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
+            res <- liftIO $ try $ encodeAndSendMessage (bpWriteMsgLock pr) s net msg
             case res of
                 Right () -> return ()
                 Left (e :: SomeException) ->
@@ -67,10 +69,9 @@ sendCompactBlockGetData pr hash = do
     let gd = GetData [InvVector InvCompactBlock hash]
         msg = MGetData gd
     debug lg $ LG.msg $ "sendCompactBlockGetData: " ++ show gd
-    case (bpSocket pr) of
+    case bpSocket pr of
         Just s -> do
-            let em = runPut . putMessage net $ msg
-            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
+            res <- liftIO $ try $ encodeAndSendMessage (bpWriteMsgLock pr) s net msg
             case res of
                 Right _ -> liftIO $ TSH.insert (ingressCompactBlocks bp2pEnv) (BlockHash hash) True
                 Left (e :: SomeException) -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
@@ -88,8 +89,7 @@ sendTxGetData pr txHash = do
     debug lg $ LG.msg $ "sendTxGetData: " ++ show gd
     case bpSocket pr of
         Just s -> do
-            let em = runPut . putMessage net $ msg
-            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
+            res <- liftIO $ try $ encodeAndSendMessage (bpWriteMsgLock pr) s net msg
             case res of
                 Right _ ->
                     liftIO $
@@ -148,8 +148,7 @@ sendGetHeaderMessages msg = do
                          let pr = snd $ connPeers !! z
                          case bpSocket pr of
                              Just q -> do
-                                 let em = runPut . putMessage net $ msg
-                                 liftIO $ sendEncMessage (bpWriteMsgLock pr) q (BSL.fromStrict em)
+                                 liftIO $ encodeAndSendMessage (bpWriteMsgLock pr) q net msg
                                  debug lg $ LG.msg ("sending out GetHeaders: " ++ show (bpAddress pr))
                              Nothing -> debug lg $ LG.msg $ val "Error sending, no connections available")
                     indices
@@ -164,10 +163,7 @@ broadcastToPeers msg = do
     bp2pEnv <- getBitcoinP2P
     peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
     mapM_
-        (\bp ->
-             if bpConnected bp
-                 then sendRequestMessages bp msg
-                 else return ())
+        (\bp -> when (bpConnected bp) $ sendRequestMessages bp msg)
         peerMap
     liftIO $ putStrLn $ "Broadcasted " ++ show (msgType msg) ++ " to peers"
 

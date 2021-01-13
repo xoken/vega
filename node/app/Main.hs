@@ -47,8 +47,7 @@ import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.HTTP.Server
-import Network.Xoken.Node.P2P.BlockSync
-import Network.Xoken.Node.P2P.ChainSync
+import Network.Xoken.Node.P2P.Sync
 import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.P2P.Process.Block
 import Network.Xoken.Node.P2P.Types

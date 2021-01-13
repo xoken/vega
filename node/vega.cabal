@@ -32,13 +32,12 @@ executable vega
       Network.Xoken.Node.Data.ThreadSafeHashTable
       Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
       Network.Xoken.Node.AriviService
-      Network.Xoken.Node.P2P.ChainSync
       Network.Xoken.Node.P2P.Types
       Network.Xoken.Node.DB
       Network.Xoken.Node.Exception
       Network.Xoken.Node.Env
       Network.Xoken.Node.GraphDB
-      Network.Xoken.Node.P2P.BlockSync
+      Network.Xoken.Node.P2P.Sync
       Network.Xoken.Node.P2P.Common
       Network.Xoken.Node.P2P.MerkleBuilder
       Network.Xoken.Node.P2P.MessageSender
