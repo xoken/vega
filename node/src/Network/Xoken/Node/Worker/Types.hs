@@ -1,12 +1,8 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE StandaloneDeriving #-}
 
 module Network.Xoken.Node.Worker.Types where
 import Codec.Serialise
@@ -14,7 +10,6 @@ import Data.ByteString (ByteString)
 import Data.Hashable
 import Data.Int
 import Data.Maybe
-import Data.Store
 import Data.Word
 import GHC.Generics
 import Network.Xoken.Node.Data

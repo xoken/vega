@@ -13,17 +13,12 @@ import Control.Concurrent.STM.TVar
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad.Reader
-import Control.Monad.Extra
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List as L
 import Data.Maybe
-import Data.Serialize
 import Data.Word
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Crypto.Hash
-import Network.Xoken.Network.Common
-import Network.Xoken.Network.Message
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH

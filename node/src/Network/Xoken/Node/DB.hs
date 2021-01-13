@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 
 module Network.Xoken.Node.DB where
 
@@ -36,7 +37,7 @@ conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = T
 
 cfStr = ["outputs", "ep_transactions_0", "ep_transactions_1", "ep_transactions_2", "blocktree", "provisional_blockhash"]
 
-columnFamilies = fmap (\x -> (x, conf)) cfStr
+columnFamilies = fmap (, conf) cfStr
 
 withDBCF path = R.withDBCF path conf columnFamilies
 

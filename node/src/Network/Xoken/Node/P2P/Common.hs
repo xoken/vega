@@ -2,26 +2,19 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Network.Xoken.Node.P2P.Common where
-
-import Control.Concurrent.MVar
 import Control.Exception
 import Control.Monad.Reader
-import Data.Bits
 import qualified Data.ByteString as B
-import Data.ByteString.Builder
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.Int
 import Data.Serialize as S
 import Data.Word
 import Network.Socket
-import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
+import qualified Network.Socket.ByteString.Lazy as LB (recv,)
 import Network.Xoken.Block.Common
 import Network.Xoken.Node.Exception
 import System.Random

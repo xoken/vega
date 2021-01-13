@@ -58,7 +58,8 @@ executable vega
       Network.Xoken.Node.Worker.Types
       Network.Xoken.Node.XokenService
 
-  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N -fplugin=Smuggler.Plugin
+  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N
+  -- -fplugin=Smuggler.Plugin
     -- -Wunused-matches -Wunused-binds -Wunused-imports
 
   hs-source-dirs:

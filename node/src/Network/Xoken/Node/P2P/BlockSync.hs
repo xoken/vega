@@ -2,11 +2,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE BangPatterns #-}
 
 module Network.Xoken.Node.P2P.BlockSync
@@ -16,9 +13,8 @@ module Network.Xoken.Node.P2P.BlockSync
     ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled, mapConcurrently_)
+import Control.Concurrent.Async ( mapConcurrently_)
 import qualified Control.Concurrent.Async.Lifted as LA (async)
-import Control.Concurrent.Event as EV
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TVar
 import Control.Exception
@@ -28,39 +24,27 @@ import Control.Monad.Reader
 import Control.Monad.STM
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BSL
-import Data.Function ((&))
-import qualified Data.HashMap.Strict as HM
 import Data.IORef
 import Data.Int
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import qualified Data.Sequence as SQ
 import Data.Serialize
 import Data.Time.Calendar
 import Data.Time.Clock
-import Data.Word
 import qualified Network.Socket as NS
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
-import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
-import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.P2P.MessageSender
 import Network.Xoken.Node.DB
-import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.P2P.Common
-import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
-import Network.Xoken.Transaction.Common
-import Streamly as S
-import qualified Streamly.Prelude as S
 import System.Logger as LG
 import Xoken.NodeConfig as NC
 

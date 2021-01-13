@@ -10,49 +10,28 @@ module Network.Xoken.Node.P2P.MessageSender where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async
 import Control.Concurrent.Async.Lifted as LA
-import qualified Control.Concurrent.MSem as MS
 import Control.Concurrent.MVar
-import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM.TVar
 import Control.Exception
-import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad.Reader
-import Control.Monad.STM
-import Control.Monad.Trans.Control
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Lazy.Char8 as LC
-import Data.Function ((&))
-import Data.IORef
-import Data.Int
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
-import Data.Maybe
 import Data.Serialize as DS
-import Data.Time.Clock.POSIX
-import Data.Word
 import Network.Socket
-import Network.Xoken.Address
 import Network.Xoken.Block
-import Network.Xoken.Constants
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.DB
-import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.Version
-import Network.Xoken.Node.Worker.Dispatcher
 import Data.ByteString.Short as BSS
-import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
+import qualified Network.Socket.ByteString.Lazy as LB ( sendAll)
 import Network.Xoken.Transaction
-import Streamly as S
-import qualified Streamly.Prelude as S
 import System.Logger as LG
-import System.Random
 import Xoken.NodeConfig as NC
 import Network.Xoken.Crypto.Hash
 

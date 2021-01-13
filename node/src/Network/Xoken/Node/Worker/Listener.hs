@@ -1,9 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module Network.Xoken.Node.Worker.Listener
     ( module Network.Xoken.Node.Worker.Listener
@@ -30,13 +28,10 @@ import GHC.Base as GHCB
 import Network.Socket as NS
 import Network.Xoken.Block.Headers
 import Network.Xoken.Node.DB
-import Network.Xoken.Node.Data
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env as NEnv
-import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.Process.Tx
-import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Common
 import Network.Xoken.Node.Worker.Types

@@ -1,9 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module Network.Xoken.Node.Worker.Common where
 
@@ -22,7 +20,6 @@ import Data.Maybe
 import GHC.Base as GHCB
 import Network.Xoken.Block.Common
 import Network.Xoken.Node.DB
-import Network.Xoken.Node.Data
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env as NEnv
@@ -31,22 +28,12 @@ import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Types
 import Network.Xoken.Transaction.Common
 import Prelude as P
-import Control.Concurrent.MVar
-import Control.Exception
-import Control.Monad.Reader
-import Data.Bits
-import qualified Data.ByteString as B
 import Data.ByteString.Builder
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as LC
-import Data.Int
 import Data.Serialize as S
-import Data.Word
 import Network.Socket
-import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
-import Network.Xoken.Block.Common
-import Network.Xoken.Node.Exception
-import System.Random
+import qualified Network.Socket.ByteString.Lazy as LB ( sendAll)
 import System.Logger as LG
 
 receiveMessage :: (MonadIO m) => Socket -> m BSL.ByteString

@@ -46,7 +46,6 @@ import Network.Xoken.Node.Exception
 import Data.Bits
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.BlockSync
-import Network.Xoken.Node.P2P.ChainSync
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MessageSender
 import Network.Xoken.Node.P2P.Process.Block

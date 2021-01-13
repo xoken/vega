@@ -8,36 +8,19 @@
 module Network.Xoken.Node.P2P.Process.Block where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (AsyncCancelled, mapConcurrently_)
-import qualified Control.Concurrent.Async.Lifted as LA (async)
-import Control.Concurrent.Event as EV
-import Control.Concurrent.MVar
-import Control.Concurrent.STM.TVar
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
-import Control.Monad
 import Control.Monad.Reader
-import Control.Monad.STM
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as BSL
 import Data.Function ((&))
 import qualified Data.HashMap.Strict as HM
 import Data.IORef
-import Data.Int
 import qualified Data.List as L
-import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Sequence as SQ
-import Data.Serialize
-import Data.Time.Calendar
-import Data.Time.Clock
 import Data.Word
-import qualified Network.Socket as NS
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
-import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
-import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.P2P.MessageSender
@@ -46,7 +29,6 @@ import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Process.Tx
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types

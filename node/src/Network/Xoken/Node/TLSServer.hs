@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -32,7 +31,6 @@ import qualified Network.TLS as NTLS
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env as NEnv
-import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.XokenService
 import Prelude as P
 import System.Logger as LG
