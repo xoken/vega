@@ -35,8 +35,8 @@ import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.Exception
-import Network.Xoken.Node.P2P.MessageHandler
-import Network.Xoken.Node.P2P.MessageSender
+import Network.Xoken.Node.P2P.Message.Handler
+import Network.Xoken.Node.P2P.Message.Sender
 import Network.Xoken.Node.P2P.Socket
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher

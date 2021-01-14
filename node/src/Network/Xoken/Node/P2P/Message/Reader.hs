@@ -6,7 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Network.Xoken.Node.P2P.MessageReader where
+module Network.Xoken.Node.P2P.Message.Reader where
 
 import qualified Control.Concurrent.MSem as MS
 import Control.Concurrent.MVar

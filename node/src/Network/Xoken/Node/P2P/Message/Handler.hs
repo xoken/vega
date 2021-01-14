@@ -6,7 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Network.Xoken.Node.P2P.MessageHandler where
+module Network.Xoken.Node.P2P.Message.Handler where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async.Lifted as LA (async, concurrently_)
@@ -36,8 +36,8 @@ import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.Exception
-import Network.Xoken.Node.P2P.MessageReader
-import Network.Xoken.Node.P2P.MessageSender
+import Network.Xoken.Node.P2P.Message.Reader
+import Network.Xoken.Node.P2P.Message.Sender
 import Network.Xoken.Node.P2P.Process.Block
 import Network.Xoken.Node.P2P.Process.Headers
 import Network.Xoken.Node.P2P.Process.Tx

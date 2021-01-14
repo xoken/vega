@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Network.Xoken.Node.P2P.MessageSender where
+module Network.Xoken.Node.P2P.Message.Sender where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async

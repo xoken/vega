@@ -22,8 +22,6 @@ import Data.Time.Clock.POSIX
 import Data.Word
 import Network.Xoken.Address
 import Network.Xoken.Block
-import Network.Xoken.Block.Common
-import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
@@ -36,12 +34,11 @@ import Network.Xoken.Node.Env
 import Network.Xoken.Node.Exception
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
-import Network.Xoken.Node.P2P.MessageSender
+import Network.Xoken.Node.P2P.Message.Sender
 import Network.Xoken.Node.P2P.Process.Tx
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
 import Network.Xoken.Transaction
-import Network.Xoken.Transaction.Common
 import Streamly as S
 import qualified Streamly.Prelude as S
 import System.Logger as LG

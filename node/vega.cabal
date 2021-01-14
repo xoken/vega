@@ -41,9 +41,9 @@ executable vega
       Network.Xoken.Node.P2P.Socket
       Network.Xoken.Node.P2P.Common
       Network.Xoken.Node.P2P.MerkleBuilder
-      Network.Xoken.Node.P2P.MessageHandler
-      Network.Xoken.Node.P2P.MessageReader
-      Network.Xoken.Node.P2P.MessageSender
+      Network.Xoken.Node.P2P.Message.Handler
+      Network.Xoken.Node.P2P.Message.Reader
+      Network.Xoken.Node.P2P.Message.Sender
       Network.Xoken.Node.P2P.Process.Headers
       Network.Xoken.Node.P2P.Process.Block
       Network.Xoken.Node.P2P.Process.Tx
