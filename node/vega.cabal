@@ -32,27 +32,36 @@ executable vega
       Network.Xoken.Node.Data.ThreadSafeHashTable
       Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
       Network.Xoken.Node.AriviService
-      Network.Xoken.Node.P2P.ChainSync
       Network.Xoken.Node.P2P.Types
       Network.Xoken.Node.DB
+      Network.Xoken.Node.Exception
       Network.Xoken.Node.Env
       Network.Xoken.Node.GraphDB
-      Network.Xoken.Node.P2P.BlockSync
+      Network.Xoken.Node.P2P.Sync
+      Network.Xoken.Node.P2P.Socket
       Network.Xoken.Node.P2P.Common
       Network.Xoken.Node.P2P.MerkleBuilder
-      Network.Xoken.Node.P2P.PeerManager
-      Network.Xoken.Node.WorkerListener
+      Network.Xoken.Node.P2P.Message.Handler
+      Network.Xoken.Node.P2P.Message.Reader
+      Network.Xoken.Node.P2P.Message.Sender
+      Network.Xoken.Node.P2P.Process.Headers
+      Network.Xoken.Node.P2P.Process.Block
+      Network.Xoken.Node.P2P.Process.Tx
+      Network.Xoken.Node.P2P.Version
       Network.Xoken.Node.HTTP.Types
       Network.Xoken.Node.HTTP.Server
       Network.Xoken.Node.Service.Chain
       Network.Xoken.Node.Service.Mining
       Network.Xoken.Node.TLSServer
-      Network.Xoken.Node.WorkerDispatcher
-      Network.Xoken.Node.P2P.UnconfTxSync
       Network.Xoken.Node.Tx.Protocol
+      Network.Xoken.Node.Worker.Common
+      Network.Xoken.Node.Worker.Dispatcher
+      Network.Xoken.Node.Worker.Listener
+      Network.Xoken.Node.Worker.Types
       Network.Xoken.Node.XokenService
 
-  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N
+  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N -fplugin=Smuggler.Plugin
+    -- -Wunused-matches -Wunused-binds -Wunused-imports
 
   hs-source-dirs:
       app, src
@@ -138,6 +147,7 @@ executable vega
     , store
     , siphash
     , uuid
+    , smuggler
     
   default-language: Haskell2010
 

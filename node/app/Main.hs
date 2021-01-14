@@ -1,11 +1,8 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -16,120 +13,57 @@
 
 import Arivi.Crypto.Utils.PublicKey.Signature as ACUPS
 import Arivi.Crypto.Utils.PublicKey.Utils
-import Arivi.Crypto.Utils.Random
-import Arivi.Env
-import Arivi.Network
-import Arivi.P2P
 import qualified Arivi.P2P.Config as Config
 import Arivi.P2P.Kademlia.Types
-import Arivi.P2P.P2PEnv as PE hiding (option)
-import Arivi.P2P.PubSub.Types
-import Arivi.P2P.RPC.Types
-import Arivi.P2P.ServiceRegistry
-import qualified Codec.Serialise as CBOR
-import Control.Arrow
-import Control.Concurrent (threadDelay)
 import Control.Concurrent
 import Control.Concurrent.Async as A (async)
-import Control.Concurrent.Async.Lifted as LA (race, wait, withAsync)
-import Control.Concurrent.Event as EV
+import Control.Concurrent.Async.Lifted as LA (wait, withAsync)
 import Control.Concurrent.MSem as MS
-import Control.Concurrent.MVar
-import Control.Concurrent.QSem
 import Control.Concurrent.STM.TVar
-import Control.Exception (throw)
-import Control.Monad
 import Control.Monad
 import Control.Monad.Base
 import Control.Monad.Catch
 import Control.Monad.Except
-import Control.Monad.Logger
-import Control.Monad.Loops
 import Control.Monad.Reader
 import qualified Control.Monad.STM as CMS (atomically)
 import Control.Monad.Trans.Control
-import Control.Monad.Trans.Maybe
-import Data.Aeson.Encoding (encodingToLazyByteString, fromEncoding)
-import Data.Bits
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Base16 as B16
-import Data.ByteString.Base64 as B64
-import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as C
-import qualified Data.ByteString.Lazy as L
-import qualified Data.ByteString.Lazy.Char8 as CL
 import qualified Data.ByteString.Short as BSS
-import Data.Char
-import Data.Default
-import Data.Default
 import Data.Function
-import Data.Functor.Identity
 import Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
-import Data.IORef
-import Data.Int
 import Data.List
 import Data.Map.Strict as M
 import Data.Maybe as DM
-import Data.Pool
-import Data.Serialize as Serialize
 import Data.Serialize as S
-import Data.String.Conv
-import Data.String.Conversions
 import qualified Data.Text as DT
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as DTE
-import qualified Data.Text.Lazy as TL
-import Data.Time.Calendar
 import Data.Time.Clock
-import Data.Time.Clock.POSIX
-import Data.Typeable
-import Data.Version
-import Data.Word (Word32)
-import Data.Word
-import qualified Database.Bolt as BT
 import qualified Database.RocksDB as R hiding (rocksDB)
-import Network.Simple.TCP
-import Network.Socket
 import Network.Xoken.Block.Headers
-import Network.Xoken.Node.AriviService
-import Network.Xoken.Node.Data
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.HTTP.Server
-import Network.Xoken.Node.P2P.BlockSync
-import Network.Xoken.Node.P2P.ChainSync
-import Network.Xoken.Node.P2P.Common
-import Network.Xoken.Node.P2P.PeerManager
+import Network.Xoken.Node.P2P.Process.Block
+import Network.Xoken.Node.P2P.Sync
 import Network.Xoken.Node.P2P.Types
-import Network.Xoken.Node.Service.Chain
 import Network.Xoken.Node.TLSServer
-import Network.Xoken.Node.WorkerListener
+import Network.Xoken.Node.Worker.Listener
 import Options.Applicative
-import Paths_vega as P
 import Prelude as P
-import qualified Snap as Snap
-import StmContainers.Map as SM
+import qualified Snap
 import System.Directory (doesDirectoryExist, doesFileExist)
-import System.Environment (getArgs)
-import System.Exit
-import System.FilePath
-import System.IO.Unsafe
 import qualified System.Logger as LG
-import qualified System.Logger.Class as LGC
 import System.Posix.Daemon
-import System.Random
-import System.ZMQ4 as Z
-import Text.Read (readMaybe)
 import Xoken
-import Xoken.Node
 import Xoken.NodeConfig as NC
 
 newtype AppM a =
-    AppM (ReaderT (ServiceEnv) (IO) a)
-    deriving (Functor, Applicative, Monad, MonadReader (ServiceEnv), MonadIO, MonadThrow, MonadCatch)
+    AppM (ReaderT ServiceEnv IO a)
+    deriving (Functor, Applicative, Monad, MonadReader ServiceEnv, MonadIO, MonadThrow, MonadCatch)
 
 deriving instance MonadBase IO AppM
 
@@ -150,13 +84,6 @@ instance HasLogger AppM where
 runAppM :: ServiceEnv -> AppM a -> IO a
 runAppM env (AppM app) = runReaderT app env
 
-data ConfigException
-    = ConfigParseException
-    | RandomSecretKeyException
-    deriving (Eq, Ord, Show)
-
-instance Exception ConfigException
-
 type HashTable k v = H.BasicHashTable k v
 
 defaultConfig :: IO ()
@@ -171,25 +98,20 @@ defaultConfig = do
             Config.Config 5678 5678 sk [bootstrapPeer] (generateNodeId sk) "127.0.0.1" (T.pack "./arivi.log") 20 5 3
     Config.makeConfig config "./arivi-config.yaml"
 
-conf :: R.Config
-conf = def {R.createIfMissing = True, R.errorIfExists = False, R.bloomFilter = True, R.prefixLength = Just 3}
-
-cfStr = ["outputs", "ep_outputs_odd", "ep_outputs_even", "ep_transactions_odd", "ep_transactions_even", "transactions", "tx", "blocktree"]
-
-columnFamilies = fmap (\x -> (x, conf)) cfStr
-
-withDBCF path = R.withDBCF path conf columnFamilies
-
 runThreads :: Config.Config -> NC.NodeConfig -> BitcoinP2P -> LG.Logger -> [FilePath] -> IO ()
 runThreads config nodeConf bp2p lg certPaths = do
     withDBCF "xdb" $ \rkdb -> do
         let cfZip = zip cfStr (R.columnFamilies rkdb)
             btcf = snd $ fromJust $ Data.List.find ((== "blocktree") . fst) cfZip
+            pcf = snd $ fromJust $ Data.List.find ((== "provisional_blockhash") . fst) cfZip
         hm <- repopulateBlockTree (bitcoinNetwork nodeConf) rkdb btcf
-        nh <- case hm of
+        nh <-
+            case hm of
                 Just h -> CMS.atomically $ swapTVar (blockTree bp2p) h
                 Nothing -> readTVarIO (blockTree bp2p) -- TODO: handled Nothing due to errors
-        cfM <- TSH.fromList 1 $ cfZip
+        pred <- fetchPredecessorsIO rkdb pcf nh
+        CMS.atomically $ swapTVar (predecessors bp2p) pred
+        cfM <- TSH.fromList 1 cfZip
         let dbh = DatabaseHandles rkdb cfM
         let allegoryEnv = AllegoryEnv $ allegoryVendorSecretKey nodeConf
         let xknEnv = XokenNodeEnv bp2p dbh lg allegoryEnv
@@ -208,26 +130,25 @@ runThreads config nodeConf bp2p lg certPaths = do
         --
         -- current node
         let node = vegaNode nodeConf
-            normalizedClstr =
-                sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) ([node] ++ vegaCluster nodeConf)
+            normalizedClstr = sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) (node : vegaCluster nodeConf)
         --
         -- run vegaCluster
         runAppM
             serviceEnv
-            (do bp2pEnv <- getBitcoinP2P
-                withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
-                    if (_nodeType node == NC.Master)
-                        then do
-                            withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
-                                withAsync setupSeedPeerConnection $ \_ -> do
-                                    withAsync runEgressChainSync $ \_ -> do
-                                        withAsync runBlockCacheQueue $ \_ -> do
-                                            withAsync (handleNewConnectionRequest epHandler) $ \_ -> do
-                                                withAsync runPeerSync $ \_ -> do
-                                                    withAsync runSyncStatusChecker $ \z -> do
-                                                        _ <- LA.wait z
-                                                        return ()
-                        else LA.wait y)
+            (withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
+                 if (_nodeType node == NC.Master)
+                     then do
+                         withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
+                             withAsync setupSeedPeerConnection $ \_ -> do
+                                 withAsync runEgressChainSync $ \_ -> do
+                                     withAsync runBlockCacheQueue $ \_ -> do
+                                         withAsync (handleNewConnectionRequest epHandler) $ \_ -> do
+                                             withAsync runPeerSync $ \_ -> do
+                                                 withAsync runSyncStatusChecker $ \_ -> do
+                                                     withAsync runEpochSwitcher $ \z -> do
+                                                         _ <- LA.wait z
+                                                         return ()
+                     else LA.wait y)
         liftIO $ putStrLn $ "node recovering from fatal DB connection failure!"
     return ()
 
@@ -235,13 +156,11 @@ runSyncStatusChecker :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runSyncStatusChecker = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    rkdb <- rocksDB <$> getDB
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     newCandidateBlockChainTip
     -- wait 300 seconds before first check
     liftIO $ threadDelay (30 * 1000000)
     forever $ do
-        isSynced <- checkBlocksFullySynced net
+        isSynced <- checkBlocksFullySynced
         LG.debug lg $
             LG.msg $
             LG.val $
@@ -267,23 +186,7 @@ runNode config nodeConf bp2p certPaths = do
                  (LG.setLogLevel (logLevel nodeConf) LG.defSettings))
     runThreads config nodeConf bp2p lg certPaths
 
-data Config =
-    Config
-        { configNetwork :: !Network
-        , configDebug :: !Bool
-        , configUnconfirmedTx :: !Bool
-        }
-
-defPort :: Int
-defPort = 3000
-
-defNetwork :: Network
-defNetwork = bsvTest
-
-netNames :: String
-netNames = intercalate "|" (Data.List.map getNetworkName allNets)
-
-defBitcoinP2P :: NodeConfig -> IO (BitcoinP2P)
+defBitcoinP2P :: NodeConfig -> IO BitcoinP2P
 defBitcoinP2P nodeCnf = do
     g <- newTVarIO M.empty
     bp <- newTVarIO M.empty
@@ -291,7 +194,8 @@ defBitcoinP2P nodeCnf = do
     hl <- newMVar True
     st <- TSH.new 1
     tl <- TSH.new 1
-    ep <- newTVarIO False
+    epoch <- getCurrentEpoch (epochLength nodeCnf)
+    ep <- newTVarIO $ fst epoch
     tc <- TSH.new 1
     rpf <- newEmptyMVar
     rpc <- newTVarIO 0
@@ -300,7 +204,7 @@ defBitcoinP2P nodeCnf = do
     tbt <- MS.new $ maxTMTBuilderThreads nodeCnf
     iut <- newTVarIO False
     udc <- H.new
-    blktr <- newTVarIO $ initialChain $ bitcoinNetwork nodeCnf  
+    blktr <- newTVarIO $ initialChain $ bitcoinNetwork nodeCnf
     wrkc <- newTVarIO []
     bsb <- newTVarIO Nothing
     ptxq <- TSH.new 1
@@ -309,6 +213,7 @@ defBitcoinP2P nodeCnf = do
     cmpct <- TSH.new 1
     pftx <- TSH.new 10
     cbu <- TSH.new 1
+    pr <- newTVarIO []
     return $
         BitcoinP2P
             nodeCnf
@@ -335,10 +240,11 @@ defBitcoinP2P nodeCnf = do
             cmpct
             pftx
             cbu
+            pr
 
 initVega :: IO ()
 initVega = do
-    putStrLn $ "Starting Xoken Nexa"
+    putStrLn "Starting Xoken Nexa"
     b <- doesFileExist "arivi-config.yaml"
     unless b defaultConfig
     cnf <- Config.readConfig "arivi-config.yaml"
@@ -360,21 +266,25 @@ repopulateBlockTree net rkdb cf = do
     t1 <- getCurrentTime
     kv <- scanCF rkdb cf
     if Data.List.null kv
-        then do
             -- print "BlockTree not found"
+        then do
             putHeaderMemoryElemIO rkdb cf $ genesisNode net
             return Nothing
         else do
             t2 <- getCurrentTime
-            let kv' = DM.mapMaybe (\(k,v) -> case S.decode k of
-                                        Right (k' :: ShortBlockHash) -> Just (k', BSS.toShort v)
-                                        Left _ -> Nothing) kv
+            let kv' =
+                    DM.mapMaybe
+                        (\(k, v) ->
+                             case S.decode k of
+                                 Right (k' :: ShortBlockHash) -> Just (k', BSS.toShort v)
+                                 Left _ -> Nothing)
+                        kv
             t3 <- getCurrentTime
             bn <- getBestBlockNodeIO rkdb
             case bn of
-                Nothing -> do
+                Nothing
                     -- print "getBestBlockNodeIO returned Nothing"
-                    return Nothing
+                 -> return Nothing
                 Just bn' -> do
                     putStrLn $ "Loaded " ++ show (length kv') ++ " BlockTree entries"
                     --putStrLn $ "Started scan: " ++ show t1
@@ -391,10 +301,27 @@ relaunch =
             then threadDelay (30 * 1000000)
             else do
                 runDetached (Just pid) (ToFile "vega.log") initVega
-                threadDelay (5000000)
+                threadDelay 5000000
 
 main :: IO ()
 main = do
     initVega
     -- let pid = "/tmp/vega.pid.0"
     -- runDetached (Just pid) (ToFile "vega.log") relaunch
+{-
+data Config =
+    Config
+        { configNetwork :: !Network
+        , configDebug :: !Bool
+        , configUnconfirmedTx :: !Bool
+        }
+
+defPort :: Int
+defPort = 3000
+
+defNetwork :: Network
+defNetwork = bsvTest
+
+netNames :: String
+netNames = intercalate "|" (Data.List.map getNetworkName allNets)
+-}

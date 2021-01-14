@@ -2,90 +2,38 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TupleSections #-}
 
-module Network.Xoken.Node.P2P.UnconfTxSync
-    ( processUnconfTransaction
-    , processTxGetData
-    , runEpochSwitcher
-    , addTxCandidateBlocks
-    ) where
+module Network.Xoken.Node.P2P.Process.Tx where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (mapConcurrently, race_)
-import Control.Concurrent.Async.Lifted as LA (async)
 import Control.Concurrent.Event as EV
-import Control.Concurrent.MVar
-import Control.Concurrent.QSem
 import Control.Concurrent.STM.TVar
 import Control.Exception
-import qualified Control.Exception.Extra as EX
 import qualified Control.Exception.Lifted as LE (try)
-import Control.Monad
-import Control.Monad.Logger
 import Control.Monad.Reader
-import Control.Monad.STM
-import Control.Monad.State.Strict
-import qualified Data.Aeson as A (decode, encode)
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Char8 as C
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Lazy.Char8 as LC
-import Data.ByteString.Short as BSS
 import Data.Function ((&))
-import Data.Functor.Identity
-import qualified Data.HashTable.IO as H
-import Data.Int
-import qualified Data.IntMap as I
 import qualified Data.List as L
-import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Sequence ((|>))
-import Data.Serialize
-import Data.Serialize as S
-import Data.String.Conversions
-import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Time.Clock
-import Data.Time.Clock
-import Data.Time.Clock.POSIX
-import Data.Time.LocalTime
 import Data.Word
-import qualified Database.RocksDB as R
-import qualified Network.Socket as NS
-import qualified Network.Socket.ByteString as SB (recv)
-import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
-import Network.Xoken.Address
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
-import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
-import Network.Xoken.Network.Common
-import Network.Xoken.Network.Message
-import Network.Xoken.Node.Data
+import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.GraphDB
-import Network.Xoken.Node.P2P.BlockSync
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
+import Network.Xoken.Node.P2P.Message.Sender
 import Network.Xoken.Node.P2P.Types
-import Network.Xoken.Node.WorkerDispatcher
-import Network.Xoken.Script.Standard
+import Network.Xoken.Node.Worker.Dispatcher
 import Network.Xoken.Transaction.Common
-import Network.Xoken.Util
-import StmContainers.Map as SM
-import Streamly
-import Streamly.Prelude ((|:), nil)
+import Streamly as S
 import qualified Streamly.Prelude as S
 import System.Logger as LG
-import System.Logger.Message
-import System.Random
 import Xoken.NodeConfig
 
 processTxGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
@@ -93,14 +41,9 @@ processTxGetData pr txHash = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
-    if indexUnconfirmedTx == False
+    if indexUnconfirmedTx
         then do
-            debug lg $ LG.msg $ val "[dag] processTxGetData - indexUnconfirmedTx False."
-            return ()
-        else do
-            let net = bitcoinNetwork $ nodeConfig bp2pEnv
             debug lg $ LG.msg $ val "processTxGetData - called."
-            debug lg $ LG.msg $ val "[dag] processTxGetData - called."
             bp2pEnv <- getBitcoinP2P
             tuple <-
                 liftIO $
@@ -108,49 +51,23 @@ processTxGetData pr txHash = do
                     (unconfirmedTxCache bp2pEnv)
                     (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
             case tuple of
-                Just (st, fh) ->
-                    if st == False
-                        then do
-                            liftIO $ threadDelay (1000000 * 30)
-                            tuple2 <-
-                                liftIO $
-                                TSH.lookup
-                                    (unconfirmedTxCache bp2pEnv)
-                                    (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
-                            case tuple2 of
-                                Just (st2, fh2) ->
-                                    if st2 == False
-                                        then sendTxGetData pr txHash
-                                        else return ()
-                                Nothing -> return ()
-                        else return ()
+                Just (st, _) ->
+                    unless st $ do
+                        liftIO $ threadDelay (1000000 * 30)
+                        tuple2 <-
+                            liftIO $
+                            TSH.lookup
+                                (unconfirmedTxCache bp2pEnv)
+                                (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
+                        case tuple2 of
+                            Just (st2, _) -> unless st2 $ sendTxGetData pr txHash
+                            Nothing -> return ()
                 Nothing -> sendTxGetData pr txHash
+        else do
+            debug lg $ LG.msg $ val "[dag] processTxGetData - indexUnconfirmedTx False."
+            return ()
 
-sendTxGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
-sendTxGetData pr txHash = do
-    lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let gd = GetData $ [InvVector InvTx txHash]
-        msg = MGetData gd
-    debug lg $ LG.msg $ "sendTxGetData: " ++ show gd
-    debug lg $ LG.msg $ "[dag] sendTxGetData: " ++ show gd
-    case (bpSocket pr) of
-        Just s -> do
-            let em = runPut . putMessage net $ msg
-            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
-            case res of
-                Right _ ->
-                    liftIO $
-                    TSH.insert
-                        (unconfirmedTxCache bp2pEnv)
-                        (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
-                        (False, TxHash txHash)
-                Left (e :: SomeException) -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
-            debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
-            debug lg $ LG.msg $ "[dag] sending out GetData: " ++ show (bpAddress pr)
-        Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
-
+{- UNUSED?
 runEpochSwitcher :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEpochSwitcher =
     forever $ do
@@ -158,20 +75,17 @@ runEpochSwitcher =
         bp2pEnv <- getBitcoinP2P
         dbe' <- getDB
         tm <- liftIO $ getCurrentTime
-        let conn = rocksDB $ dbe'
-            hour = todHour $ timeToTimeOfDay $ utctDayTime tm
+        let hour = todHour $ timeToTimeOfDay $ utctDayTime tm
             minute = todMin $ timeToTimeOfDay $ utctDayTime tm
             epoch =
-                case hour `mod` 2 of
-                    0 -> True
-                    1 -> False
+                case hour `mod` 3 of
+                    0 -> Epoch0
+                    1 -> Epoch1
+                    2 -> Epoch2
         liftIO $ atomically $ writeTVar (epochType bp2pEnv) epoch
         if minute == 0
             then do
-                let (op_cf, tx_cf) =
-                        case epoch of
-                            True -> ("ep_outputs_odd", "ep_transactions_odd")
-                            False -> ("ep_outputs_even", "ep_transactions_even")
+                let delcf = 
                 --R.dropCF rkdb op_cf
                 --R.dropCF rkdb tx_cf
                 --o_ptr <- R.createCF rkdb config op_cf
@@ -179,16 +93,6 @@ runEpochSwitcher =
                 liftIO $ threadDelay (1000000 * 60 * 60)
             else liftIO $ threadDelay (1000000 * 60 * (60 - minute))
         return ()
-
-insertTxIdOutputs :: (HasLogger m, MonadIO m) => R.DB -> R.ColumnFamily -> (TxHash, Word32) -> TxOut -> m ()
-insertTxIdOutputs conn cf (txid, outputIndex) txOut = do
-    lg <- getLogger
-    res <- liftIO $ try $ putDBCF conn cf (txid, outputIndex) txOut
-    case res of
-        Right _ -> return ()
-        Left (e :: SomeException) -> do
-            err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf) ++ ": " ++ show e
-            throw KeyValueDBInsertException
 
 isNotConfirmed :: TxHash -> IO Bool
 isNotConfirmed txHash = return False
@@ -199,47 +103,24 @@ coalesceUnconfTransaction dag txhash hashes sats = do
     print $ "coalesceUnconfTransaction called for tx: " ++ show (txhash)
     unconfHashes <- filterM (isNotConfirmed) hashes
     DAG.coalesce dag txhash unconfHashes sats (+) nextBcState
-
+-}
 processUnconfTransaction :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> m ([TxHash])
 processUnconfTransaction tx = do
-    dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
-    epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let conn = rocksDB $ dbe'
-        cf = rocksCF dbe'
     bbn <- fetchBestBlock
-    let (bsh,bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+    let (bsh, bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+    prb <- liftIO $ mkProvisionalBlockHashR bsh
+    putProvisionalBlockHash prb bsh
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     debug lg $ LG.msg $ "[dag] processUnconfTransaction: processing Unconf Tx " ++ show (txHash tx)
-    cftx <- liftIO $ TSH.lookup cf ("tx")
-    case cftx of
-        Just cftx' -> do
-            debug lg $ LG.msg $ "inserting tx " ++ show (txHash tx)
-            putDBCF conn cftx' (txHash tx) tx
-        Nothing -> do
-            debug lg $ LG.msg $ val "[dag] insert tx: Error: cf Nothing"
-            return () -- ideally should be unreachable
+    putTx (txHash tx) tx
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
- --
     let outpoints =
             map (\(b, _) -> ((outPointHash $ prevOutput b), fromIntegral $ outPointIndex $ prevOutput b)) (inputs)
- --
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
-    cf' <- liftIO $ TSH.lookup cf (getEpochTxOutCF epoch)
-    case cf' of
-        Just cf'' -> do
-            mapM_
-                (\(txOut, oind) -> do
-                     debug lg $ LG.msg $ "inserting output " ++ show txOut
-                     debug lg $ LG.msg $ "[dag] processUnconfTransaction: inserting output " ++ show txOut
-                     insertTxIdOutputs conn cf'' (txHash tx, oind) (txOut))
-                outputs
-        Nothing -> do
-            debug lg $ LG.msg $ val "[dag] validateOutpoint: Error: cf Nothing"
-            return () -- ideally should be unreachable
     inputValsOutpoints <-
         mapM
             (\(b, indx) -> do
@@ -273,7 +154,6 @@ processUnconfTransaction tx = do
                                  throw e)
             (inputs)
     -- insert UTXO/s
-    cf' <- liftIO $ TSH.lookup cf ("outputs")
     let opCount = fromIntegral $ L.length outputs
     ovs <-
         mapM
@@ -284,45 +164,19 @@ processUnconfTransaction tx = do
                          ZtxiUtxo
                              (txHash tx)
                              (oindex)
-                             [mkProvisionalBlockHash bsh] -- if already present then ADD to the existing list of BlockHashes
+                             [prb] -- if already present then ADD to the existing list of BlockHashes
                              (fromIntegral 9999999)
                              outpoints
                              []
                              (fromIntegral $ outValue opt)
                              opCount
-                 res <- liftIO $ try $ putDBCF conn (fromJust cf') (txHash tx, oindex) zut
+                 res <- LE.try $ putOutput (OutPoint (txHash tx) oindex) zut
                  case res of
                      Right _ -> return (zut)
                      Left (e :: SomeException) -> do
-                         err lg $ LG.msg $ "Error: INSERTing into " ++ (show cf') ++ ": " ++ show e
+                         err lg $ LG.msg $ "Error: INSERTing into outputs: " ++ show e
                          throw KeyValueDBInsertException)
             outputs
-    -- TODO : cleanup this!!
-    --
-    -- debug lg $ LG.msg $ "[dag] BEFORE COALESCE for txid" ++ show (txHash tx)
-    -- let coalesceInp =
-    --         catMaybes $
-    --         fmap
-    --             (\(val, (_, bh, txh, _)) ->
-    --                  case bh of
-    --                      [] -> Just (txh, val)
-    --                      (x:_) -> Nothing)
-    --             inputValsOutpoints
-    --     txhs = fmap fst coalesceInp
-    --     vs = sum $ fmap snd coalesceInp
-    -- liftIO $
-    --     TSH.mapM_
-    --         (\(bsh, dag) -> do
-    --              print $ "TXHASH: " ++ show (txHash tx) ++ "; EDGES: " ++ show txhs
-    --              LA.async $ DAG.coalesce dag (txHash tx) txhs vs (+)
-    --              putStrLn "BEFORE getTopologicalSortedForest DAG: "
-    --              dagT <- DAG.getTopologicalSortedForest dag
-    --              debug lg $ LG.msg $ "DAG: " ++ show (dagT)
-    --              return ())
-    --         (candidateBlocks bp2pEnv)
-    -- debug lg $ LG.msg $ "[dag] AFTER COALESCE for txid" ++ show (txHash tx)
- --
- --
  -- mapM_
  --     (\(b, indx) -> do
  --          let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
@@ -353,15 +207,15 @@ processUnconfTransaction tx = do
         Nothing -> return ()
     -- let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
     let parentTxns =
-            catMaybes $
-            map
+            mapMaybe
                 (\(_, (_, bsh, ophs, _)) ->
                      case bsh of
                          [] -> Just ophs
                          _ -> Nothing)
                 inputValsOutpoints
-    return (parentTxns)
+    return parentTxns
 
+{- UNUSED?
 getSatsValueFromEpochOutpoint ::
        R.DB
     -> Bool
@@ -407,16 +261,10 @@ convertToScriptHash :: Network -> String -> Maybe String
 convertToScriptHash net s = do
     let addr = stringToAddr net (T.pack s)
     (T.unpack . txHashToHex . TxHash . sha256 . addressToScriptBS) <$> addr
-
+-}
 addTxCandidateBlocks :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TxHash -> [BlockHash] -> [TxHash] -> m ()
 addTxCandidateBlocks txHash candBlockHashes depTxHashes = do
-    dbe' <- getDB
-    bp2pEnv <- getBitcoinP2P
     lg <- getLogger
-    --epoch <- liftIO $ readTVarIO $ epochType bp2pEnv
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    let conn = rocksDB $ dbe'
-        cfs = rocksCF dbe'
     debug lg $
         LG.msg $ "Appending to candidate blocks Tx " ++ show (txHash) ++ " with parent Tx's: " ++ show depTxHashes
     mapM_ (\bhash -> addTxCandidateBlock txHash bhash depTxHashes) candBlockHashes
@@ -435,3 +283,159 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
             dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)
             liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP
             return ()
+
+{- UNUSED? txind isn't used anywhere in processConfTransaction -}
+processConfTransaction ::
+       (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ([OutPoint])
+processConfTransaction tx bhash blkht txind = do
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
+    debug lg $ LG.msg $ "[dag] processing Tx " ++ show (txHash tx)
+    let inputs = zip (txIn tx) [0 :: Word32 ..]
+    let outputs = zip (txOut tx) [0 :: Word32 ..]
+    --
+    let outpoints =
+            map (\(b, _) -> ((outPointHash $ prevOutput b), fromIntegral $ outPointIndex $ prevOutput b)) (inputs)
+    --
+    inputValsOutpoints <-
+        mapM
+            (\(b, indx) -> do
+                 let shortHash = getTxShortHash (outPointHash $ prevOutput b) 20
+                 let opindx = fromIntegral $ outPointIndex $ prevOutput b
+                 if (outPointHash nullOutPoint) == (outPointHash $ prevOutput b)
+                     then do
+                         let sval = fromIntegral $ computeSubsidy net $ (fromIntegral blkht :: Word32)
+                         return (sval, (shortHash, opindx))
+                     else do
+                         zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ Just bhash
+                         case zz of
+                             Right (val, _, _) -> return (val, (shortHash, opindx))
+                             Left (e :: SomeException) -> do
+                                 err lg $
+                                     LG.msg $
+                                     "Error: [pCT calling gSVFO] WHILE Processing TxID " ++
+                                     show (txHashToHex $ txHash tx) ++
+                                     ", getting value for dependent input (TxID,Index): (" ++
+                                     show (txHashToHex $ outPointHash (prevOutput b)) ++
+                                     ", " ++ show (outPointIndex $ prevOutput b) ++ ")" ++ (show e)
+                                 throw e)
+            (inputs)
+    -- insert UTXO/s
+    let opCount = fromIntegral $ L.length outputs
+    ovs <-
+        mapM
+            (\(opt, oindex) -> do
+                 debug lg $ LG.msg $ "Inserting UTXO : " ++ show (txHash tx, oindex)
+                 let zut =
+                         ZtxiUtxo
+                             (txHash tx)
+                             (oindex)
+                             [bhash] -- if already present then ADD to the existing list of BlockHashes
+                             (fromIntegral blkht)
+                             outpoints
+                             []
+                             (fromIntegral $ outValue opt)
+                             opCount
+                 res <- LE.try $ putOutput (OutPoint (txHash tx) oindex) zut
+                 case res of
+                     Right _ -> return (zut)
+                     Left (e :: SomeException) -> do
+                         err lg $ LG.msg $ "Error: INSERTing into outputs: " ++ show e
+                         throw KeyValueDBInsertException)
+            outputs
+    --
+    --
+    -- mapM_
+    --     (\(b, indx) -> do
+    --          let opt = OutPoint (outPointHash $ prevOutput b) (outPointIndex $ prevOutput b)
+    --          predBlkHash <- getChainIndexByHeight $ fromIntegral blkht - 10
+    --          case predBlkHash of
+    --              Just pbh -> do
+    --                  _ <- zRPCDispatchTraceOutputs opt pbh True 0 -- TODO: use appropriate Stale marker blockhash
+    --                  return ()
+    --              Nothing -> do
+    --                  if blkht > 11
+    --                      then throw InvalidBlockHashException
+    --                      else return ()
+    --          return ())
+    --     (inputs)
+    --
+    let ipSum = foldl (+) 0 $ (\(val, _) -> val) <$> inputValsOutpoints
+        opSum = foldl (+) 0 $ (\o -> outValue o) <$> (txOut tx)
+    if (ipSum - opSum) < 0
+        then do
+            debug lg $ LG.msg $ " ZUT value mismatch " ++ (show ipSum) ++ " " ++ (show opSum)
+            throw InvalidTxSatsValueException
+        else return ()
+    -- signal 'done' event for tx's that were processed out of sequence 
+    --
+    vall <- liftIO $ TSH.lookup (txSynchronizer bp2pEnv) (txHash tx)
+    case vall of
+        Just ev -> liftIO $ EV.signal ev
+        Nothing -> return ()
+    debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
+    let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
+    return (outpts)
+
+processTxStream :: (HasXokenNodeEnv env m, MonadIO m) => (Tx, BlockInfo, Int) -> m ()
+processTxStream (tx, binfo, txIndex) = do
+    let bhash = biBlockHash binfo
+        bheight = biBlockHeight binfo
+    lg <- getLogger
+    res <- LE.try $ zRPCDispatchTxValidate processConfTransaction tx bhash bheight (fromIntegral txIndex)
+    case res of
+        Right () -> return ()
+        Left TxIDNotFoundException -> throw TxIDNotFoundException
+        Left KeyValueDBInsertException -> do
+            err lg $ LG.msg $ val "[ERROR] KeyValueDBInsertException"
+            throw KeyValueDBInsertException
+        Left e -> do
+            err lg $ LG.msg ("[ERROR] Unhandled exception!" ++ show e)
+            throw e
+
+processTxBatch :: (HasXokenNodeEnv env m, MonadIO m) => [Tx] -> IngressStreamState -> m ()
+processTxBatch txns iss = do
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    let bi = issBlockIngest iss
+    let binfo = issBlockInfo iss
+    case binfo of
+        Just bf -> do
+            valx <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (biBlockHash bf)
+            skip <-
+                case valx of
+                    Just lfa -> do
+                        y <- liftIO $ TSH.lookup (fst lfa) (txHash $ head txns)
+                        case y of
+                            Just c -> return True
+                            Nothing -> return False
+                    Nothing -> return False
+            if skip
+                then do
+                    debug lg $
+                        LG.msg $
+                        ("Tx already processed, block: " ++
+                         (show $ biBlockHash bf) ++ ", tx-index: " ++ show (binTxIngested bi))
+                else do
+                    S.drain $
+                        aheadly $
+                        (do let start = (binTxIngested bi) - (L.length txns)
+                                end = (binTxIngested bi) - 1
+                            S.fromList $ zip [start .. end] [0 ..]) &
+                        S.mapM
+                            (\(cidx, idx) -> do
+                                 if (idx >= (L.length txns))
+                                     then debug lg $ LG.msg $ (" (error) Tx__index: " ++ show idx ++ show bf)
+                                     else debug lg $ LG.msg $ ("Tx__index: " ++ show idx)
+                                 return ((txns !! idx), bf, cidx)) &
+                        S.mapM (processTxStream) &
+                        S.maxBuffer (maxTxProcessingBuffer $ nodeConfig bp2pEnv) &
+                        S.maxThreads (maxTxProcessingThreads $ nodeConfig bp2pEnv)
+                    valy <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (biBlockHash bf)
+                    case valy of
+                        Just lefta -> liftIO $ TSH.insert (fst lefta) (txHash $ head txns) (L.length txns)
+                        Nothing -> return ()
+                    return ()
+        Nothing -> throw InvalidStreamStateException

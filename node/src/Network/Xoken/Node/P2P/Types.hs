@@ -8,17 +8,9 @@
 module Network.Xoken.Node.P2P.Types where
 
 import Codec.Serialise
-import Control.Concurrent.MSem as MS
-import Control.Concurrent.MSemN as MSN
 import Control.Concurrent.MVar
-import Control.Concurrent.QSem
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TSem
 import Control.Monad.IO.Class
-import Data.Aeson
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LB
-import Data.Functor.Identity
 import Data.IORef
 import Data.Int
 import qualified Data.Map.Strict as M
@@ -32,15 +24,11 @@ import Data.Store
 import GHC.Generics
 import Network.Socket hiding (send)
 import Network.Xoken.Block
-import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network
-import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.Worker.Types
 import Network.Xoken.Transaction
-import StmContainers.Map as SM
-import System.Random
-import Text.Read
 import Xoken.NodeConfig
 
 -- | Type alias for a combination of hostname and port.

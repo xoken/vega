@@ -1,19 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE RecordWildCards #-}
 
-module Network.Xoken.Node.WorkerListener
-    ( module Network.Xoken.Node.WorkerListener
+module Network.Xoken.Node.Worker.Listener
+    ( module Network.Xoken.Node.Worker.Listener
     ) where
 
-import Arivi.P2P.P2PEnv
-import Arivi.P2P.RPC.Fetch
-import Arivi.P2P.Types
 import Codec.Serialise
-import qualified Codec.Serialise as CBOR
 import Control.Concurrent.Async.Lifted as LA (async)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM
@@ -21,59 +15,34 @@ import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Loops
-import Control.Monad.Trans.Class
-import Data.Aeson as A
 import Data.Binary as DB
 import qualified Data.ByteString as B
 import Data.ByteString.Base64 as B64
-import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LC
-import Data.Functor (($>))
-import Data.IORef
-import Data.Int
 import Data.List as L
-import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Serialize
-import qualified Data.Serialize as S
-import qualified Data.Set as DS
-import Data.Text as T
-import Data.Time.Clock
 import Data.Time.Clock.POSIX
-import Data.Word
-import Data.X509.CertificateStore
 import GHC.Base as GHCB
-import GHC.Generics
 import Network.Socket as NS
-import Network.Socket.ByteString.Lazy as SB (recv, sendAll)
-import qualified Network.TLS as NTLS
-import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
-import Network.Xoken.Network.Message
-import Network.Xoken.Node.Data
 import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env as NEnv
-import Network.Xoken.Node.P2P.BlockSync
-import Network.Xoken.Node.P2P.Common
+import Network.Xoken.Node.Exception
+import Network.Xoken.Node.P2P.Process.Tx
 import Network.Xoken.Node.P2P.Types
-import Network.Xoken.Node.P2P.UnconfTxSync
-import Network.Xoken.Node.Service.Chain
-import Network.Xoken.Node.WorkerDispatcher
+import Network.Xoken.Node.Worker.Common
+import Network.Xoken.Node.Worker.Types
 import Network.Xoken.Transaction.Common
 import Prelude as P
-import StmContainers.Map as SM
 import System.Logger as LG
-import Text.Printf
 import Xoken.NodeConfig as NC
 
 workerMessageMultiplexer :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Worker -> m ()
 workerMessageMultiplexer worker = do
     lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
     forever $ do
         msg <- liftIO $ receiveMessage (woSocket worker)
         case (deserialiseOrFail msg) of
@@ -98,14 +67,12 @@ requestHandler sock writeLock msg = do
     lg <- getLogger
     dbe' <- getDB
     bp2pEnv <- getBitcoinP2P
-    let rkdb = rocksDB dbe'
-        cf = rocksCF dbe'
-        net = bitcoinNetwork $ nodeConfig bp2pEnv
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     resp <-
-        case (deserialiseOrFail msg) of
+        case deserialiseOrFail msg of
             Right ms ->
                 case ms of
-                    ZRPCRequest mid param -> do
+                    ZRPCRequest mid param ->
                         case param of
                             ZInvite cluster clusterID -> do
                                 let myNode = vegaNode $ nodeConfig bp2pEnv
@@ -115,59 +82,44 @@ requestHandler sock writeLock msg = do
                                     else do
                                         async $ initializeWorkers myNode cluster
                                         return $ successResp mid ZOk
-                            ZPing -> do
-                                return $ successResp mid ZPong
-                            ZGetOutpoint txId index bhash pred
+                            ZPing -> return $ successResp mid ZPong
+                            ZGetOutpoint txId index bhash
                                 -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
                              -> do
                                 zz <-
-                                    do let bhash' =
-                                               case bhash of
-                                                   Nothing -> DS.empty
-                                                   Just bh -> (DS.singleton bh) -- TODO: needs to contains more predecessors
-                                       LE.try $
-                                           validateOutpoint
-                                               (OutPoint txId index)
-                                               bhash'
-                                               bhash
-                                               (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
+                                    LE.try $
+                                    validateOutpoint
+                                        (OutPoint txId index)
+                                        bhash
+                                        (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                 case zz of
                                     Right (val, bhs, ht)
                                         -- liftIO $
                                         --     print $
                                         --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
-                                     -> do
-                                        return $ successResp mid $ ZGetOutpointResp val B.empty bhs ht
-                                    Left (e :: SomeException) -> do
-                                        return $ errorResp mid (show e)
+                                     -> return $ successResp mid $ ZGetOutpointResp val B.empty bhs ht
+                                    Left (e :: SomeException) -> return $ errorResp mid (show e)
                             -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
                             --     ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
                             --     return $ successResp mid $ ZTraceOutputsResp ret
                             ZUpdateOutpoint txId index bhash ht
                                 -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
                              -> do
-                                zz <-
-                                    LE.try $
-                                        updateOutpoint
-                                            (OutPoint txId index)
-                                            bhash
-                                            ht
+                                zz <- LE.try $ updateOutpoint (OutPoint txId index) bhash ht
                                 case zz of
                                     Right upd
                                         -- liftIO $
                                         --     print $
                                         --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
-                                     -> do
-                                        return $ successResp mid $ ZUpdateOutpointResp upd
-                                    Left (e :: SomeException) -> do
-                                        return $ errorResp mid (show e)
+                                     -> return $ successResp mid $ ZUpdateOutpointResp upd
+                                    Left (e :: SomeException) -> return $ errorResp mid (show e)
                             -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
                             --     ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
                             --     return $ successResp mid $ ZTraceOutputsResp ret
                             ZValidateTx bhash blkht txind tx
                                 -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
                              -> do
-                                debug lg $ LG.msg $ "decoded ZValidateTx (Conf) : " ++ (show $ txHash tx)
+                                debug lg $ LG.msg $ "decoded ZValidateTx (Conf) : " ++ show (txHash tx)
                                 res <-
                                     LE.try $ processConfTransaction tx bhash (fromIntegral blkht) (fromIntegral txind)
                                 case res of
@@ -212,14 +164,18 @@ requestHandler sock writeLock msg = do
                                     mapM_
                                         (\(ZBlockHeader header blkht) -> do
                                              tm <- liftIO $ floor <$> getPOSIXTime
-                                             bnm <- liftIO $ atomically $ stateTVar
-                                                                    (blockTree bp2pEnv)
-                                                                    (\hm -> case connectBlock hm net tm header of
-                                                                                    Right (hm',bn) -> (Just bn,hm')
-                                                                                    Left _ -> (Nothing,hm))
+                                             bnm <-
+                                                 liftIO $
+                                                 atomically $
+                                                 stateTVar
+                                                     (blockTree bp2pEnv)
+                                                     (\hm ->
+                                                          case connectBlock hm net tm header of
+                                                              Right (hm', bn) -> (Just bn, hm')
+                                                              Left _ -> (Nothing, hm))
                                              case bnm of
-                                                Just b -> putHeaderMemoryElem b
-                                                Nothing -> return ())
+                                                 Just b -> putHeaderMemoryElem b
+                                                 Nothing -> return ())
                                              --liftIO $
                                              --    TSH.insert
                                              --        (blockTree bp2pEnv)
@@ -234,6 +190,14 @@ requestHandler sock writeLock msg = do
                                             "ZNotifyNewBlockHeader - sending RESPONSE " ++ (show $ P.head headers)
                                         return $ successResp mid (ZNotifyNewBlockHeaderResp)
                                     Left (e :: SomeException) -> return $ errorResp mid (show e)
+                            ZProvisionalBlockHash bh pbh -> do
+                                pcf <- liftIO $ TSH.lookup (rocksCF dbe') "provisional_blockhash"
+                                case pcf of
+                                    Just pc -> do
+                                        putProvisionalBlockHashIO (rocksDB dbe') pc pbh bh
+                                        updatePredecessors
+                                        return $ successResp mid (ZProvisionalBlockHashResp)
+                                    Nothing -> return $ errorResp mid (show ZInvalidColumnFamily)
                             otherwise -> do
                                 err lg $ LG.msg $ "requestHandler unknown handler: " ++ (show param)
                                 return $ errorResp mid (show ZUnknownHandler)

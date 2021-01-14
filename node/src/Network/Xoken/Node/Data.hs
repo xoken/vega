@@ -1,144 +1,34 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
 module Network.Xoken.Node.Data where
 
 import Codec.Compression.GZip as GZ
 import Codec.Serialise
-import Conduit
 import Control.Applicative
-import Control.Arrow (first)
-import Control.Monad
-import Control.Monad.Trans.Maybe
 import Data.Aeson as A
-import qualified Data.Aeson.Encoding as A
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as B
 import Data.ByteString.Base64.Lazy as B64L
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as C
 import Data.ByteString.Short (ShortByteString)
 import qualified Data.ByteString.Short as B.Short
-import Data.Char (ord)
-import Data.Default
-import Data.Foldable
-import Data.Functor.Identity
 import Data.Hashable
-import Data.Hashable.Time
 import Data.Int
-import qualified Data.IntMap as I
-import Data.IntMap.Strict (IntMap)
-import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Serialize as S
-import qualified Data.Set as DS
 import Data.Store
-import Data.String.Conversions
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.Text.Lazy as T.Lazy
-import Data.Time.Clock (UTCTime)
 import Data.Word
 import GHC.Generics
-import Network.Socket (SockAddr(SockAddrUnix))
-import Network.Xoken.Address.Base58
-import Paths_vega as P
 import Prelude as P
-import Text.Regex.TDFA
-import UnliftIO
-import UnliftIO.Exception
-import qualified Web.Scotty.Trans as Scotty
 import Xoken as H
-import Xoken.NodeConfig
-
-data ZRPCRequest =
-    ZRPCRequest
-        { zrqId :: !Word32
-        , zrqParams :: !ZRPCRequestParam
-        }
-    deriving (Show, Generic, Eq, Serialise)
-
-data ZRPCResponse =
-    ZRPCResponse
-        { zrsMatchId :: !Word32
-        , zrsPayload :: !(Either ZRPCError (Maybe ZRPCResponseBody))
-        }
-    deriving (Show, Generic, Hashable, Eq, Serialise)
-
---
--- Legend: (M = Master), (C = Compute)
---
-data ZRPCRequestParam
-    = ZValidateTx -- M =>> C
-          { vtBlockHash :: !BlockHash
-          , vtBlockHeight :: !Word32
-          , vtTxIndex :: !Word32
-          , vtTxSerialized :: !Tx
-          }
-    | ZPutOutpoint -- C =>> C | C =>> M  | M =>> C 
-          { poTxID :: !TxHash
-          , poIndex :: !Word32
-          , poScript :: !ByteString
-          , poValue :: !Word64
-          }
-    | ZGetOutpoint -- C =>> C | C =>> M  | M =>> C 
-          { goTxID :: !TxHash
-          , goIndex :: !Word32
-          , goBlockHash :: !(Maybe BlockHash)
-          , goPredecessors :: !(DS.Set BlockHash)
-          }
-    | ZUpdateOutpoint -- C =>> C | C =>> M  | M =>> C 
-          { uoTxID :: !TxHash
-          , uoIndex :: !Word32
-          , uoBlockHash :: !BlockHash
-          , uoBlockHeight :: !Word32
-          }
-    | ZUnspendOutpoint -- C =>> C | C =>> M |  M =>> C 
-          { goTxID :: !TxHash
-          , goIndex :: !Word32
-          }
-    | ZTraceOutputs
-          { toTxID :: !TxHash
-          , toIndex :: !Word32
-          , toBlockHash :: !BlockHash
-          , toIsPrevFresh :: !Bool
-          , htt :: !Int
-          }
-    | ZGetBlockHeaders -- C =>> M
-          { gbBlockHash :: !BlockHash
-          }
-    | ZNotifyNewBlockHeader -- M =>> C
-          { znBlockHeaders :: ![ZBlockHeader]
-          , znBlockNode :: !BlockNode
-          }
-    | ZPruneBlockTxOutputs
-          { prBlockHashes :: ![BlockHash]
-          }
-    | ZValidateUnconfirmedTx -- M =>> C
-          { vtTxSerialized :: !Tx
-          }
-    | ZInvite -- M =>> C | C =>> M | C =>> C
-          { cluster :: ![Node]
-          , clusterID :: !ByteString
-          }
-    | ZPing -- M =>> C | C =>> M | C =>> C
-    deriving (Show, Generic, Eq, Serialise)
-
-data ZBlockHeader =
-    ZBlockHeader
-        { zBlockHeader :: !BlockHeader
-        , zBlockHeight :: !BlockHeight
-        }
-    deriving (Show, Generic, Eq, Serialise)
-
-deriving instance Store BlockHash
 
 deriving instance Store Tx
 
@@ -150,63 +40,15 @@ deriving instance Store TxOut
 
 deriving instance Store TxHash
 
-deriving instance Store Hash256
-
-deriving instance Store BlockHeader
+deriving instance Store BlockNode
 
 deriving instance Serialise BlockNode
 
-data ZRPCError =
-    ZRPCError
-        { zrsStatusMessage :: !ZRPCErrors
-        , zrsErrorData :: !(Maybe String)
-        }
-    deriving (Show, Generic, Hashable, Eq, Serialise)
+deriving instance Store BlockHeader
 
-data ZRPCErrors
-    = Z_INVALID_METHOD
-    | Z_PARSE_ERROR
-    | Z_INVALID_PARAMS
-    | Z_INTERNAL_ERROR
-    | Z_SERVER_ERROR
-    | Z_INVALID_REQUEST
-    deriving (Show, Generic, Hashable, Eq, Serialise)
+deriving instance Store BlockHash
 
-data ZRPCResponseBody
-    = ZValidateTxResp
-          { isValid :: !Bool
-          }
-    | ZPutOutpointResp
-          {
-          }
-    | ZGetOutpointResp
-          { zOutValue :: !Word64
-          , zScriptOutput :: !ByteString
-          , zBlockHash :: ![BlockHash]
-          , zBlockHeight :: !Word32
-          }
-    | ZUpdateOutpointResp
-          { zOutpointUpdated :: !Word32
-          }
-    | ZUnspendOutpointResp
-          {
-          }
-    | ZTraceOutputsResp
-          { ztIsRoot :: !Bool
-          }
-    | ZGetBlockHeadersResp
-          { blockHeaders :: ![(BlockHash, Int32)]
-          }
-    | ZNotifyNewBlockHeaderResp
-          {
-          }
-    | ZPruneBlockTxOutputsResp
-    | ZValidateUnconfirmedTxResp
-          { utDependentTransaction :: ![TxHash] -- utCandidateParentBlock :: ![BlockHash]
-          }
-    | ZOk
-    | ZPong
-    deriving (Show, Generic, Hashable, Eq, Serialise)
+deriving instance Store Hash256
 
 --
 --
@@ -718,6 +560,7 @@ getJsonRPCErrorCode err =
         INTERNAL_ERROR -> -32603
         PARSE_ERROR -> -32700
 
+{- UNUSED?
 coinbaseTxToMessage :: C.ByteString -> String
 coinbaseTxToMessage s =
     case C.length (C.pack regex) > 6 of
@@ -752,9 +595,7 @@ mergeAddrTxOutTxOutput addr (TxOut {..}) txOutput = txOutput {lockingScript = sc
 txToTx' :: Tx -> [TxOutput] -> [TxInput] -> Tx'
 txToTx' (Tx {..}) txout txin = Tx' txVersion txout txin txLockTime
 
-{-
 type TxIdOutputs = ((T.Text, Int32, Int32), Bool, Set ((T.Text, Int32), Int32, (T.Text, Int64)), Int64, T.Text)
-
 
 genTxOutputData :: (T.Text, Int32, TxIdOutputs, Maybe TxIdOutputs) -> TxOutputData
 genTxOutputData (txId, txIndex, ((hs, ht, ind), _, inps, val, addr), Nothing) =
@@ -779,3 +620,19 @@ txOutputDataToOutput (TxOutputData {..}) = TxOutput txind (T.unpack address) spe
 reverse2 :: String -> String
 reverse2 (x:y:xs) = reverse2 xs ++ [x, y]
 reverse2 x = x
+
+data Epoch
+    = Epoch0
+    | Epoch1
+    | Epoch2
+    deriving (Show, Eq)
+
+nextEpoch :: Epoch -> Epoch
+nextEpoch Epoch0 = Epoch1
+nextEpoch Epoch1 = Epoch2
+nextEpoch Epoch2 = Epoch0
+
+prevEpoch :: Epoch -> Epoch
+prevEpoch Epoch0 = Epoch2
+prevEpoch Epoch1 = Epoch0
+prevEpoch Epoch2 = Epoch1

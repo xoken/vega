@@ -10,31 +10,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 --
-module Network.Xoken.Node.AriviService where
-
-import Arivi.P2P.MessageHandler.HandlerTypes (HasNetworkConfig, networkConfig)
-import Arivi.P2P.P2PEnv
-import Arivi.P2P.PubSub.Class
-import Arivi.P2P.PubSub.Env
-import Arivi.P2P.PubSub.Publish as Pub
-import Arivi.P2P.PubSub.Types
-import Arivi.P2P.RPC.Env
-import Arivi.P2P.RPC.Fetch
-import Arivi.P2P.Types hiding (msgType)
-import Control.Monad
-import Control.Monad.Extra
-import Control.Monad.IO.Class
-import Control.Monad.Logger
-import Control.Monad.Reader
-import Network.Xoken.Node.Data
-import Network.Xoken.Node.Env
-import Network.Xoken.Node.P2P.Types
-import System.Random
-import Text.Printf
-import UnliftIO
-import UnliftIO.Resource
-import Xoken
-import Xoken.NodeConfig
+module Network.Xoken.Node.AriviService where -- UNUSED?    
 -- globalHandlerRpc :: (HasService env m) => RPCMessage -> m (Maybe RPCMessage)
 -- globalHandlerRpc msg = do
 --     bp2pEnv <- getBitcoinP2P

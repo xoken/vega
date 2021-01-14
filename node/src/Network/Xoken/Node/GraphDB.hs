@@ -1,52 +1,27 @@
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module Network.Xoken.Node.GraphDB where
 
-import Arivi.P2P.P2PEnv as PE hiding (option)
-import Codec.Serialise
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.MVar
-import Control.Concurrent.STM.TVar
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
-import Control.Monad.Reader
-import Control.Monad.Trans (liftIO)
-import Control.Monad.Trans.Reader (ReaderT(..))
-import Data.Aeson (ToJSON(..), (.=), decode, encode, object)
-import qualified Data.ByteString.Base16 as B16 (decode, encode)
-import qualified Data.ByteString.Char8 as C
-import qualified Data.ByteString.Lazy.Char8 as BL
+import Data.Aeson (ToJSON(..))
 import Data.Char
-import Data.Hashable
-import Data.List ((\\), filter, intersect, nub, nubBy, union, zip4)
+import Data.List ((\\), filter, intersect, union, zip4)
 import Data.Map.Strict as M (fromList)
 import Data.Maybe (fromJust)
 import Data.Monoid ((<>))
-import Data.Pool (Pool, createPool)
-import Data.Text (Text, append, concat, filter, intercalate, isInfixOf, map, null, pack, replace, take, unpack)
-import Data.Time.Clock
-import Data.Word
+import Data.Pool (createPool)
+import Data.Text (Text, filter, intercalate, map, null, pack, replace, take)
 import Database.Bolt as BT
-
-import GHC.Generics
-import Network.Socket hiding (send)
-import Network.Xoken.Crypto.Hash
-import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Transaction
-import System.Random
-import Text.Read
 
 data MerkleBranchNode =
     MerkleBranchNode
