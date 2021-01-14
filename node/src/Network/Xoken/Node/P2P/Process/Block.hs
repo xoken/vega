@@ -17,28 +17,35 @@ import Data.IORef
 import qualified Data.List as L
 import Data.Maybe
 import qualified Data.Sequence as SQ
+import Data.Serialize as DS
+import Data.Time.Clock.POSIX
 import Data.Word
+import Network.Xoken.Address
+import Network.Xoken.Block
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
+import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
+import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
-import Network.Xoken.Node.P2P.MessageSender
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
-import Network.Xoken.Node.P2P.Process.Tx
+import Network.Xoken.Node.Exception
+import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
+import Network.Xoken.Node.P2P.MessageSender
+import Network.Xoken.Node.P2P.Process.Tx
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
+import Network.Xoken.Transaction
 import Network.Xoken.Transaction.Common
 import Streamly as S
 import qualified Streamly.Prelude as S
 import System.Logger as LG
 import Xoken.NodeConfig as NC
-
 
 newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
 newCandidateBlock hash = do
@@ -241,3 +248,81 @@ processCompactBlockGetData pr hash = do
                 Just _ -> return ()
                 Nothing -> sendCompactBlockGetData pr hash
         Nothing -> sendCompactBlockGetData pr hash
+
+mineBlockFromCandidate :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe CompactBlock)
+mineBlockFromCandidate = do
+    bp2pEnv <- getBitcoinP2P
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    bbn <- fetchBestBlock
+    let (bhash, ht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+    dag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
+    case dag of
+        Nothing -> return Nothing
+        Just dag' -> do
+            top <- liftIO $ DAG.getPrimaryTopologicalSorted dag'
+            ct <- liftIO getPOSIXTime
+            if L.null top
+                then do
+                    liftIO $ print $ "Couldn't mine cmptblk (dag empty over): " ++ show bhash
+                    return Nothing
+                else do
+                    let cbase =
+                            makeCoinbaseTx
+                                (fromIntegral $ ht + 1)
+                                (fromJust $ stringToAddr net "msedZ3WsLDsd97f2cPo26J5xU5ZjBgTExz")
+                                1250000000
+                        txhashes = (txHash cbase : top)
+                    --    TxHash hh = txHash $ cbase
+                    --let TxHash hh' = head top
+                    --tx' <- liftIO $ TSH.lookup (unconfTxCache bp2pEnv) (TxHash hh')
+                    --case tx' of
+                    --    Nothing -> do
+                    --        liftIO $ print $ "Mined cmptblk (tx not in cache): " ++ show (TxHash hh')
+                    --        return Nothing
+                    --    Just tx -> do
+                    let bh =
+                            BlockHeader
+                                0x20000000
+                                bhash
+                                (buildMerkleRoot txhashes)
+                                (fromIntegral $ floor ct)
+                                0x207fffff
+                                (1) -- BlockHeader
+                        (bhsh@(BlockHash bhsh'), nn) = generateHeaderHash net bh
+                        sidl = fromIntegral $ L.length $ top -- shortIds length
+                        skey = getCompactBlockSipKey bh $ fromIntegral nn
+                        pfl = 1
+                        --cbase'' = fromJust cbase'
+                        --ourtxin = head $ txIn cbase
+                        --newtxin' = fmap (\ti -> ti {scriptInput = scriptInput ourtxin}) $ txIn cbase''
+                        --newcb = cbase'' {txIn = newtxin'}
+                        pftx = [PrefilledTx 0 $ cbase]
+                        (cbsid:sids) = map (\txid -> txHashToShortId' txid skey) $ txhashes -- shortIds
+                        cb = CompactBlock (bh {bhNonce = nn}) (fromIntegral nn) sidl sids pfl pftx
+                    liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb, top)
+                    liftIO $
+                        print $
+                        "Mined cmptblk " ++
+                        show bhsh ++
+                        " over " ++
+                        show bhash ++
+                        " with work " ++
+                        (show $ headerWork bh) ++
+                        " and coinbase tx: " ++
+                        (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase)
+                                                                -- ++ " and prev coinbase tx: " ++ (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase')
+                         ++
+                        " hash: " ++ (show $ head $ txhashes) ++ " sid: " ++ (show $ cbsid)
+                    --peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
+                    --mapM_ (\bp -> if bpConnected bp then processCompactBlock cb bp else return ()) peerMap
+                    newCandidateBlock bhsh
+                    broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
+                    --mapM_ (\x -> updateZtxiUtxo x bhsh $ fromIntegral $ ht + 1) top
+                    zRPCDispatchProvisionalBlockHash bhsh (mkProvisionalBlockHash bhash)
+                    return $ Just $ cb
+
+generateHeaderHash :: Network -> BlockHeader -> (BlockHash, Word32)
+generateHeaderHash net hdr =
+    if isValidPOW net hdr
+        then (headerHash hdr, bhNonce hdr)
+        else generateHeaderHash net (hdr {bhNonce = (bhNonce hdr + 1)})

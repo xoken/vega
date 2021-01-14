@@ -13,6 +13,7 @@ import Control.Concurrent.STM.TVar
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad.Reader
+import Data.Function ((&))
 import qualified Data.List as L
 import Data.Maybe
 import Data.Word
@@ -22,14 +23,16 @@ import Network.Xoken.Crypto.Hash
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
-import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.MessageSender
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
 import Network.Xoken.Transaction.Common
+import Streamly as S
+import qualified Streamly.Prelude as S
 import System.Logger as LG
 import Xoken.NodeConfig
 
@@ -50,16 +53,15 @@ processTxGetData pr txHash = do
             case tuple of
                 Just (st, _) ->
                     unless st $ do
-                            liftIO $ threadDelay (1000000 * 30)
-                            tuple2 <-
-                                liftIO $
-                                TSH.lookup
-                                    (unconfirmedTxCache bp2pEnv)
-                                    (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
-                            case tuple2 of
-                                Just (st2, _) ->
-                                    unless st2 $ sendTxGetData pr txHash
-                                Nothing -> return ()
+                        liftIO $ threadDelay (1000000 * 30)
+                        tuple2 <-
+                            liftIO $
+                            TSH.lookup
+                                (unconfirmedTxCache bp2pEnv)
+                                (getTxShortHash (TxHash txHash) (unconfirmedTxCacheKeyBits $ nodeConfig bp2pEnv))
+                        case tuple2 of
+                            Just (st2, _) -> unless st2 $ sendTxGetData pr txHash
+                            Nothing -> return ()
                 Nothing -> sendTxGetData pr txHash
         else do
             debug lg $ LG.msg $ val "[dag] processTxGetData - indexUnconfirmedTx False."
@@ -376,3 +378,64 @@ processConfTransaction tx bhash blkht txind = do
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
     let outpts = map (\(tid, idx) -> OutPoint tid idx) outpoints
     return (outpts)
+
+processTxStream :: (HasXokenNodeEnv env m, MonadIO m) => (Tx, BlockInfo, Int) -> m ()
+processTxStream (tx, binfo, txIndex) = do
+    let bhash = biBlockHash binfo
+        bheight = biBlockHeight binfo
+    lg <- getLogger
+    res <- LE.try $ zRPCDispatchTxValidate processConfTransaction tx bhash bheight (fromIntegral txIndex)
+    case res of
+        Right () -> return ()
+        Left TxIDNotFoundException -> throw TxIDNotFoundException
+        Left KeyValueDBInsertException -> do
+            err lg $ LG.msg $ val "[ERROR] KeyValueDBInsertException"
+            throw KeyValueDBInsertException
+        Left e -> do
+            err lg $ LG.msg ("[ERROR] Unhandled exception!" ++ show e)
+            throw e
+
+processTxBatch :: (HasXokenNodeEnv env m, MonadIO m) => [Tx] -> IngressStreamState -> m ()
+processTxBatch txns iss = do
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    let bi = issBlockIngest iss
+    let binfo = issBlockInfo iss
+    case binfo of
+        Just bf -> do
+            valx <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (biBlockHash bf)
+            skip <-
+                case valx of
+                    Just lfa -> do
+                        y <- liftIO $ TSH.lookup (fst lfa) (txHash $ head txns)
+                        case y of
+                            Just c -> return True
+                            Nothing -> return False
+                    Nothing -> return False
+            if skip
+                then do
+                    debug lg $
+                        LG.msg $
+                        ("Tx already processed, block: " ++
+                         (show $ biBlockHash bf) ++ ", tx-index: " ++ show (binTxIngested bi))
+                else do
+                    S.drain $
+                        aheadly $
+                        (do let start = (binTxIngested bi) - (L.length txns)
+                                end = (binTxIngested bi) - 1
+                            S.fromList $ zip [start .. end] [0 ..]) &
+                        S.mapM
+                            (\(cidx, idx) -> do
+                                 if (idx >= (L.length txns))
+                                     then debug lg $ LG.msg $ (" (error) Tx__index: " ++ show idx ++ show bf)
+                                     else debug lg $ LG.msg $ ("Tx__index: " ++ show idx)
+                                 return ((txns !! idx), bf, cidx)) &
+                        S.mapM (processTxStream) &
+                        S.maxBuffer (maxTxProcessingBuffer $ nodeConfig bp2pEnv) &
+                        S.maxThreads (maxTxProcessingThreads $ nodeConfig bp2pEnv)
+                    valy <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (biBlockHash bf)
+                    case valy of
+                        Just lefta -> liftIO $ TSH.insert (fst lefta) (txHash $ head txns) (L.length txns)
+                        Nothing -> return ()
+                    return ()
+        Nothing -> throw InvalidStreamStateException

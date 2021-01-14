@@ -69,10 +69,10 @@ requestHandler sock writeLock msg = do
     bp2pEnv <- getBitcoinP2P
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     resp <-
-        case (deserialiseOrFail msg) of
+        case deserialiseOrFail msg of
             Right ms ->
                 case ms of
-                    ZRPCRequest mid param -> do
+                    ZRPCRequest mid param ->
                         case param of
                             ZInvite cluster clusterID -> do
                                 let myNode = vegaNode $ nodeConfig bp2pEnv
@@ -82,26 +82,23 @@ requestHandler sock writeLock msg = do
                                     else do
                                         async $ initializeWorkers myNode cluster
                                         return $ successResp mid ZOk
-                            ZPing -> do
-                                return $ successResp mid ZPong
+                            ZPing -> return $ successResp mid ZPong
                             ZGetOutpoint txId index bhash
                                 -- liftIO $ print $ "ZGetOutpoint - REQUEST " ++ show (txId, index)
                              -> do
                                 zz <-
-                                    do LE.try $
-                                           validateOutpoint
-                                               (OutPoint txId index)
-                                               bhash
-                                               (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
+                                    LE.try $
+                                    validateOutpoint
+                                        (OutPoint txId index)
+                                        bhash
+                                        (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                 case zz of
                                     Right (val, bhs, ht)
                                         -- liftIO $
                                         --     print $
                                         --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
-                                     -> do
-                                        return $ successResp mid $ ZGetOutpointResp val B.empty bhs ht
-                                    Left (e :: SomeException) -> do
-                                        return $ errorResp mid (show e)
+                                     -> return $ successResp mid $ ZGetOutpointResp val B.empty bhs ht
+                                    Left (e :: SomeException) -> return $ errorResp mid (show e)
                             -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
                             --     ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
                             --     return $ successResp mid $ ZTraceOutputsResp ret
@@ -114,17 +111,15 @@ requestHandler sock writeLock msg = do
                                         -- liftIO $
                                         --     print $
                                         --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
-                                     -> do
-                                        return $ successResp mid $ ZUpdateOutpointResp upd
-                                    Left (e :: SomeException) -> do
-                                        return $ errorResp mid (show e)
+                                     -> return $ successResp mid $ ZUpdateOutpointResp upd
+                                    Left (e :: SomeException) -> return $ errorResp mid (show e)
                             -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do
                             --     ret <- pruneSpentOutputs (toTxID, toIndex) toBlockHash prevFresh htt
                             --     return $ successResp mid $ ZTraceOutputsResp ret
                             ZValidateTx bhash blkht txind tx
                                 -- liftIO $ print $ "ZValidateTx - REQUEST " ++ (show $ txHash tx)
                              -> do
-                                debug lg $ LG.msg $ "decoded ZValidateTx (Conf) : " ++ (show $ txHash tx)
+                                debug lg $ LG.msg $ "decoded ZValidateTx (Conf) : " ++ show (txHash tx)
                                 res <-
                                     LE.try $ processConfTransaction tx bhash (fromIntegral blkht) (fromIntegral txind)
                                 case res of

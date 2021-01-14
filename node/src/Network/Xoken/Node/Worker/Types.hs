@@ -18,6 +18,9 @@ import Prelude as P
 import Xoken as H
 import Xoken.NodeConfig
 
+newtype Temp =
+    Temp RPCMessage -- just to stop smuggler from smuggling Data away
+
 data ZRPCRequest =
     ZRPCRequest
         { zrqId :: !Word32

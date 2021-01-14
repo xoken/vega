@@ -43,6 +43,16 @@ encodeAndSendMessage writeLock sock net msg =
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
 sendEncMessage writeLock sock msg = withMVar writeLock (\_ -> LB.sendAll sock msg)
 
+produceGetDataMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m (Message)
+produceGetDataMessage peer = do
+    lg <- getLogger
+    debug lg $ LG.msg $ "Block - produceGetDataMessage - called." ++ show peer
+    bl <- liftIO $ takeMVar (blockFetchQueue peer)
+    trace lg $ LG.msg $ "took mvar.. " ++ (show bl) ++ (show peer)
+    let gd = GetData [InvVector InvBlock $ getBlockHash $ biBlockHash bl]
+    debug lg $ LG.msg $ "GetData req: " ++ show gd
+    return (MGetData gd)
+
 sendRequestMessages :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> Message -> m ()
 sendRequestMessages pr msg = do
     lg <- getLogger

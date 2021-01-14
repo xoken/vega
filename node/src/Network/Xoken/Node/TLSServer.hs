@@ -19,6 +19,7 @@ import Control.Monad.IO.Class
 import Control.Monad.Loops
 import Data.Aeson as A
 import Data.Binary as DB
+import Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LBS
 import Data.Functor (($>))
@@ -31,7 +32,6 @@ import qualified Network.TLS as NTLS
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Env as NEnv
 import Network.Xoken.Node.Exception
-import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.XokenService
 import Prelude as P
 import System.Logger as LG
@@ -197,6 +197,11 @@ startTLSEndpoint handler listenIP listenPort [certFilePath, keyFilePath, certSto
         Left err -> do
             putStrLn $ "Unable to read credentials from file"
             P.error "BadCredentialFile"
+
+fromBytes :: B.ByteString -> Integer
+fromBytes = B.foldl' f 0
+  where
+    f a b = a `shiftL` 8 .|. fromIntegral b
 
 recvTLSMessage :: TLS.Context -> Bool -> Int -> IO (B.ByteString)
 recvTLSMessage context prefixFlag remLen = do

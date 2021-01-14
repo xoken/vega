@@ -9,7 +9,7 @@
 module Network.Xoken.Node.P2P.Sync where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (mapConcurrently_)
+import Control.Concurrent.Async (mapConcurrently, mapConcurrently_)
 import qualified Control.Concurrent.Async.Lifted as LA (async)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TVar
@@ -19,26 +19,25 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.STM
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as BSL
 import Data.IORef
 import Data.Int
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Serialize
 import Data.Time.Calendar
 import Data.Time.Clock
 import qualified Network.Socket as NS
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers
 import Network.Xoken.Constants
-import Network.Xoken.Network.Common
 import Network.Xoken.Network.Message
 import Network.Xoken.Node.DB
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.Exception
+import Network.Xoken.Node.P2P.MessageHandler
 import Network.Xoken.Node.P2P.MessageSender
+import Network.Xoken.Node.P2P.Socket
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
 import System.Logger as LG
@@ -302,6 +301,98 @@ sortPeers peers = do
                      Nothing -> return longlongago)
             peers
     return $ map snd $ L.sortBy (\(a, _) (b, _) -> compare b a) (zip ts peers)
+
+setupSeedPeerConnection :: (HasXokenNodeEnv env m, MonadIO m) => m ()
+setupSeedPeerConnection =
+    forever $ do
+        bp2pEnv <- getBitcoinP2P
+        lg <- getLogger
+        let net = bitcoinNetwork $ nodeConfig bp2pEnv
+            seeds = getSeeds net
+            hints = NS.defaultHints {NS.addrSocketType = NS.Stream}
+            port = getDefaultPort net
+        debug lg $ msg $ show seeds
+        --let sd = map (\x -> Just (x :: HostName)) seeds
+        !addrs <-
+            liftIO $ mapConcurrently (\x -> head <$> NS.getAddrInfo (Just hints) (Just x) (Just (show port))) seeds
+        mapM_
+            (\y -> do
+                 debug lg $ msg ("Peer.. " ++ show (NS.addrAddress y))
+                 LA.async $
+                     (do blockedpr <- liftIO $ readTVarIO (blacklistedPeers bp2pEnv)
+                         allpr <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
+                             -- this can be optimized
+                         let connPeers =
+                                 L.foldl'
+                                     (\c x ->
+                                          if bpConnected (snd x)
+                                              then c + 1
+                                              else c)
+                                     0
+                                     (M.toList allpr)
+                         if connPeers > (maxBitcoinPeerCount $ nodeConfig bp2pEnv)
+                             then liftIO $ threadDelay (10 * 1000000)
+                             else do
+                                 let toConn =
+                                         case M.lookup (NS.addrAddress y) allpr of
+                                             Just pr ->
+                                                 if bpConnected pr
+                                                     then False
+                                                     else True
+                                             Nothing -> True
+                                     isBlacklisted = M.member (NS.addrAddress y) blockedpr
+                                 if toConn == False
+                                     then do
+                                         debug lg $
+                                             msg ("Seed peer already connected, ignoring.. " ++ show (NS.addrAddress y))
+                                     else if isBlacklisted
+                                              then do
+                                                  debug lg $
+                                                      msg
+                                                          ("Seed peer blacklisted, ignoring.. " ++
+                                                           show (NS.addrAddress y))
+                                              else do
+                                                  wl <- liftIO $ newMVar ()
+                                                  {- UNUSED?
+                                                  ss <- liftIO $ newTVarIO Nothing
+                                                  imc <- liftIO $ newTVarIO 0
+                                                  rc <- liftIO $ newTVarIO Nothing
+                                                  st <- liftIO $ newTVarIO Nothing
+                                                  fw <- liftIO $ newTVarIO 0
+                                                  -}
+                                                  res <- LE.try $ liftIO $ createSocket y
+                                                  trk <- liftIO $ getNewTracker
+                                                  bfq <- liftIO $ newEmptyMVar
+                                                  sc <- liftIO $ newIORef False
+                                                  case res of
+                                                      Right (sock) -> do
+                                                          case sock of
+                                                              Just sx -> do
+                                                                  fl <- doVersionHandshake net sx $ NS.addrAddress y
+                                                                  let bp =
+                                                                          BitcoinPeer
+                                                                              (NS.addrAddress y)
+                                                                              sock
+                                                                              wl
+                                                                              fl
+                                                                              Nothing
+                                                                              99999
+                                                                              trk
+                                                                              bfq
+                                                                              sc
+                                                                  liftIO $
+                                                                      atomically $
+                                                                      modifyTVar'
+                                                                          (bitcoinPeers bp2pEnv)
+                                                                          (M.insert (NS.addrAddress y) bp)
+                                                                  liftIO $ print "Sending sendcmpt.."
+                                                                  sendcmpt bp
+                                                                  handleIncomingMessages bp
+                                                              Nothing -> return ()
+                                                      Left (SocketConnectException addr) ->
+                                                          warn lg $ msg ("SocketConnectException: " ++ show addr)))
+            (addrs)
+        liftIO $ threadDelay (30 * 1000000)
 --
 -- Get ZUT from outpoint
 -- getZUTFromOutpoint ::

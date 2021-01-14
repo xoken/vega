@@ -38,10 +38,12 @@ executable vega
       Network.Xoken.Node.Env
       Network.Xoken.Node.GraphDB
       Network.Xoken.Node.P2P.Sync
+      Network.Xoken.Node.P2P.Socket
       Network.Xoken.Node.P2P.Common
       Network.Xoken.Node.P2P.MerkleBuilder
+      Network.Xoken.Node.P2P.MessageHandler
+      Network.Xoken.Node.P2P.MessageReader
       Network.Xoken.Node.P2P.MessageSender
-      Network.Xoken.Node.P2P.PeerManager
       Network.Xoken.Node.P2P.Process.Headers
       Network.Xoken.Node.P2P.Process.Block
       Network.Xoken.Node.P2P.Process.Tx
@@ -57,8 +59,7 @@ executable vega
       Network.Xoken.Node.Worker.Types
       Network.Xoken.Node.XokenService
 
-  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N
-  -- -fplugin=Smuggler.Plugin
+  ghc-options:  -fprof-auto -fprof-cafs -rtsopts -O2 -threaded -with-rtsopts=-N -fplugin=Smuggler.Plugin
     -- -Wunused-matches -Wunused-binds -Wunused-imports
 
   hs-source-dirs:
