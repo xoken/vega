@@ -44,13 +44,13 @@ import qualified Streamly.Prelude as S
 import System.Logger as LG
 import Xoken.NodeConfig as NC
 
-newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
+newCandidateBlock :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> m ()
 newCandidateBlock hash = do
     bp2pEnv <- getBitcoinP2P
     tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 
-newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+newCandidateBlockChainTip :: (HasXokenNodeEnv env m, MonadIO m) => m ()
 newCandidateBlockChainTip = do
     bp2pEnv <- getBitcoinP2P
     bbn <- fetchBestBlock
@@ -60,14 +60,14 @@ newCandidateBlockChainTip = do
 
 defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"
 
-processBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => DefBlock -> m ()
+processBlock :: (HasXokenNodeEnv env m, MonadIO m) => DefBlock -> m ()
 processBlock dblk = do
     lg <- getLogger
     debug lg $ LG.msg ("processing deflated Block! " ++ show dblk)
     -- liftIO $ signalQSem (blockFetchBalance bp2pEnv)
     return ()
 
-processCompactBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => CompactBlock -> BitcoinPeer -> m ()
+processCompactBlock :: (HasXokenNodeEnv env m, MonadIO m) => CompactBlock -> BitcoinPeer -> m ()
 processCompactBlock cmpct peer = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
@@ -136,7 +136,7 @@ processCompactBlock cmpct peer = do
             return ()
 
 --
-processBlockTransactions :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockTxns -> m ()
+processBlockTransactions :: (HasXokenNodeEnv env m, MonadIO m) => BlockTxns -> m ()
 processBlockTransactions blockTxns = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
@@ -231,7 +231,7 @@ processDeltaTx bhash tx = do
             err lg $ LG.msg ("[ERROR] Unhandled exception!" ++ show e)
             throw e
 
-processCompactBlockGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
+processCompactBlockGetData :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
 processCompactBlockGetData pr hash = do
     lg <- getLogger
     debug lg $ LG.msg $ val "processCompactBlockGetData - called."

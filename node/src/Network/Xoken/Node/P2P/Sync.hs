@@ -43,7 +43,7 @@ import Network.Xoken.Node.Worker.Dispatcher
 import System.Logger as LG
 import Xoken.NodeConfig as NC
 
-runEgressChainSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+runEgressChainSync :: (HasXokenNodeEnv env m, MonadIO m) => m ()
 runEgressChainSync = do
     lg <- getLogger
     res1 <- LE.try $ forever $ produceGetHeadersMessage >>= sendGetHeaderMessages
@@ -51,7 +51,7 @@ runEgressChainSync = do
         Right () -> return ()
         Left (e :: SomeException) -> err lg $ LG.msg $ "[ERROR] runEgressChainSync " ++ show e
 
-runPeerSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+runPeerSync :: (HasXokenNodeEnv env m, MonadIO m) => m ()
 runPeerSync =
     forever $ do
         lg <- getLogger
@@ -97,7 +97,7 @@ getBatchSize net peerCount n
     | getNetworkName net == "regtest" = [1]
     | otherwise = getBatchSizeMainnet peerCount n
 
-runBlockCacheQueue :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+runBlockCacheQueue :: (HasXokenNodeEnv env m, MonadIO m) => m ()
 runBlockCacheQueue =
     forever $ do
         lg <- getLogger
@@ -396,7 +396,7 @@ setupSeedPeerConnection =
 --
 -- Get ZUT from outpoint
 -- getZUTFromOutpoint ::
---        (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+--        (HasXokenNodeEnv env m, MonadIO m)
 --     => Int
 --     -> TSH.TSHashTable (TxHash, Word32) (MVar (Text, Text, Int64))
 --     -> Logger

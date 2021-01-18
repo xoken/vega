@@ -178,7 +178,7 @@ getBestBlockNodeIO rkdb = do
             Just (Right b) -> Just b
             _ -> Nothing
 
-updatePredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+updatePredecessors :: (HasXokenNodeEnv env m, MonadIO m) => m ()
 updatePredecessors = do
     bp2pEnv <- getBitcoinP2P
     pr <- fetchPredecessors
@@ -196,7 +196,7 @@ fetchPredecessorsIO rkdb pcf hm =
                  Just p -> return [hash, p]) $
     getParents hm (10) (memoryBestHeader hm)
 
-fetchPredecessors :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m [BlockHash]
+fetchPredecessors :: (HasXokenNodeEnv env m, MonadIO m) => m [BlockHash]
 fetchPredecessors = do
     dbe <- getDB
     bp2pEnv <- getBitcoinP2P
@@ -280,25 +280,25 @@ getIO rkdb cf k = do
 deleteIO :: (Store a, MonadIO m) => R.DB -> R.ColumnFamily -> a -> m ()
 deleteIO rkdb cf k = R.deleteCF rkdb cf (DS.encode k)
 
-checkBlocksFullySynced :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m Bool
+checkBlocksFullySynced :: (HasXokenNodeEnv env m, MonadIO m) => m Bool
 checkBlocksFullySynced = do
     bestBlock <- fetchBestBlock
     bestSynced <- fetchBestSyncedBlock
     return $ (headerHash $ nodeHeader bestBlock, fromIntegral $ nodeHeight bestBlock) == bestSynced
 
-blocksUnsynced :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m Int32
+blocksUnsynced :: (HasXokenNodeEnv env m, MonadIO m) => m Int32
 blocksUnsynced = do
     bestBlock <- fetchBestBlock
     bestSynced <- fetchBestSyncedBlock
     return $ (fromIntegral $ nodeHeight bestBlock) - (snd bestSynced)
 
-markBestSyncedBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Text -> Int32 -> m ()
+markBestSyncedBlock :: (HasXokenNodeEnv env m, MonadIO m) => Text -> Int32 -> m ()
 markBestSyncedBlock hash height = do
     rkdb <- rocksDB <$> getDB
     R.put rkdb "best_synced_hash" $ DTE.encodeUtf8 hash
     R.put rkdb "best_synced_height" $ C.pack $ show height
 
-fetchBestSyncedBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ((BlockHash, Int32))
+fetchBestSyncedBlock :: (HasXokenNodeEnv env m, MonadIO m) => m ((BlockHash, Int32))
 fetchBestSyncedBlock = do
     lg <- getLogger
     rkdb <- rocksDB <$> getDB
@@ -319,14 +319,14 @@ fetchBestSyncedBlock = do
             debug lg $ LG.msg $ val "Bestblock is genesis."
             return ((headerHash $ getGenesisHeader net), 0)
 
-getBlockLocator :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m BlockLocator
+getBlockLocator :: (HasXokenNodeEnv env m, MonadIO m) => m BlockLocator
 getBlockLocator = do
     bp2pEnv <- getBitcoinP2P
     bn <- fetchBestBlock
     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
     return $ blockLocator hm bn
 
-fetchMatchBlockOffset :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m (Maybe BlockHeight)
+fetchMatchBlockOffset :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> m (Maybe BlockHeight)
 fetchMatchBlockOffset hash = do
     bp2pEnv <- getBitcoinP2P
     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)

@@ -43,7 +43,7 @@ encodeAndSendMessage writeLock sock net msg =
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
 sendEncMessage writeLock sock msg = withMVar writeLock (\_ -> LB.sendAll sock msg)
 
-produceGetDataMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m (Message)
+produceGetDataMessage :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m (Message)
 produceGetDataMessage peer = do
     lg <- getLogger
     debug lg $ LG.msg $ "Block - produceGetDataMessage - called." ++ show peer
@@ -71,7 +71,7 @@ sendRequestMessages pr msg = do
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
 
-sendCompactBlockGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
+sendCompactBlockGetData :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
 sendCompactBlockGetData pr hash = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
@@ -88,7 +88,7 @@ sendCompactBlockGetData pr hash = do
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
 
-sendTxGetData :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
+sendTxGetData :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> Hash256 -> m ()
 sendTxGetData pr txHash = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
@@ -111,7 +111,7 @@ sendTxGetData pr txHash = do
             debug lg $ LG.msg $ "[dag] sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
 
-produceGetHeadersMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m Message
+produceGetHeadersMessage :: (HasXokenNodeEnv env m, MonadIO m) => m Message
 produceGetHeadersMessage = do
     lg <- getLogger
     debug lg $ LG.msg $ val "produceGetHeadersMessage - called."
@@ -128,7 +128,7 @@ produceGetHeadersMessage = do
     debug lg $ LG.msg ("block-locator: " ++ show bl)
     return (MGetHeaders gh)
 
-sendGetHeaderMessages :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Message -> m ()
+sendGetHeaderMessages :: (HasXokenNodeEnv env m, MonadIO m) => Message -> m ()
 sendGetHeaderMessages msg = do
     lg <- getLogger
     debug lg $ LG.msg $ val "sendGetHeaderMessages - called."

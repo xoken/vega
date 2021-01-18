@@ -79,7 +79,7 @@ handleIncomingMessages pr = do
             liftIO $ atomically $ modifyTVar' (bitcoinPeers bp2pEnv) (M.delete (bpAddress pr))
             return ()
 
-logMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> MessageCommand -> m (Bool)
+logMessage :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> MessageCommand -> m (Bool)
 logMessage peer mg = do
     lg <- getLogger
     -- liftIO $ atomically $ modifyTVar' (bpIngressMsgCount peer) (\z -> z + 1)
@@ -87,7 +87,7 @@ logMessage peer mg = do
     return (True)
 
 messageHandler ::
-       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+       (HasXokenNodeEnv env m, MonadIO m)
     => BitcoinPeer
     -> (Maybe Message, Maybe IngressStreamState)
     -> m (MessageCommand)
@@ -343,7 +343,7 @@ doVersionHandshake net sock sa = do
             err lg $ msg $ val "Error, unexpected message (1) during handshake"
             return False
 
-peerBlockSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m ()
+peerBlockSync :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
 peerBlockSync peer =
     forever $ do
         lg <- getLogger

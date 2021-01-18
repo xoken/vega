@@ -40,7 +40,7 @@ import Prelude as P
 import System.Logger as LG
 import Xoken.NodeConfig as NC
 
-workerMessageMultiplexer :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Worker -> m ()
+workerMessageMultiplexer :: (HasXokenNodeEnv env m, MonadIO m) => Worker -> m ()
 workerMessageMultiplexer worker = do
     lg <- getLogger
     forever $ do
@@ -239,7 +239,7 @@ startTCPServer ip port = do
 
 --
 -- masterWorkerConnSetup zctxt (workers nodeConf)
-initializeWorkers :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Node -> [Node] -> m ()
+initializeWorkers :: (HasXokenNodeEnv env m, MonadIO m) => Node -> [Node] -> m ()
 initializeWorkers myNode clstrNodes = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P

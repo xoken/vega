@@ -81,7 +81,7 @@ zRPCRequestDispatcher param wrk = do
     return resp
 
 validateOutpoint ::
-       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+       (HasXokenNodeEnv env m, MonadIO m)
     => OutPoint
     -> Maybe BlockHash
     -> Int
@@ -150,7 +150,7 @@ validateOutpoint outPoint curBlkHash wait = do
             err lg $ LG.msg $ "Error: (validateOutpoint) Fetching from outputs: " ++ show e
             throw KeyValueDBInsertException
 
-updateOutpoint :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Word32)
+updateOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Word32)
 updateOutpoint outPoint bhash bht = do
     lg <- getLogger
     debug lg $ LG.msg $ "[dag] updateOutpoint called for (Outpoint,blkHash,blkHeight) " ++ (show (outPoint, bhash, bht))
@@ -178,7 +178,7 @@ updateOutpoint outPoint bhash bht = do
             err lg $ LG.msg $ "Error: Fetching from outputs: " ++ show e
             throw KeyValueDBInsertException
 
-pruneBlocksTxnsOutputs :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => [BlockHash] -> m ()
+pruneBlocksTxnsOutputs :: (HasXokenNodeEnv env m, MonadIO m) => [BlockHash] -> m ()
 pruneBlocksTxnsOutputs blockHashes = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger

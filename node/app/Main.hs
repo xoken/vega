@@ -152,7 +152,7 @@ runThreads config nodeConf bp2p lg certPaths = do
         liftIO $ putStrLn $ "node recovering from fatal DB connection failure!"
     return ()
 
-runSyncStatusChecker :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+runSyncStatusChecker :: (HasXokenNodeEnv env m, MonadIO m) => m ()
 runSyncStatusChecker = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P

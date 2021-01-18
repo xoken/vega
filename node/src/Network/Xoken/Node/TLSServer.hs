@@ -56,7 +56,7 @@ newEndPointConnection context = do
     return $ EndPointConnection reqQueue resLock formatRef
 
 handleRPCReqResp ::
-       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+       (HasXokenNodeEnv env m, MonadIO m)
     => EndPointConnection
     -> EncodingFormat
     -> Int
@@ -95,7 +95,7 @@ handleRPCReqResp epConn format mid version encReq = do
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: goGetResource / authenticate " ++ show e
 
-handleNewConnectionRequest :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TLSEndpointServiceHandler -> m ()
+handleNewConnectionRequest :: (HasXokenNodeEnv env m, MonadIO m) => TLSEndpointServiceHandler -> m ()
 handleNewConnectionRequest handler = do
     continue <- liftIO $ newIORef True
     whileM_ (liftIO $ readIORef continue) $ do
@@ -103,7 +103,7 @@ handleNewConnectionRequest handler = do
         async $ handleRequest epConn
         return ()
 
-handleRequest :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => EndPointConnection -> m ()
+handleRequest :: (HasXokenNodeEnv env m, MonadIO m) => EndPointConnection -> m ()
 handleRequest epConn = do
     continue <- liftIO $ newIORef True
     whileM_ (liftIO $ readIORef continue) $ do

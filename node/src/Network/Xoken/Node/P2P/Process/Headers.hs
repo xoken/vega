@@ -33,7 +33,7 @@ validateChainedBlockHeaders hdrs = do
         pairs = zip xs (drop 1 xs)
     L.foldl' (\ac x -> ac && (headerHash $ fst (fst x)) == (prevBlock $ fst (snd x))) True pairs
 
-processHeaders :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Headers -> m ()
+processHeaders :: (HasXokenNodeEnv env m, MonadIO m) => Headers -> m ()
 processHeaders hdrs = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
