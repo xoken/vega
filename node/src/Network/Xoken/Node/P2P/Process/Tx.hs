@@ -89,20 +89,23 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
             liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP
             return ()
 
-processTx :: (HasXokenNodeEnv env m, MonadIO m) => Tx -> Maybe BlockHash -> Word32 -> m ([OutPoint],[TxHash])
-processTx tx bhash blkht = do
+processTx :: (HasXokenNodeEnv env m, MonadIO m) => Tx -> Maybe (BlockHash,Word32) -> m ([OutPoint],[TxHash])
+processTx tx bhashht = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     let inputs = zip (txIn tx) [0 :: Word32 ..]
     let outputs = zip (txOut tx) [0 :: Word32 ..]
     let outpoints =
             map (\(b, _) -> ((outPointHash $ prevOutput b), fromIntegral $ outPointIndex $ prevOutput b)) (inputs)
-    bsh <- case bhash of
+    (bhash,blkht) <- case bhashht of
             Just bh -> return bh
             Nothing -> do
-                prb <- liftIO $ mkProvisionalBlockHashR bsh
-                putProvisionalBlockHash prb bsh
-                return prb
+                bbn <- fetchBestBlock
+                let (bbsh, bbht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+                prb <- liftIO $ mkProvisionalBlockHashR bbsh
+                putProvisionalBlockHash prb bbsh
+                return (prb,bbht + 1)
     inputValsOutpoints <- mapM
             (\(b, indx) -> do
                  let opHash = outPointHash $ prevOutput b
@@ -110,13 +113,13 @@ processTx tx bhash blkht = do
                  let opindx = fromIntegral $ outPointIndex $ prevOutput b
                  if outPointHash nullOutPoint == opHash
                      then do
-                         let sval = fromIntegral $ computeSubsidy net (fromIntegral bht :: Word32) -- TODO: replace with correct  block height
+                         let sval = fromIntegral $ computeSubsidy net (fromIntegral blkht :: Word32) -- TODO: replace with correct  block height
                          return (sval, (shortHash, [], opHash, opindx))
                      else do
                          debug lg $
                              LG.msg
                                  ("[dag] processUnconfTransaction: inputValsOutpoint (inputs): " ++ (show (b, indx)))
-                         zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) bhash -- Nothing for unconf
+                         zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ fmap fst bhashht -- Nothing for unconf?
                          -- validateOutpoint timeout value should be zero, and TimeOut not to be considered an error 
                          -- even if parent tx is missing, lets proceed hoping it will become available soon. 
                          -- this assumption is crucial for async ZTXI logic.    
@@ -144,7 +147,7 @@ processTx tx bhash blkht = do
                          ZtxiUtxo
                              (txHash tx)
                              oindex
-                             [bsh] -- [bhash] if already present then ADD to the existing list of BlockHashes
+                             [bhash] -- [bhash] if already present then ADD to the existing list of BlockHashes
                              (fromIntegral blkht) -- (fromIntegral blkht) could be 999999 for unconf
                              outpoints
                              []
@@ -179,9 +182,6 @@ processTx tx bhash blkht = do
 processUnconfTransaction :: (HasXokenNodeEnv env m, MonadIO m) => Tx -> m ([TxHash])
 processUnconfTransaction tx = do
     lg <- getLogger
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    bbn <- fetchBestBlock
-    let (bsh, bht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
     debug lg $ LG.msg $ "processing Unconf Tx " ++ show (txHash tx)
     putTx (txHash tx) tx
     (_, parentTxns) <- processTx tx Nothing
@@ -193,7 +193,6 @@ processConfTransaction ::
        (HasXokenNodeEnv env m, MonadIO m) => Tx -> BlockHash -> Word32 -> Word32 -> m ([OutPoint])
 processConfTransaction tx bhash blkht txind = do
     lg <- getLogger
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx)
     (outpts,_) <- processTx tx (Just (bhash, blkht))
     debug lg $ LG.msg $ "processing Tx " ++ show (txHash tx) ++ ": end of processing signaled"
