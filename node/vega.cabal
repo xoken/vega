@@ -53,7 +53,7 @@ executable vega
       Network.Xoken.Node.Service.Chain
       Network.Xoken.Node.Service.Mining
       Network.Xoken.Node.TLSServer
-      Network.Xoken.Node.Tx.Protocol
+      --Network.Xoken.Node.Tx.Protocol
       Network.Xoken.Node.Worker.Common
       Network.Xoken.Node.Worker.Dispatcher
       Network.Xoken.Node.Worker.Listener
