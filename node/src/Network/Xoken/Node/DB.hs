@@ -15,6 +15,7 @@ import Data.ByteString.Char8 as C
 import Data.Default
 import Data.Int
 import Data.Store as DS
+import Data.Serialize as S
 import Data.Text as T
 import qualified Data.Text.Encoding as DTE
 import Data.Time.Clock.POSIX
@@ -146,7 +147,7 @@ fetchBestBlock = do
     bp2pEnv <- getBitcoinP2P
     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
     return $ memoryBestHeader hm
-
+{-
 putHeaderMemoryElem :: (HasXokenNodeEnv env m, MonadIO m) => BlockNode -> m ()
 putHeaderMemoryElem b = putX "blocktree" (shortBlockHash $ headerHash $ nodeHeader b) b
 
@@ -154,6 +155,27 @@ putHeaderMemoryElemIO :: (MonadIO m) => R.DB -> R.ColumnFamily -> BlockNode -> m
 putHeaderMemoryElemIO rkdb cf b = do
     let sb = DS.encode $ shortBlockHash $ headerHash $ nodeHeader b
         bne = DS.encode b
+    R.putCF rkdb cf sb bne
+-}
+
+putHeaderMemoryElem :: (HasXokenNodeEnv env m, MonadIO m) => BlockNode -> m ()
+putHeaderMemoryElem b = do
+    dbe' <- getDB
+    let rkdb = rocksDB dbe'
+        cf = rocksCF dbe'
+        sb = S.encode $ shortBlockHash $ headerHash $ nodeHeader b
+        bne = S.encode b
+    cfhm' <- liftIO $ TSH.lookup cf "blocktree"
+    case cfhm' of
+        Just cf' -> R.putCF rkdb cf' sb bne
+        Nothing -> do
+            liftIO $ print "Couldn't get cf"
+            return ()
+
+putHeaderMemoryElemIO :: (MonadIO m) => R.DB -> R.ColumnFamily -> BlockNode -> m ()
+putHeaderMemoryElemIO rkdb cf b = do
+    let sb = S.encode $ shortBlockHash $ headerHash $ nodeHeader b
+        bne = S.encode b
     R.putCF rkdb cf sb bne
 
 putBestBlockNode :: (HasXokenNodeEnv env m, MonadIO m) => BlockNode -> m ()
