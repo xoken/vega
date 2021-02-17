@@ -84,8 +84,11 @@ zRPCDispatchTxValidate selfFunc tx bhash bheight txindex = do
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
-                    let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
-                    throw mex
+                    let mexStr = (fromMaybe (show $ ZUnknownException "zrsErrorData is Nothing") $ zrsErrorData er)
+                    mex <- liftIO $ try $ return $ (read mexStr :: BlockSyncException)
+                    case mex of
+                        Right exp -> throw exp
+                        Left (_ :: SomeException) -> throw $ ZUnknownException mexStr
     return ()
 
 zRPCDispatchProvisionalBlockHash :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> BlockHash -> m ()
@@ -109,8 +112,11 @@ zRPCDispatchProvisionalBlockHash bh pbh = do
                                  Nothing -> throw InvalidMessageTypeException
                          Left er -> do
                              err lg $ LG.msg $ "decoding zRPCDispatchProvisionalBlockHash error resp : " ++ show er
-                             let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
-                             throw mex)
+                             let mexStr = (fromMaybe (show $ ZUnknownException "zrsErrorData is Nothing") $ zrsErrorData er)
+                             mex <- liftIO $ try $ return $ (read mexStr :: BlockSyncException)
+                             case mex of
+                                Right exp -> throw exp
+                                Left (_ :: SomeException) -> throw $ ZUnknownException mexStr)
         (wrkrs)
 
 zRPCDispatchGetOutpoint ::
@@ -144,8 +150,11 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
-                    let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
-                    throw mex
+                    let mexStr = (fromMaybe (show $ ZUnknownException "zrsErrorData is Nothing") $ zrsErrorData er)
+                    mex <- liftIO $ try $ return $ (read mexStr :: BlockSyncException)
+                    case mex of
+                        Right exp -> throw exp
+                        Left (_ :: SomeException) -> throw $ ZUnknownException mexStr
 
 zRPCDispatchUpdateOutpoint :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Word32 -> m (Word32)
 zRPCDispatchUpdateOutpoint outPoint bhash height = do
@@ -176,8 +185,11 @@ zRPCDispatchUpdateOutpoint outPoint bhash height = do
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
                     err lg $ LG.msg $ "decoding Tx updation error resp : " ++ show er
-                    let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
-                    throw mex
+                    let mexStr = (fromMaybe (show $ ZUnknownException "zrsErrorData is Nothing") $ zrsErrorData er)
+                    mex <- liftIO $ try $ return $ (read mexStr :: BlockSyncException)
+                    case mex of
+                        Right exp -> throw exp
+                        Left (_ :: SomeException) -> throw $ ZUnknownException mexStr
 
 zRPCDispatchBlocksTxsOutputs :: (HasXokenNodeEnv env m, MonadIO m) => [BlockHash] -> m ()
 zRPCDispatchBlocksTxsOutputs blockHashes = do
@@ -200,8 +212,11 @@ zRPCDispatchBlocksTxsOutputs blockHashes = do
                                  Nothing -> throw InvalidMessageTypeException
                          Left er -> do
                              err lg $ LG.msg $ "decoding PruneBlockTxOutputs error resp : " ++ show er
-                             let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
-                             throw mex)
+                             let mexStr = (fromMaybe (show $ ZUnknownException "zrsErrorData is Nothing") $ zrsErrorData er)
+                             mex <- liftIO $ try $ return $ (read mexStr :: BlockSyncException)
+                             case mex of
+                                 Right exp -> throw exp
+                                 Left (_ :: SomeException) -> throw $ ZUnknownException mexStr)
         (wrkrs)
 
 -- zRPCDispatchTraceOutputs :: (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> BlockHash -> Bool -> Int -> m (Bool)
@@ -228,8 +243,12 @@ zRPCDispatchBlocksTxsOutputs blockHashes = do
 --                         Nothing -> throw InvalidMessageTypeException
 --                 Left er -> do
 --                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
---                     let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
---                     throw mex
+--                     let mexStr = (fromMaybe (show $ ZUnknownException "zrsErrorData is Nothing") $ zrsErrorData er)
+--                     mex <- liftIO $ try $ return $ (read mexStr :: BlockSyncException)
+--                     case mex of
+--                         Right exp -> throw exp
+--                         Left (_ :: SomeException) -> throw $ ZUnknownException mexStr
+
 zRPCDispatchNotifyNewBlockHeader :: (HasXokenNodeEnv env m, MonadIO m) => [ZBlockHeader] -> BlockNode -> m ()
 zRPCDispatchNotifyNewBlockHeader headers bn = do
     bp2pEnv <- getBitcoinP2P
@@ -251,8 +270,11 @@ zRPCDispatchNotifyNewBlockHeader headers bn = do
                                  Nothing -> throw InvalidMessageTypeException
                          Left er -> do
                              err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er
-                             let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
-                             throw mex)
+                             let mexStr = (fromMaybe (show $ ZUnknownException "zrsErrorData is Nothing") $ zrsErrorData er)
+                             mex <- liftIO $ try $ return $ (read mexStr :: BlockSyncException)
+                             case mex of
+                                 Right exp -> throw exp
+                                 Left (_ :: SomeException) -> throw $ ZUnknownException mexStr)
         (wrkrs)
 
 --
@@ -290,8 +312,11 @@ zRPCDispatchUnconfirmedTxValidate selfFunc tx = do
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
                     err lg $ LG.msg $ "decoding Unconfirmed Tx validation error resp : " ++ show er
-                    let mex = (read $ fromJust $ zrsErrorData er) :: BlockSyncException
-                    throw mex
+                    let mexStr = (fromMaybe (show $ ZUnknownException "zrsErrorData is Nothing") $ zrsErrorData er)
+                    mex <- liftIO $ try $ return $ (read mexStr :: BlockSyncException)
+                    case mex of
+                        Right exp -> throw exp
+                        Left (_ :: SomeException) -> throw $ ZUnknownException mexStr
 
 getRemoteWorker :: (HasXokenNodeEnv env m, MonadIO m) => Word32 -> NodeRole -> m (Maybe Worker)
 getRemoteWorker shardingLex role = do

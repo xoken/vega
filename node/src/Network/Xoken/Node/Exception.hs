@@ -39,6 +39,7 @@ data BlockSyncException
     | ZUnknownHandler
     | ColumnFamilyNotFoundException
     | ZInvalidColumnFamily
+    | ZUnknownException String
     deriving (Show, Read)
 
 instance Exception BlockSyncException
