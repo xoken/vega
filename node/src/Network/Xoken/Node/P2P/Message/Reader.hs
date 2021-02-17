@@ -80,7 +80,7 @@ readNextMessage' peer readLock = do
                                     liftIO $ writeIORef (ptLastTxRecvTime tracker) $ Just tm
                                     if binTxTotalCount ingst == binTxIngested ingst
                                         then do
-                                            liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z - 1)
+                                            liftIO $ atomicModifyIORef' (blockFetchWindow bp2pEnv) (\z -> (z - 1, ()))
                                             liftIO $
                                                 TSH.insert
                                                     (blockSyncStatusMap bp2pEnv)

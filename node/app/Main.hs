@@ -33,6 +33,7 @@ import qualified Data.ByteString.Short as BSS
 import Data.Function
 import Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
+import Data.IORef
 import Data.List
 import Data.Map.Strict as M
 import Data.Maybe as DM
@@ -214,6 +215,7 @@ defBitcoinP2P nodeCnf = do
     pftx <- TSH.new 10
     cbu <- TSH.new 1
     pr <- newTVarIO []
+    fw <- liftIO $ newIORef 0
     return $
         BitcoinP2P
             nodeCnf
@@ -241,6 +243,7 @@ defBitcoinP2P nodeCnf = do
             pftx
             cbu
             pr
+            fw
 
 initVega :: IO ()
 initVega = do

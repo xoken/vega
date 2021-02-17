@@ -21,6 +21,7 @@ import Crypto.Secp256k1
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
 import Data.Hashable
+import Data.IORef
 import Data.Int
 import qualified Data.Map.Strict as M
 import Data.Sequence
@@ -97,6 +98,7 @@ data BitcoinP2P =
         , candidatesByUuid :: !(TSH.TSHashTable UUID (Int32, TxHash))
         , predecessors :: !(TVar [BlockHash])
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
+        , blockFetchWindow :: !(IORef Int) -- number of outstanding blocks
         }
 
 class HasBitcoinP2P m where

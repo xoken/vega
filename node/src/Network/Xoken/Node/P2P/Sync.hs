@@ -41,6 +41,7 @@ import Network.Xoken.Node.P2P.Socket
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
 import System.Logger as LG
+import System.Random (randomRIO)
 import Xoken.NodeConfig as NC
 
 runEgressChainSync :: (HasXokenNodeEnv env m, MonadIO m) => m ()
@@ -113,105 +114,120 @@ runBlockCacheQueue =
         syt' <- liftIO $ TSH.toList (blockSyncStatusMap bp2pEnv)
         let syt = L.sortBy (\(_, (_, h)) (_, (_, h')) -> compare h h') syt'
             sysz = fromIntegral $ L.length syt
+        fullySynced <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
+        -- check any retries
+        retn1 <-
+            do debug lg $ LG.msg $ val "Checking for retries"
+               let unsent = L.filter (\x -> (fst $ snd x) == RequestQueued) syt
+               let sent =
+                       L.filter
+                           (\x ->
+                                case fst $ snd x of
+                                    RequestSent _ -> True
+                                    otherwise -> False)
+                           syt
+               let recvNotStarted =
+                       L.filter
+                           (\(_, ((RequestSent t), _)) ->
+                                (diffUTCTime tm t > (fromIntegral $ getDataResponseTimeout nc)))
+                           sent
+               let receiveInProgress =
+                       L.filter
+                           (\x ->
+                                case fst $ snd x of
+                                    RecentTxReceiveTime _ -> True
+                                    otherwise -> False)
+                           syt
+               let recvTimedOut =
+                       L.filter
+                           (\(_, ((RecentTxReceiveTime (t, c)), _)) ->
+                                (diffUTCTime tm t > (fromIntegral $ recentTxReceiveTimeout nc)))
+                           receiveInProgress
+               let recvComplete =
+                       L.filter
+                           (\x ->
+                                case fst $ snd x of
+                                    BlockReceiveComplete _ -> True
+                                    otherwise -> False)
+                           syt
+               let processingIncomplete =
+                       L.filter
+                           (\(_, ((BlockReceiveComplete t), _)) ->
+                                (diffUTCTime tm t > (fromIntegral $ blockProcessingTimeout nc)))
+                           recvComplete
+                -- all blocks received, empty the cache, cache-miss gracefully
+               if L.length processingIncomplete > 0
+                   then return $ mkBlkInf $ getHead processingIncomplete
+                   else if L.length recvTimedOut > 0
+                            then return $ mkBlkInf $ getHead recvTimedOut
+                            else if L.length recvNotStarted > 0
+                                     then return $ mkBlkInf $ getHead recvNotStarted
+                                     else if L.length unsent > 0
+                                              then return $ mkBlkInf $ getHead unsent
+                                              else return Nothing
         -- reload cache
         retn <-
-            if sysz == 0
-                then do
-                    (bhash, ht') <- fetchBestSyncedBlock
-                    hmem <- liftIO $ readTVarIO (blockTree bp2pEnv)
-                    let ht = fromIntegral ht'
-                        bc = last $ getBatchSize net (fromIntegral $ L.length connPeers) ht
-                        bh = ht + bc
+            case retn1 of
+                Just x -> return $ Just x
+                Nothing ->
+                    if sysz <= (blocksFetchWindow $ nodeConfig bp2pEnv)
+                        then do
+                            (bhash, ht') <- fetchBestSyncedBlock
+                            hmem <- liftIO $ readTVarIO (blockTree bp2pEnv)
+                            let fetchMore = (blocksFetchWindow $ nodeConfig bp2pEnv) - sysz
+                            let ht = fromIntegral ht'
+                                bc = (blocksFetchWindow $ nodeConfig bp2pEnv) - sysz -- last $ getBatchSize net (fromIntegral $ L.length connPeers) ht
+                                bh = ht + bc
                     --let !bks = map (\x -> ht + x) cacheInd
-                        parc = bc - 1
-                        ans = getAncestor hmem (fromIntegral bh) (memoryBestHeader hmem)
-                        op =
-                            case ans of
-                                Nothing -> []
-                                Just an -> L.reverse (an : getParents hmem (fromIntegral parc) an)
+                                parc = bc - 1
+                                ans = getAncestor hmem (fromIntegral bh) (memoryBestHeader hmem)
+                                op =
+                                    case ans of
+                                        Nothing -> []
+                                        Just an -> L.reverse (an : getParents hmem (fromIntegral parc) an)
                     --liftIO $ print (bhash,ht,bc,bh,parc,ans,op)
-                    if L.length op == 0
-                        then do
-                            trace lg $ LG.msg $ val "Synced fully!"
-                            return (Nothing)
-                        else if L.length op == fromIntegral bc
-                                 then do
-                                     debug lg $ LG.msg $ val "Reloading cache."
-                                     let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) op
-                                     mapM (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
-                                     let e = head p
-                                     return (Just $ BlockInfo (fst e) (snd $ snd e))
-                                 else do
-                                     debug lg $ LG.msg $ val "Still loading block headers, try again!"
-                                     return Nothing
-                else do
-                    mapM_
-                        (\(bsh, (_, ht)) -> do
-                             q <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (bsh)
-                             case q of
-                                 Nothing -> trace lg $ LG.msg $ ("bsh did-not-find : " ++ show bsh)
-                                 Just (vvv, www) -> do
-                                     eee <- liftIO $ TSH.toList vvv
-                                     trace lg $ LG.msg $ ("bsh: " ++ (show bsh) ++ " " ++ (show eee) ++ (show www)))
-                        syt
+                            if L.null op
+                                then do
+                                    trace lg $ LG.msg $ val "Synced fully!"
+                                    return Nothing
+                                else do --if L.length op == fromIntegral bc
+                                    debug lg $ LG.msg $ val "Reloading cache."
+                                    let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) op
+                                    if L.null p
+                                        then do
+                                            trace lg $ LG.msg $ val "Nothing to add."
+                                            return Nothing
+                                        else do
+                                            debug lg $ LG.msg $ val "Adding to cache."
+                                            mapM_ (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
+                                            let e = head p
+                                            return (Just $ BlockInfo (fst e) (snd $ snd e))
+                        else do
+                            debug lg $ LG.msg $ val "Still loading block headers, try again!"
+                            return Nothing
                     --
-                    mapM_
-                        (\(bsh, (_, ht)) -> do
-                             valx <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (bsh)
-                             case valx of
-                                 Just xv -> do
-                                     siza <- liftIO $ TSH.toList (fst xv)
-                                     when ((sum $ snd $ unzip siza) == snd xv) $
-                                         liftIO $
-                                         TSH.insert (blockSyncStatusMap bp2pEnv) (bsh) (BlockProcessingComplete, ht)
-                                 Nothing -> return ())
-                        syt
-                    --
-                    let unsent = L.filter (\x -> (fst $ snd x) == RequestQueued) syt
-                    let sent =
-                            L.filter
-                                (\x ->
-                                     case fst $ snd x of
-                                         RequestSent _ -> True
-                                         otherwise -> False)
-                                syt
-                    let recvNotStarted =
-                            L.filter
-                                (\(_, (RequestSent t, _)) ->
-                                     (diffUTCTime tm t > (fromIntegral $ getDataResponseTimeout nc)))
-                                sent
-                    let receiveInProgress =
-                            L.filter
-                                (\x ->
-                                     case fst $ snd x of
-                                         RecentTxReceiveTime _ -> True
-                                         otherwise -> False)
-                                syt
-                    let recvTimedOut =
-                            L.filter
-                                (\(_, (RecentTxReceiveTime (t, c), _)) ->
-                                     (diffUTCTime tm t > (fromIntegral $ recentTxReceiveTimeout nc)))
-                                receiveInProgress
-                    let recvComplete =
-                            L.filter
-                                (\x ->
-                                     case fst $ snd x of
-                                         BlockReceiveComplete _ -> True
-                                         otherwise -> False)
-                                syt
-                    let processingIncomplete =
-                            L.filter
-                                (\(_, (BlockReceiveComplete t, _)) ->
-                                     (diffUTCTime tm t > (fromIntegral $ blockProcessingTimeout nc)))
-                                recvComplete
-                    -- all blocks received, empty the cache, cache-miss gracefully
-                    trace lg $ LG.msg $ ("blockSyncStatusMap size: " ++ (show sysz))
-                    trace lg $ LG.msg $ ("blockSyncStatusMap (list): " ++ (show syt))
-                    if L.length sent == 0 &&
-                       L.length unsent == 0 && L.length receiveInProgress == 0 && L.length recvComplete == 0
-                            --let !lelm = last $ L.sortOn (snd . snd) (syt)
-                        then do
-                            let !(lhash, (_, lht)) = last $ syt
+        mapM_
+            (\(bsh, (_, ht)) -> do
+                    valx <- liftIO $ TSH.lookup (blockTxProcessingLeftMap bp2pEnv) (bsh)
+                    case valx of
+                        Just xv -> do
+                            siza <- liftIO $ TSH.toList (fst xv)
+                            trace lg $ LG.msg $ ("bsh: " ++ (show bsh) ++ " " ++ (show siza) ++ (show $ snd xv))
+                            when ((sum $ snd $ unzip siza) == snd xv) $
+                                liftIO $
+                                TSH.insert (blockSyncStatusMap bp2pEnv) (bsh) (BlockProcessingComplete, ht)
+                        Nothing -> trace lg $ LG.msg $ ("bsh did-not-find : " ++ show bsh))
+            syt
+        --
+        trace lg $ LG.msg $ ("blockSyncStatusMap size: " ++ (show sysz))
+        trace lg $ LG.msg $ ("blockSyncStatusMap (list): " ++ (show syt))
+        syncList <- liftIO $ TSH.toList (blockSyncStatusMap bp2pEnv)
+        let sortedList = L.sortOn (snd . snd) syncList
+        trace lg $ LG.msg $ ("sorted blockSyncStatusMap (list): " ++ (show sortedList))
+        let compl = L.takeWhile (\x -> (fst $ snd x) == BlockProcessingComplete) sortedList
+        if not $ L.null compl
+            then do
+                            let !(lhash, (_, lht)) = last $ compl
                             debug lg $ LG.msg $ ("marking best synced " ++ show (blockHashToHex $ lhash))
                             markBestSyncedBlock (blockHashToHex $ lhash) (fromIntegral $ lht)
                             updatePredecessors
@@ -250,21 +266,13 @@ runBlockCacheQueue =
                                 (\(k, _) -> do
                                      liftIO $ TSH.delete (blockSyncStatusMap bp2pEnv) k
                                      liftIO $ TSH.delete (blockTxProcessingLeftMap bp2pEnv) k)
-                                syt
-                            return Nothing
-                        else if L.null processingIncomplete
-                                 then return $ mkBlkInf $ getHead processingIncomplete
-                                 else if L.null recvTimedOut
-                                          then return $ mkBlkInf $ getHead recvTimedOut
-                                          else if L.null recvNotStarted
-                                                   then return $ mkBlkInf $ getHead recvNotStarted
-                                                   else if L.null unsent
-                                                            then return $ mkBlkInf $ getHead unsent
-                                                            else return Nothing
+                                compl
+            else return ()
+                             
         case retn of
             Just bbi -> do
                 latest <- liftIO $ newIORef True
-                sortedPeers <- liftIO $ sortPeers (map snd connPeers)
+                sortedPeers <- liftIO $ sortPeersRandom (map snd connPeers)
                 mapM_
                     (\pr -> do
                          ltst <- liftIO $ readIORef latest
@@ -283,11 +291,18 @@ runBlockCacheQueue =
                     sortedPeers
             Nothing -> trace lg $ LG.msg $ "nothing yet" ++ ""
         --
-        liftIO $ threadDelay 10000 -- 0.01 sec
+        liftIO $ threadDelay 100000 -- 0.1 sec
         return ()
   where
     getHead l = head $ L.sortOn (snd . snd) l
     mkBlkInf h = Just $ BlockInfo (fst h) (snd $ snd h)
+
+
+sortPeersRandom :: [BitcoinPeer] -> IO [BitcoinPeer]
+sortPeersRandom peers = do
+    mark <- randomRIO (0, L.length peers - 1)
+    let parts = L.splitAt mark peers
+    return $ snd parts ++ fst parts
 
 sortPeers :: [BitcoinPeer] -> IO [BitcoinPeer]
 sortPeers peers = do
@@ -300,7 +315,7 @@ sortPeers peers = do
                      Just lr -> return lr
                      Nothing -> return longlongago)
             peers
-    return $ map snd $ L.sortBy (\(a, _) (b, _) -> compare b a) (zip ts peers)
+    return $ map snd $ L.sortBy (\(a, _) (b, _) -> compare a b) (zip ts peers)
 
 setupSeedPeerConnection :: (HasXokenNodeEnv env m, MonadIO m) => m ()
 setupSeedPeerConnection =

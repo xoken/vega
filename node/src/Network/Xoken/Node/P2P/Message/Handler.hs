@@ -72,6 +72,7 @@ handleIncomingMessages pr = do
     case res of
         Right a -> return ()
         Left (e :: SomeException) -> do
+            liftIO $ atomicModifyIORef' (blockFetchWindow bp2pEnv) (\x -> (0, ())) -- safety border case
             err lg $ msg $ (val "[ERROR] Closing peer connection ") +++ (show e)
             case (bpSocket pr) of
                 Just sock -> liftIO $ NS.close sock
@@ -348,16 +349,16 @@ peerBlockSync peer =
     forever $ do
         lg <- getLogger
         bp2pEnv <- getBitcoinP2P
-        trace lg $ LG.msg $ ("peer block sync : " ++ (show peer))
-        !tm <- liftIO $ getCurrentTime
+        trace lg $ LG.msg $ "peer block sync : " ++ show peer
+        !tm <- liftIO getCurrentTime
         let tracker = statsTracker peer
-        fw <- liftIO $ readIORef $ ptBlockFetchWindow tracker
+        fw <- liftIO $ readIORef $ blockFetchWindow bp2pEnv
         recvtm <- liftIO $ readIORef $ ptLastTxRecvTime tracker
         sendtm <- liftIO $ readIORef $ ptLastGetDataSent tracker
         let staleTime = fromInteger $ fromIntegral (unresponsivePeerConnTimeoutSecs $ nodeConfig bp2pEnv)
         case recvtm of
             Just rt -> do
-                if (fw == 0) && (diffUTCTime tm rt < staleTime)
+                if (fw <= (blocksFetchWindow $ nodeConfig bp2pEnv) && (diffUTCTime tm rt < staleTime))
                     then do
                         msg <- produceGetDataMessage peer
                         res <- LE.try $ sendRequestMessages peer msg
@@ -365,7 +366,7 @@ peerBlockSync peer =
                             Right () -> do
                                 debug lg $ LG.msg $ val "updating state."
                                 liftIO $ writeIORef (ptLastGetDataSent tracker) $ Just tm
-                                liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z + 1)
+                                liftIO $ atomicModifyIORef' (blockFetchWindow bp2pEnv) (\z -> (z + 1, ()))
                             Left (e :: SomeException) -> do
                                 err lg $ LG.msg ("[ERROR] peerBlockSync " ++ show e)
                                 throw e
@@ -391,7 +392,7 @@ peerBlockSync peer =
                                 throw UnresponsivePeerException
                             else return ()
                     Nothing -> do
-                        if (fw == 0)
+                        if (fw <= (blocksFetchWindow $ nodeConfig bp2pEnv))
                             then do
                                 msg <- produceGetDataMessage peer
                                 res <- LE.try $ sendRequestMessages peer msg
@@ -399,12 +400,12 @@ peerBlockSync peer =
                                     Right () -> do
                                         debug lg $ LG.msg $ val "updating state."
                                         liftIO $ writeIORef (ptLastGetDataSent tracker) $ Just tm
-                                        liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z + 1)
+                                        liftIO $ atomicModifyIORef' (blockFetchWindow bp2pEnv) (\z -> (z + 1, ()))
                                     Left (e :: SomeException) -> do
                                         err lg $ LG.msg ("[ERROR] peerBlockSync " ++ show e)
                                         throw e
                             else return ()
-        liftIO $ threadDelay (10000) -- 0.01 sec
+        liftIO $ threadDelay (100000) -- 0.1 sec
         return ()
 
 setupPeerConnection :: (HasXokenNodeEnv env m, MonadIO m) => SockAddr -> m (Maybe BitcoinPeer)
