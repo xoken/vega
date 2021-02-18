@@ -290,7 +290,8 @@ runBlockCacheQueue =
                             (bhash, ht') <- fetchBestSyncedBlock
                             hmem <- liftIO $ readTVarIO (blockTree bp2pEnv)
                             let ht = fromIntegral ht'
-                                bc = last $ getBatchSize net (fromIntegral $ L.length connPeers) ht
+                                --bc = last $ getBatchSize net (fromIntegral $ L.length connPeers) ht
+                                bc = fromIntegral $ (blocksFetchWindow $ nodeConfig bp2pEnv) - sysz
                                 bh = ht + bc
                             --let !bks = map (\x -> ht + x) cacheInd
                                 parc = bc - 1
@@ -334,8 +335,10 @@ runBlockCacheQueue =
             syt     
    
         trace lg $ LG.msg $ ("blockSyncStatusMap size: " ++ (show sysz))
-        trace lg $ LG.msg $ ("blockSyncStatusMap (list): " ++ (show syt))
-        let compl = L.takeWhile (\x -> (fst $ snd x) == BlockProcessingComplete) syt
+        syncList <- liftIO $ TSH.toList (blockSyncStatusMap bp2pEnv)
+        let sortedList = L.sortOn (snd . snd) syncList
+        trace lg $ LG.msg $ ("blockSyncStatusMap (list): " ++ (show sortedList))
+        let compl = L.takeWhile (\x -> (fst $ snd x) == BlockProcessingComplete) sortedList
         unless (L.null compl) $ do
             let !(lhash, (_, lht)) = last $ syt
             debug lg $ LG.msg $ ("marking best synced " ++ show (blockHashToHex $ lhash))

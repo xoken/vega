@@ -245,7 +245,7 @@ resilientRead ::
        (HasLogger m, MonadBaseControl IO m, MonadIO m) => Socket -> BlockIngestState -> m (([Tx], LC.ByteString), Int64)
 resilientRead sock !blin = do
     lg <- getLogger
-    let chunkSize = 100 * 1000 -- 100 KB
+    let chunkSize = 1000 * 1000 -- 1 MB
         !delta =
             if binTxPayloadLeft blin > chunkSize
                 then chunkSize - ((LC.length $ binUnspentBytes blin))
@@ -757,7 +757,7 @@ readNextMessage' peer readLock = do
                                     liftIO $ writeIORef (ptLastTxRecvTime tracker) $ Just tm
                                     if binTxTotalCount ingst == binTxIngested ingst
                                         then do
-                                            liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z - 1)
+                                            liftIO $ atomicModifyIORef' (ptBlockFetchWindow tracker) (\z -> (z - 1,()))
                                             liftIO $
                                                 TSH.insert
                                                     (blockSyncStatusMap bp2pEnv)
@@ -794,7 +794,7 @@ handleIncomingMessages pr = do
         LA.concurrently_
             (peerBlockSync pr) -- issue GetData msgs
             (S.drain $
-             aheadly $
+             asyncly $
              S.repeatM (readNextMessage' pr rlk) & -- read next msgs
              S.mapM (messageHandler pr) & -- handle read msgs
              S.mapM (logMessage pr) & -- log msgs & collect stats
