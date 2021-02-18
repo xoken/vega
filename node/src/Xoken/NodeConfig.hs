@@ -65,6 +65,7 @@ data NodeConfig =
         , coinbaseTxAddress :: String
         , pruneLag :: Int
         , epochLength :: Int
+        , blocksFetchWindow :: Int
         }
     deriving (Show, Generic)
 

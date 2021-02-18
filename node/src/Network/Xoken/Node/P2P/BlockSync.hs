@@ -122,7 +122,8 @@ peerBlockSync peer =
                             Right () -> do
                                 debug lg $ LG.msg $ val "updating state."
                                 liftIO $ writeIORef (ptLastGetDataSent tracker) $ Just tm
-                                liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z + 1)
+                                --liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z + 1)
+                                liftIO $ atomicModifyIORef' (ptBlockFetchWindow tracker) (\z -> (z + 1, ()))
                             Left (e :: SomeException) -> do
                                 err lg $ LG.msg ("[ERROR] peerBlockSync " ++ show e)
                                 throw e
@@ -156,12 +157,13 @@ peerBlockSync peer =
                                     Right () -> do
                                         debug lg $ LG.msg $ val "updating state."
                                         liftIO $ writeIORef (ptLastGetDataSent tracker) $ Just tm
-                                        liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z + 1)
+                                        --liftIO $ modifyIORef' (ptBlockFetchWindow tracker) (\z -> z + 1)
+                                        liftIO $ atomicModifyIORef' (ptBlockFetchWindow tracker) (\z -> (z + 1, ()))
                                     Left (e :: SomeException) -> do
                                         err lg $ LG.msg ("[ERROR] peerBlockSync " ++ show e)
                                         throw e
                             else return ()
-        liftIO $ threadDelay (10000) -- 0.01 sec
+        liftIO $ threadDelay (100000) -- 0.1 sec
         return ()
 
 runPeerSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
@@ -403,11 +405,17 @@ runBlockCacheQueue =
                     sortedPeers
             Nothing -> trace lg $ LG.msg $ "nothing yet" ++ ""
         --
-        liftIO $ threadDelay 10000 -- 0.01 sec
+        liftIO $ threadDelay 100000 -- 0.1 sec
         return ()
   where
     getHead l = head $ L.sortOn (snd . snd) l
     mkBlkInf h = Just $ BlockInfo (fst h) (snd $ snd h)
+
+sortPeersRandom :: [BitcoinPeer] -> IO ([BitcoinPeer])
+sortPeersRandom peers = do
+    mark <- randomRIO (0, (L.length peers - 1))
+    let parts = L.splitAt mark peers
+    return $ snd parts ++ fst parts
 
 sortPeers :: [BitcoinPeer] -> IO [BitcoinPeer]
 sortPeers peers = do
@@ -420,7 +428,7 @@ sortPeers peers = do
                      Just lr -> return lr
                      Nothing -> return longlongago)
             peers
-    return $ map snd $ L.sortBy (\(a, _) (b, _) -> compare b a) (zip ts peers)
+    return $ map snd $ L.sortBy (\(a, _) (b, _) -> compare a b) (zip ts peers)
 
 {- UNUSED? txind isn't used anywhere in processConfTransaction -}
 processConfTransaction ::
