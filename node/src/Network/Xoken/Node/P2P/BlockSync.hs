@@ -32,6 +32,7 @@ import Control.Concurrent.STM.TVar
 import Control.Exception
 import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
+import Control.Monad.Extra
 import Control.Monad.Reader
 import Control.Monad.STM
 import qualified Data.ByteString as B
@@ -308,8 +309,18 @@ runBlockCacheQueue =
                                 else if L.length op == (fromIntegral bc)
                                         then do
                                             debug lg $ LG.msg $ val "Reloading cache."
-                                            let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) op
-                                            mapM (\(k, v) -> liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) k v) p
+                                            --let !p = fmap (\x -> (headerHash $ nodeHeader x, (RequestQueued, nodeHeight x))) op
+                                            !p <- mapMaybeM 
+                                                    (\x -> do
+                                                        let bhash = headerHash $ nodeHeader x
+                                                            bht = nodeHeight x
+                                                        val <- liftIO $ TSH.lookup (blockSyncStatusMap bp2pEnv) bhash
+                                                        case val of
+                                                            Just _ -> return Nothing
+                                                            Nothing -> do
+                                                                let value = (RequestQueued,bht)
+                                                                liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) bhash value
+                                                                return $ Just (bhash,value)) op
                                             let e = p !! 0
                                             return (Just $ BlockInfo (fst e) (snd $ snd e))
                                         else do
