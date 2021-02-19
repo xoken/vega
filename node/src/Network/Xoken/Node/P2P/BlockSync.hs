@@ -321,8 +321,14 @@ runBlockCacheQueue =
                                                                 let value = (RequestQueued,bht)
                                                                 liftIO $ TSH.insert (blockSyncStatusMap bp2pEnv) bhash value
                                                                 return $ Just (bhash,value)) op
-                                            let e = p !! 0
-                                            return (Just $ BlockInfo (fst e) (snd $ snd e))
+                                            if L.null p
+                                                then do
+                                                    trace lg $ LG.msg $ val "Synced fully!"
+                                                    return Nothing
+                                                else do
+                                                    trace lg $ LG.msg $ val "Added to cache!"
+                                                    let e = p !! 0
+                                                    return (Just $ BlockInfo (fst e) (snd $ snd e))
                                         else do
                                             debug lg $ LG.msg $ val "Still loading block headers, try again!"
                                             return (Nothing)
