@@ -77,3 +77,5 @@ shardingHashSecretSalt: 29347693
 maxTxProcessingThreads: 100
 
 maxTxProcessingBuffer: 100
+
+ blocksFetchWindow: 4

@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -9,9 +8,6 @@ module Network.Xoken.Node.TLSServer
     ( module Network.Xoken.Node.TLSServer
     ) where
 
-import Arivi.P2P.P2PEnv
-import Arivi.P2P.RPC.Fetch
-import Arivi.P2P.Types
 import Codec.Serialise
 import Control.Concurrent.Async.Lifted (async)
 import Control.Concurrent.MVar
@@ -23,26 +19,19 @@ import Control.Monad.IO.Class
 import Control.Monad.Loops
 import Data.Aeson as A
 import Data.Binary as DB
+import Data.Bits
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LBS
 import Data.Functor (($>))
 import Data.IORef
 import Data.Int
-import qualified Data.Map.Strict as M
 import Data.Maybe
-import Data.Serialize
-import qualified Data.Serialize as S
-import Data.Text as T
-import Data.Time.Clock
-import Data.Time.Clock.POSIX
-import Data.X509.CertificateStore
-import GHC.Generics
 import qualified Network.Simple.TCP.TLS as TLS
 import Network.Socket
 import qualified Network.TLS as NTLS
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Env as NEnv
-import Network.Xoken.Node.P2P.Common
+import Network.Xoken.Node.Exception
 import Network.Xoken.Node.XokenService
 import Prelude as P
 import System.Logger as LG
@@ -67,7 +56,7 @@ newEndPointConnection context = do
     return $ EndPointConnection reqQueue resLock formatRef
 
 handleRPCReqResp ::
-       (HasXokenNodeEnv env m, HasLogger m, MonadIO m)
+       (HasXokenNodeEnv env m, MonadIO m)
     => EndPointConnection
     -> EncodingFormat
     -> Int
@@ -79,7 +68,7 @@ handleRPCReqResp epConn format mid version encReq = do
     lg <- getLogger
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     liftIO $ printf "handleRPCReqResp (%d, %s)\n" mid (show encReq)
-    res <- LE.try $ goGetResource encReq net 
+    res <- LE.try $ goGetResource encReq net
     case res of
         Right rpcResp -> do
             let body =
@@ -93,14 +82,12 @@ handleRPCReqResp epConn format mid version encReq = do
                         JSON ->
                             case rsResp rpcResp of
                                 Left (RPCError err rsData) ->
-                                    A.encode 
+                                    A.encode
                                         (JSONRPCErrorResponse
                                              mid
                                              (ErrorResponse (getJsonRPCErrorCode err) (show err) rsData)
                                              (fromJust version))
-                                Right rsBody ->
-                                    A.encode $
-                                    (JSONRPCSuccessResponse (fromJust version) (rsBody) mid)
+                                Right rsBody -> A.encode $ (JSONRPCSuccessResponse (fromJust version) (rsBody) mid)
             connSock <- liftIO $ takeMVar (context epConn)
             let prefixbody = LBS.append (DB.encode (fromIntegral (LBS.length body) :: Int32)) body
             NTLS.sendData connSock prefixbody
@@ -108,7 +95,7 @@ handleRPCReqResp epConn format mid version encReq = do
         Left (e :: SomeException) -> do
             err lg $ LG.msg $ "Error: goGetResource / authenticate " ++ show e
 
-handleNewConnectionRequest :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => TLSEndpointServiceHandler -> m ()
+handleNewConnectionRequest :: (HasXokenNodeEnv env m, MonadIO m) => TLSEndpointServiceHandler -> m ()
 handleNewConnectionRequest handler = do
     continue <- liftIO $ newIORef True
     whileM_ (liftIO $ readIORef continue) $ do
@@ -116,7 +103,7 @@ handleNewConnectionRequest handler = do
         async $ handleRequest epConn
         return ()
 
-handleRequest :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => EndPointConnection -> m ()
+handleRequest :: (HasXokenNodeEnv env m, MonadIO m) => EndPointConnection -> m ()
 handleRequest epConn = do
     continue <- liftIO $ newIORef True
     whileM_ (liftIO $ readIORef continue) $ do
@@ -210,6 +197,11 @@ startTLSEndpoint handler listenIP listenPort [certFilePath, keyFilePath, certSto
         Left err -> do
             putStrLn $ "Unable to read credentials from file"
             P.error "BadCredentialFile"
+
+fromBytes :: B.ByteString -> Integer
+fromBytes = B.foldl' f 0
+  where
+    f a b = a `shiftL` 8 .|. fromIntegral b
 
 recvTLSMessage :: TLS.Context -> Bool -> Int -> IO (B.ByteString)
 recvTLSMessage context prefixFlag remLen = do

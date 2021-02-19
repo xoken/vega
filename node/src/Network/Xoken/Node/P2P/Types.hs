@@ -8,17 +8,9 @@
 module Network.Xoken.Node.P2P.Types where
 
 import Codec.Serialise
-import Control.Concurrent.MSem as MS
-import Control.Concurrent.MSemN as MSN
 import Control.Concurrent.MVar
-import Control.Concurrent.QSem
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TSem
 import Control.Monad.IO.Class
-import Data.Aeson
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LB
-import Data.Functor.Identity
 import Data.IORef
 import Data.Int
 import qualified Data.Map.Strict as M
@@ -32,15 +24,11 @@ import Data.Store
 import GHC.Generics
 import Network.Socket hiding (send)
 import Network.Xoken.Block
-import Network.Xoken.Constants
 import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network
-import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Node.Worker.Types
 import Network.Xoken.Transaction
-import StmContainers.Map as SM
-import System.Random
-import Text.Read
 import Xoken.NodeConfig
 
 -- | Type alias for a combination of hostname and port.
@@ -77,7 +65,7 @@ data PeerTracker =
         { ptIngressMsgCount :: !(IORef Int) -- recent msg count for detecting stale peer connections
         , ptLastTxRecvTime :: !(IORef (Maybe UTCTime)) -- last tx recv time
         , ptLastGetDataSent :: !(IORef (Maybe UTCTime)) -- block 'GetData' sent time
-        , ptBlockFetchWindow :: !(IORef Int) -- number of outstanding blocks
+        --, ptBlockFetchWindow :: !(IORef Int) -- number of outstanding blocks
         -- ptLastPing , Ping :: !(Maybe (UTCTime, Word64)) -- last sent ping time and nonce
         }
 
@@ -86,8 +74,8 @@ getNewTracker = do
     imc <- liftIO $ newIORef 0
     rc <- liftIO $ newIORef Nothing
     st <- liftIO $ newIORef Nothing
-    fw <- liftIO $ newIORef 0
-    return $ PeerTracker imc rc st fw
+    --fw <- liftIO $ newIORef 0
+    return $ PeerTracker imc rc st
 
 instance Show BitcoinPeer where
     show p = (show $ bpAddress p) ++ " : " ++ (show $ bpConnected p)
