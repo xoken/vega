@@ -23,6 +23,7 @@ import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad.Reader
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List as L
+import Data.EnumBitSet (fromEnums, (.|.))
 import Data.Maybe
 import Data.Serialize
 import Data.Word
@@ -40,6 +41,7 @@ import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
+import Network.Xoken.Script
 import Network.Xoken.Transaction.Common
 import System.Logger as LG
 import Xoken.NodeConfig
@@ -178,7 +180,19 @@ processUnconfTransaction tx = do
                          -- even if parent tx is missing, lets proceed hoping it will become available soon. 
                          -- this assumption is crucial for async ZTXI logic.    
                          case zz of
-                             Right (val, bsh, _) -> do
+                             Right (val, bsh, _,scr) -> do
+                                 let context = Ctx
+                                                { script_flags = fromEnums [GENESIS, UTXO_AFTER_GENESIS, VERIFY_MINIMALIF]
+                                                                    .|. mandatoryScriptFlags .|. standardScriptFlags
+                                                , consensus = True
+                                                , sig_checker_data = Just $ SigCheckerData net tx (fromIntegral indx) val
+                                                }
+                                     scrd = decode scr
+                                     scrdi = decode (scriptInput b)
+                                 case (scrd, scrdi) of
+                                     (Left e,_) -> liftIO $ print $ "[SCRIPT] " ++ e
+                                     (_,Left e) -> liftIO $ print $ "[SCRIPT] " ++ e
+                                     (Right sc, Right sci) -> liftIO $ print $ "[SCRIPT] " ++ show (error_msg (verifyScriptWith context empty_env sci sc))
                                  debug lg $ LG.msg $ "[dag] processUnconfTransaction: zz: " ++ (show $ zz)
                                  return (val, (shortHash, bsh, opHash, opindx))
                              Left (e :: SomeException) -> do
@@ -208,6 +222,7 @@ processUnconfTransaction tx = do
                              []
                              (fromIntegral $ outValue opt)
                              opCount
+                             (scriptOutput opt)
                  res <- LE.try $ putOutput (OutPoint (txHash tx) oindex) zut
                  case res of
                      Right _ -> return (zut)

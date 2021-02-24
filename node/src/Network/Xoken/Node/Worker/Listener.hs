@@ -18,6 +18,7 @@ import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Binary as DB
+import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Char8 as C
@@ -99,12 +100,12 @@ requestHandler sock writeLock msg = do
                                                bhash
                                                (txProcInputDependenciesWait $ nodeConfig bp2pEnv)
                                 case zz of
-                                    Right (val, bhs, ht)
+                                    Right (val, bhs, ht, scr)
                                         -- liftIO $
                                         --     print $
                                         --     "ZGetOutpoint - sending RESPONSE " ++ show (txId, index) ++ (show mid)
                                      -> do
-                                        return $ successResp mid $ ZGetOutpointResp val B.empty bhs ht
+                                        return $ successResp mid $ ZGetOutpointResp val scr bhs ht
                                     Left (e :: SomeException) -> do
                                         return $ errorResp mid (show e)
                             -- ZTraceOutputs toTxID toIndex toBlockHash prevFresh htt -> do

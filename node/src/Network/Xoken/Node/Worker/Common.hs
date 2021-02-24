@@ -16,6 +16,7 @@ import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Binary as DB
+import Data.ByteString (ByteString)
 import Data.Int
 import Data.List as L
 import Data.Maybe
@@ -62,7 +63,7 @@ validateOutpoint ::
     => OutPoint
     -> Maybe BlockHash
     -> Int
-    -> m (Word64, [BlockHash], Word32)
+    -> m (Word64, [BlockHash], Word32, ByteString)
 validateOutpoint outPoint curBlkHash wait = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
@@ -91,7 +92,7 @@ validateOutpoint outPoint curBlkHash wait = do
                     let vx = spendZtxiUtxo curBlkHash (optxid) (opindx) zu
                     putOutput outPoint vx
                     --liftIO $ putDBCF rkdb (fromJust cf) (optxid, opindx) vx
-                    return $ (zuSatoshiValue zu, zuBlockHash zu, zuBlockHeight zu)
+                    return $ (zuSatoshiValue zu, zuBlockHash zu, zuBlockHeight zu, zuScriptOutput zu)
                 Nothing -> do
                     debug lg $
                         LG.msg $
@@ -197,6 +198,7 @@ spendZtxiUtxo mbh tsh ind zu =
                 , zuSpending = (zuSpending zu) ++ [Spending bh tsh ind]
                 , zuSatoshiValue = zuSatoshiValue zu
                 , zuOpCount = zuOpCount zu
+                , zuScriptOutput = zuScriptOutput zu
                 }
 
 unSpendZtxiUtxo :: BlockHash -> TxHash -> Word32 -> ZtxiUtxo -> ZtxiUtxo
@@ -210,4 +212,5 @@ unSpendZtxiUtxo bh tsh ind zu =
         , zuSpending = L.delete (Spending bh tsh ind) (zuSpending zu)
         , zuSatoshiValue = zuSatoshiValue zu
         , zuOpCount = zuOpCount zu
+        , zuScriptOutput = zuScriptOutput zu
         }

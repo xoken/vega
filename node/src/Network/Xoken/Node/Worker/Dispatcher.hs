@@ -14,6 +14,7 @@ import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Binary as DB
+import Data.ByteString (ByteString)
 import Data.List as L
 import Data.Maybe
 import GHC.Base as GHCB
@@ -120,7 +121,7 @@ zRPCDispatchProvisionalBlockHash bh pbh = do
         (wrkrs)
 
 zRPCDispatchGetOutpoint ::
-       (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> Maybe BlockHash -> m (Word64, [BlockHash], Word32)
+       (HasXokenNodeEnv env m, MonadIO m) => OutPoint -> Maybe BlockHash -> m (Word64, [BlockHash], Word32, ByteString)
 zRPCDispatchGetOutpoint outPoint bhash = do
     bp2pEnv <- getBitcoinP2P
     lg <- getLogger
@@ -146,7 +147,7 @@ zRPCDispatchGetOutpoint outPoint bhash = do
                     case spl of
                         Just pl ->
                             case pl of
-                                ZGetOutpointResp val scr bsh ht -> return (val, bsh, ht)
+                                ZGetOutpointResp val scr bsh ht -> return (val, bsh, ht, scr)
                         Nothing -> throw InvalidMessageTypeException
                 Left er -> do
                     err lg $ LG.msg $ "decoding Tx validation error resp : " ++ show er

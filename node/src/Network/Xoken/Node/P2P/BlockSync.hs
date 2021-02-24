@@ -56,6 +56,7 @@ import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
+import Network.Xoken.Script
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
@@ -70,6 +71,7 @@ import Streamly as S
 import qualified Streamly.Prelude as S
 import System.Logger as LG
 import Xoken.NodeConfig as NC
+import Data.EnumBitSet (fromEnums, (.|.))
 
 produceGetDataMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m (Message)
 produceGetDataMessage peer = do
@@ -449,7 +451,20 @@ processConfTransaction tx bhash blkht txind = do
                      else do
                          zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ Just bhash
                          case zz of
-                             Right (val, _, _) -> return (val, (shortHash, opindx))
+                             Right (val, _, _,scr) -> do
+                                 let context = Ctx
+                                                { script_flags = fromEnums [GENESIS, UTXO_AFTER_GENESIS, VERIFY_MINIMALIF]
+                                                                    .|. mandatoryScriptFlags .|. standardScriptFlags
+                                                , consensus = True
+                                                , sig_checker_data = Just $ SigCheckerData net tx (fromIntegral indx) val
+                                                }
+                                     scrd = decode scr
+                                     scrdi = decode (scriptInput b)
+                                 case (scrd, scrdi) of
+                                     (Left e,_) -> liftIO $ print $ "[SCRIPT conf] " ++ e
+                                     (_,Left e) -> liftIO $ print $ "[SCRIPT conf] " ++ e
+                                     (Right sc, Right sci) -> liftIO $ print $ "[SCRIPT conf] " ++ show (error_msg (verifyScriptWith context empty_env sci sc))
+                                 return (val, (shortHash, opindx))
                              Left (e :: SomeException) -> do
                                  err lg $
                                      LG.msg $
@@ -476,6 +491,7 @@ processConfTransaction tx bhash blkht txind = do
                              []
                              (fromIntegral $ outValue opt)
                              opCount
+                             (scriptOutput opt)
                  res <- LE.try $ putOutput (OutPoint (txHash tx) oindex) zut
                  case res of
                      Right _ -> return (zut)

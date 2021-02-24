@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -25,7 +25,9 @@ import Network.Socket
 import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
 import Network.Xoken.Block.Common
 import Network.Xoken.Node.Exception
+import Network.Xoken.Util
 import System.Random
+import Network.Xoken.Script
 
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
 sendEncMessage writeLock sock msg = withMVar writeLock (\_ -> LB.sendAll sock msg)
@@ -144,3 +146,32 @@ replaceProvisionals bh [] = [bh]
 replaceProvisionals bh (pbh:bhs)
     | isProvisionalBlockHash pbh = (bh : filter (not . isProvisionalBlockHash) bhs)
     | otherwise = pbh : (replaceProvisionals bh bhs)
+
+error_msg :: (Env, Maybe InterpreterError) -> Maybe ErrorMsg
+error_msg (env, error) = go <$> error where
+  go x = ErrorMsg { name = x, position, extra = extra x }
+  position = take 4 (ops_left env)
+  extra SigNullFail    = [hex_stack]
+  extra StackUnderflow = [hex_stack]
+  extra CleanStack     = [hex_stack]
+  extra SigHighS       = [hex_stack]
+  extra _              = []
+  hex_stack = Stack $ HexElem <$> stack env
+
+data ErrorMsg = ErrorMsg
+  { name     :: InterpreterError
+  , position :: [ScriptOp]
+  , extra    :: [ErrorMsgExtra]
+  }
+  deriving (Eq, Show)
+
+newtype HexElem = HexElem { getElem :: Elem }
+  deriving Eq
+
+instance Show HexElem where
+  show = show . encodeHex . getElem
+
+data ErrorMsgExtra
+  = Stack (Stack HexElem)
+  | AltStack (Stack HexElem)
+  deriving (Eq, Show)

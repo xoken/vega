@@ -10,6 +10,7 @@ module Network.Xoken.Node.P2P.Types where
 import Codec.Serialise
 import Control.Concurrent.MVar
 import Control.Monad.IO.Class
+import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LB
 import Data.IORef
 import Data.Int
@@ -156,6 +157,7 @@ data ZtxiUtxo =
         , zuSpending :: ![Spending]
         , zuSatoshiValue :: !Word64
         , zuOpCount :: !Word32
+        , zuScriptOutput :: !ByteString
         }
     deriving (Show, Eq, Ord, Generic, Serialise)
 
