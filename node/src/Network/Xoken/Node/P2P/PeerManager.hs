@@ -36,6 +36,8 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Serialize as DS
 import Data.Time.Clock.POSIX
+import qualified Data.UUID as UUID
+import qualified Data.UUID.V1 as UUID
 import Data.Word
 import Network.Socket
 import Network.Xoken.Address
@@ -404,11 +406,13 @@ doVersionHandshake net sock sa = do
     let ip = bitcoinNodeListenIP $ nodeConfig p2pEnv
         port = toInteger $ bitcoinNodeListenPort $ nodeConfig p2pEnv
     myaddr <- liftIO $ head <$> getAddrInfo (Just defaultHints {addrSocketType = Stream}) (Just ip) (Just $ show port)
+    uuid <- liftIO $ applyTillJust UUID.nextUUID 
     let nonce = fst (random g :: (Word64, StdGen))
         ad = NetworkAddress 0 $ addrAddress myaddr
         bb = 1 :: Word32 -- ### TODO: getBestBlock ###
         rmt = NetworkAddress 0 sa
-        ver = buildVersion net nonce bb ad rmt now
+        assoc = Just $ LC.toStrict $ UUID.toByteString uuid
+        ver = buildVersion net nonce bb ad rmt now assoc
         em = runPut . putMessage net $ (MVersion ver)
     mv <- liftIO $ (newMVar ())
     liftIO $ sendEncMessage mv sock (BSL.fromStrict em)

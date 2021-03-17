@@ -158,6 +158,13 @@ error_msg (env, error) = go <$> error where
   extra _              = []
   hex_stack = Stack $ HexElem <$> stack env
 
+applyTillJust :: IO (Maybe a) -> IO a
+applyTillJust f = do
+    res <- f
+    case res of
+        Just r -> return r
+        Nothing -> applyTillJust f
+
 data ErrorMsg = ErrorMsg
   { name     :: InterpreterError
   , position :: [ScriptOp]
