@@ -783,3 +783,15 @@ txOutputDataToOutput (TxOutputData {..}) = TxOutput txind (T.unpack address) spe
 reverse2 :: String -> String
 reverse2 (x:y:xs) = reverse2 xs ++ [x, y]
 reverse2 x = x
+
+data SubmitMiningSolutionException
+    = UuidFormatException
+    | BlockCandidateIdNotFound
+    deriving (Eq)
+
+instance Exception SubmitMiningSolutionException
+
+instance Show SubmitMiningSolutionException where
+    show UuidFormatException = "UUID formatted incorrectly (use RFC-4122 version 4 UUIDs)"
+    show BlockCandidateIdNotFound =
+        "Required ID was not found, the ID supplied does not correspond to any candidate block"

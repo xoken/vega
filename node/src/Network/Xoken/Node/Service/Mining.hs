@@ -88,6 +88,7 @@ import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.P2P.BlockSync (fetchBestSyncedBlock)
+import Network.Xoken.Node.P2P.PeerManager (mineBlockFromCandidate)
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
@@ -203,22 +204,6 @@ submitMiningSolution id nonce coinbase time version = do
             Nothing -> do
                 throw UuidFormatException
             Just u' -> return u'
-    mbCandidateBlockState <- liftIO $ TSH.lookup candidateBlocksByUuid uuid
-    (blockHash, txCount, merkleRoot, merkleBranch) <-
-        case mbCandidateBlockState of
-            Nothing -> do
-                throw BlockCandidateIdNotFound
-            Just cb -> return cb
+    mineBlockFromCandidate uuid
     return True
 
-data SubmitMiningSolutionException
-    = UuidFormatException
-    | BlockCandidateIdNotFound
-    deriving (Eq)
-
-instance Exception SubmitMiningSolutionException
-
-instance Show SubmitMiningSolutionException where
-    show UuidFormatException = "UUID formatted incorrectly (use RFC-4122 version 4 UUIDs)"
-    show BlockCandidateIdNotFound =
-        "Required ID was not found, the ID supplied does not correspond to any candidate block"
