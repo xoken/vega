@@ -252,7 +252,7 @@ runSyncStatusChecker = do
                 else "No"
         mn <-
             if isSynced
-                then mineBlockFromCandidate
+                then mineBlockFromCandidateChainTip
                 else return Nothing
         liftIO $ print $ "Sync status: " ++ show mn
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced

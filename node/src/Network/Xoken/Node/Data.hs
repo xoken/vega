@@ -307,19 +307,22 @@ instance FromJSON RPCReqParams where
         (SubmitMiningSolutionRequest <$> o .: "id" <*> o .: "nonce" <*> o .:? "coinbase" <*> o .:? "time" <*>
          o .:? "version")
 
-data RPCResponseBody =
-    GetMiningCandidateResp
-        { rgmcId :: String
-        , rgmcPrevHash :: String
-        , rgmcCoinbase :: Maybe String
-        , rgmcNumTx :: Int32
-        , rgmcVersion :: Int32
-        , rgmcCoinbaseValue :: Int64
-        , rgmcnBits :: Int32
-        , rgmcTime :: Int32
-        , rgmcHeight :: Int32
-        , rgmcMerkleProof :: [String]
-        }
+data RPCResponseBody
+    = GetMiningCandidateResp
+          { rgmcId :: String
+          , rgmcPrevHash :: String
+          , rgmcCoinbase :: Maybe String
+          , rgmcNumTx :: Int32
+          , rgmcVersion :: Int32
+          , rgmcCoinbaseValue :: Int64
+          , rgmcnBits :: Int32
+          , rgmcTime :: Int32
+          , rgmcHeight :: Int32
+          , rgmcMerkleProof :: [String]
+          }
+    | SubmitMiningSolutionResp
+          { smsrStatus :: Bool
+          }
     deriving (Generic, Show, Hashable, Eq, Serialise)
 
 instance ToJSON RPCResponseBody where
@@ -336,6 +339,7 @@ instance ToJSON RPCResponseBody where
             , "height" .= ht
             , "merkleProof" .= mp
             ]
+    toJSON (SubmitMiningSolutionResp s) = object ["status" .= s]
 
 data ChainInfo =
     ChainInfo
@@ -779,3 +783,15 @@ txOutputDataToOutput (TxOutputData {..}) = TxOutput txind (T.unpack address) spe
 reverse2 :: String -> String
 reverse2 (x:y:xs) = reverse2 xs ++ [x, y]
 reverse2 x = x
+
+data SubmitMiningSolutionException
+    = UuidFormatException
+    | BlockCandidateIdNotFound
+    deriving (Eq)
+
+instance Exception SubmitMiningSolutionException
+
+instance Show SubmitMiningSolutionException where
+    show UuidFormatException = "UUID formatted incorrectly (use RFC-4122 version 4 UUIDs)"
+    show BlockCandidateIdNotFound =
+        "Required ID was not found, the ID supplied does not correspond to any candidate block"
