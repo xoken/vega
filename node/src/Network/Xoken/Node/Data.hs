@@ -290,7 +290,7 @@ instance ToJSON ErrorResponse where
 
 data RPCReqParams
     = GetMiningCandidateRequest
-          { gmcrProvideCoinbaseTx :: Maybe Bool
+          { gmcrProvideCoinbaseTx :: Bool
           }
     | SubmitMiningSolutionRequest
           { smsrId :: String
@@ -303,7 +303,7 @@ data RPCReqParams
 
 instance FromJSON RPCReqParams where
     parseJSON (Object o) =
-        (GetMiningCandidateRequest <$> o .:? "provide_coinbase_tx") <|>
+        (GetMiningCandidateRequest <$> o .:? "provide_coinbase_tx" .!= False) <|>
         (SubmitMiningSolutionRequest <$> o .: "id" <*> o .: "nonce" <*> o .:? "coinbase" <*> o .:? "time" <*>
          o .:? "version")
 
