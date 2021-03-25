@@ -171,11 +171,11 @@ runSyncStatusChecker = do
             if isSynced
                 then "Yes"
                 else "No"
-        mn <-
-            if isSynced
-                then mineBlockFromCandidate
-                else return Nothing
-        liftIO $ print $ "Sync status: " ++ show mn
+        --mn <-
+        --    if isSynced
+        --        then mineBlockFromCandidateChainTip
+        --        else return Nothing
+        liftIO $ print $ "Sync status: " -- ++ show mn
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced
         liftIO $ threadDelay (60 * 1000000)
 

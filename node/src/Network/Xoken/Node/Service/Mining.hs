@@ -16,11 +16,18 @@ import Conduit hiding (runResourceT)
 import Control.Concurrent.STM
 import Control.Exception
 import Data.Maybe
+import Data.Int
 import qualified Data.Serialize as DS (encode)
 import qualified Data.Text as DT
 import Data.Time.Clock
 import Data.Time.Clock.POSIX
 import Data.UUID
+import qualified Data.UUID as UUID (fromString)
+import Data.Word
+import Data.Yaml
+import qualified Database.Bolt as BT
+import qualified Network.Simple.TCP.TLS as TLS
+import Network.Xoken.Address.Base58
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers (computeSubsidy)
 import Network.Xoken.Node.DB
@@ -29,11 +36,18 @@ import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
+import Network.Xoken.Node.GraphDB
+import Network.Xoken.Node.DB (fetchBestSyncedBlock)
+import Network.Xoken.Node.P2P.PeerManager (mineBlockFromCandidate)
+import Network.Xoken.Node.P2P.Common
+import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Transaction (makeCoinbaseTx)
 import Network.Xoken.Util (encodeHex)
 import System.Logger as LG
 import System.Random
+import Text.Read
+import Text.Show
 import Xoken
 import qualified Xoken.NodeConfig as NC
 
@@ -79,9 +93,14 @@ getMiningCandidate = do
             throw KeyValueDBLookupException
         Just blk -> do
             (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
+            pts <- liftIO $ DAG.getPrimaryTopologicalSorted blk
+            let sibling =
+                    if length pts >= 2
+                        then Just $ txHashToHex $ pts !! 1
+                        else Nothing
             uuid <- liftIO generateUuid
-            let (merkleBranch, merkleRoot) =
-                    (\(b, r) -> (txHashToHex <$> b, fromJust r)) $ computeMerkleBranch bcState (fromJust mbCoinbaseTxn)
+            let (merkleBranch', merkleRoot) =
+                    (\(b, r) -> (txHashToHex . TxHash <$> b, TxHash $ fromJust r)) $ getProof bcState
                 coinbaseTx =
                     DT.unpack $
                     encodeHex $
@@ -90,8 +109,16 @@ getMiningCandidate = do
                         (1 + fromIntegral bestSyncedBlockHeight)
                         coinbaseAddress
                         (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
+                merkleBranch =
+                    case sibling of
+                        Just s -> (s : merkleBranch')
+                        Nothing -> merkleBranch'
             -- persist generated UUID and txCount in memory
-            liftIO $ TSH.insert cbByUuidTSH uuid (fromIntegral txCount, merkleRoot)
+            liftIO $
+                TSH.insert
+                    cbByUuidTSH
+                    uuid
+                    (bestSyncedBlockHash, fromIntegral txCount, merkleRoot, fromJust . hexToTxHash <$> merkleBranch)
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
             let parentBlock = memoryBestHeader hm
                 candidateHeader = BlockHeader 0 (BlockHash "") "" (round timestamp) 0 0
@@ -108,3 +135,22 @@ getMiningCandidate = do
                     (round timestamp)
                     (1 + fromIntegral bestSyncedBlockHeight)
                     (DT.unpack <$> merkleBranch)
+
+submitMiningSolution ::
+       (HasXokenNodeEnv env m, MonadIO m) => String -> Int32 -> Maybe String -> Maybe Int32 -> Maybe Int32 -> m Bool
+submitMiningSolution id nonce coinbase time version = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    nodeCfg <- nodeConfig <$> getBitcoinP2P
+    net <- (NC.bitcoinNetwork . nodeConfig) <$> getBitcoinP2P
+    rkdb <- rocksDB <$> getDB
+    let candidateBlocksByUuid = candidatesByUuid bp2pEnv
+        mbUuid = UUID.fromString id
+    uuid <-
+        case mbUuid of
+            Nothing -> do
+                throw UuidFormatException
+            Just u' -> return u'
+    mineBlockFromCandidate uuid nonce coinbase time version 
+    return True
+

@@ -138,7 +138,7 @@ isNotConfirmed :: TxHash -> IO Bool
 isNotConfirmed txHash = return False
 
 coalesceUnconfTransaction ::
-       (TSDirectedAcyclicGraph TxHash Word64 BranchComputeState) -> TxHash -> [TxHash] -> Word64 -> IO ()
+       (TSDirectedAcyclicGraph TxHash Word64 IncrementalBranch) -> TxHash -> [TxHash] -> Word64 -> IO ()
 coalesceUnconfTransaction dag txhash hashes sats = do
     print $ "coalesceUnconfTransaction called for tx: " ++ show (txhash)
     unconfHashes <- filterM (isNotConfirmed) hashes
@@ -190,9 +190,12 @@ processUnconfTransaction tx = do
                                      scrd = decode scr
                                      scrdi = decode (scriptInput b)
                                  case (scrd, scrdi) of
-                                     (Left e,_) -> liftIO $ print $ "[SCRIPT] " ++ e
-                                     (_,Left e) -> liftIO $ print $ "[SCRIPT] " ++ e
-                                     (Right sc, Right sci) -> liftIO $ print $ "[SCRIPT] " ++ show (error_msg (verifyScriptWith context empty_env sci sc))
+                                     (Left e,_) -> debug lg $ LG.msg $ "[SCRIPT] " ++ e
+                                     (_,Left e) -> debug lg $ LG.msg $ "[SCRIPT] " ++ e
+                                     (Right sc, Right sci) -> debug lg $ LG.msg $ "[SCRIPT] "
+                                                                                ++ show (error_msg (verifyScriptWith context empty_env sci sc))
+                                                                                ++ "; for tx: "
+                                                                                ++ show (txHash tx)
                                  debug lg $ LG.msg $ "[dag] processUnconfTransaction: zz: " ++ (show $ zz)
                                  return (val, (shortHash, bsh, opHash, opindx))
                              Left (e :: SomeException) -> do
@@ -332,7 +335,7 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
     case q of
         Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show candBlockHash)
         Just dag -> do
-            liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+) nextBcState
+            liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+) updateMerkleBranch
             dagT <- liftIO $ (DAG.getTopologicalSortedForest dag)
             dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)
             liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP

@@ -9,12 +9,22 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Network.Xoken.Node.P2P.MerkleBuilder
-    ( computeMerkleBranch
-    , nextBcState
-    , importTxHash
+    ( updateMerkleBranch
+    , getProof
     ) where
 
 import Control.Exception
+import qualified Control.Exception.Extra as EX
+import qualified Control.Exception.Lifted as LE (try)
+import Control.Monad.Logger
+import Control.Monad.Loops
+import Control.Monad.Reader
+import Control.Monad.STM
+import Control.Monad.State.Strict
+import Control.Monad.Trans.Control
+import Control.Monad.Writer.Lazy
+import Crypto.MAC.SipHash as SH
+import qualified Data.Aeson as A (decode, encode)
 import qualified Data.ByteString as B
 import Data.Int
 import qualified Data.List as L
@@ -71,49 +81,69 @@ pushHash (stateMap, res) nhash left right ht ind final =
             Just i -> snd $ M.elemAt i stateMap
             Nothing -> emptyMerkleNode
 
-nextBcState :: BranchComputeState -> [TxHash] -> BranchComputeState
-nextBcState bcState [] = bcState
-nextBcState bcState txHashes =
-    let (hashesToProcess, finalHash) =
-            ( case lastTxn bcState of
-                  Just l -> l : (L.init txHashes)
-                  Nothing -> L.init txHashes
-            , Just $ L.last txHashes)
-        newTxCount = (txCount bcState) + (fromIntegral $ L.length hashesToProcess)
-        treeHeight = computeTreeHeight $ fromIntegral newTxCount
-        runPush hashComp [] = hashComp
-        runPush hashComp (h:hs) = runPush (pushHash hashComp (getTxHash h) Nothing Nothing treeHeight 0 False) hs
-     in BranchComputeState (runPush (hashCompute bcState) hashesToProcess) newTxCount finalHash
-
-computeMerkleBranch :: BranchComputeState -> TxHash -> ([TxHash], Maybe TxHash)
-computeMerkleBranch (BranchComputeState hcState _ Nothing) _ = ([], Nothing)
-computeMerkleBranch (BranchComputeState hcState txCount (Just finalTxHash)) coinbaseTxHash = do
-    let finalHcState =
-            pushHash
-                hcState
-                (getTxHash finalTxHash)
-                Nothing
-                Nothing
-                (computeTreeHeight $ (fromIntegral txCount) + 1)
-                0
-                True
-        parentNodes =
-            case (snd finalHcState) of
+-- | Add a leaf node to Merkle tree, compute and return additions to Merkle branch for leftmost
+-- | leaf node, if any.
+nextBranchComputeState :: BranchCompute -> Hash256 -> Int8 -> Bool -> (BranchCompute, [Hash256])
+nextBranchComputeState (hcState, currRoot) txHash treeHt final =
+    let (stateMap, merkleNodes) = pushHash hcState txHash Nothing Nothing treeHt 0 final
+        ancestors =
+            case merkleNodes of
                 [] -> []
-                res' ->
-                    let getParents child merkleNodes parents =
+                mn ->
+                    let getAncestors child merkleNodes ancestors =
                             let parent = searchParent child merkleNodes
                              in if parent == child
-                                    then parents
-                                    else getParents parent merkleNodes (parent : parents)
+                                    then ancestors
+                                    else getAncestors parent merkleNodes (parent : ancestors)
                           where
                             searchParent c li =
                                 case L.find (\(MerkleNode _ l r _) -> (node c == l) || (node c == r)) li of
                                     Just p -> p
                                     Nothing -> c
-                     in getParents (MerkleNode (Just $ getTxHash coinbaseTxHash) Nothing Nothing True) res' []
-        branch = L.init $ L.reverse $ (TxHash . fromJust . node) <$> parentNodes
-     in (branch, Just $ L.last branch)
+                     in (fromJust . node) <$> getAncestors (MerkleNode (Just currRoot) Nothing Nothing True) mn []
+        newRoot =
+            if L.null ancestors
+                then currRoot
+                else head ancestors
+     in (((stateMap, []), newRoot), L.reverse ancestors)
+
+-- | Process batch of transactions to update Merkle branch for candidate block.
+updateMerkleBranch :: IncrementalBranch -> [TxHash] -> IncrementalBranch
+updateMerkleBranch branch [] = branch
+updateMerkleBranch EmptyBranch txns =
+    updateMerkleBranch (Branch [] (emptyHashCompute, getTxHash $ head txns) Nothing 0) txns
+updateMerkleBranch Branch {..} txns =
+    let nextBcsRunner bcState [] _ = return bcState
+        nextBcsRunner bcState (t:ts) treeHeight = do
+            let (bcState', branch) = nextBranchComputeState bcState t treeHeight False
+             in tell branch >> nextBcsRunner bcState' ts treeHeight :: Writer [Hash256] BranchCompute
+        (lastTxn', txBatch) = prepareBatch lastTxn (getTxHash <$> txns)
+        txCount' = txCount + (L.length txBatch)
+        treeHt = computeTreeHeight txCount'
+        (bcState', branch') = runWriter $ nextBcsRunner bcState txBatch (treeHt + 1)
+     in Branch (branch ++ branch') bcState' lastTxn' txCount'
+
+-- | Get the Merkle proof for current candidate block state.
+getProof :: IncrementalBranch -> ([Hash256], Maybe Hash256)
+getProof EmptyBranch = ([], Nothing)
+getProof (Branch _ _ Nothing _) = error "bad branch compute state"
+getProof (Branch _ _ (Just t) 0) = ([], Just t)
+getProof Branch {..} =
+    let (_, branch') = nextBranchComputeState bcState (fromJust lastTxn) (computeTreeHeight $ txCount + 1) True
+        merklePath = branch ++ branch'
+     in (init merklePath, Just $ last merklePath)
+
+-- | Defer the processing of the last transaction in the batch.
+-- | Add the last transaction of the previous batch to the start of the
+-- | current batch.
+prepareBatch :: Maybe Hash256 -> [Hash256] -> (Maybe Hash256, [Hash256])
+prepareBatch lastTxn [] = (lastTxn, [])
+prepareBatch lastTxn batch =
+    ( Just $ last batch
+    , (if lastTxn == Nothing
+           then []
+           else [fromJust lastTxn]) ++
+      init batch)
 
 importTxHash :: String -> Hash256
 importTxHash = getTxHash . fromJust . hexToTxHash . T.pack

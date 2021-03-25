@@ -461,9 +461,12 @@ processConfTransaction tx bhash blkht txind = do
                                      scrd = decode scr
                                      scrdi = decode (scriptInput b)
                                  case (scrd, scrdi) of
-                                     (Left e,_) -> liftIO $ print $ "[SCRIPT conf] " ++ e
-                                     (_,Left e) -> liftIO $ print $ "[SCRIPT conf] " ++ e
-                                     (Right sc, Right sci) -> liftIO $ print $ "[SCRIPT conf] " ++ show (error_msg (verifyScriptWith context empty_env sci sc))
+                                     (Left e,_) -> debug lg $ LG.msg $ "[SCRIPT conf] " ++ e
+                                     (_,Left e) -> debug lg $ LG.msg $ "[SCRIPT conf] " ++ e
+                                     (Right sc, Right sci) -> debug lg $ LG.msg $ "[SCRIPT conf] "
+                                                                                ++ show (error_msg (verifyScriptWith context empty_env sci sc))
+                                                                                ++ "; for tx: "
+                                                                                ++ show (txHash tx)
                                  return (val, (shortHash, opindx))
                              Left (e :: SomeException) -> do
                                  err lg $
@@ -654,8 +657,8 @@ processCompactBlock cmpct peer = do
                              -- TODO: lock the previous dag and insert into a NEW dag!!
                           -> do
                              case rt of
-                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+) nextBcState
-                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+) nextBcState)
+                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+) updateMerkleBranch
+                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+) updateMerkleBranch)
                 mpShortTxIDList
             --    lastIndex <- liftIO $ newIORef 0
             --    mtxIndexes <-
@@ -760,7 +763,7 @@ processBlockTransactions blockTxns = do
     olddag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash'
     case olddag of
         Just dag -> do
-            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 emptyBranchComputeState 16 16 (+) (nextBcState)
+            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 EmptyBranch 16 16 (+) (updateMerkleBranch)
             liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash newdag
         Nothing -> do
             newCandidateBlock bhash
@@ -818,7 +821,7 @@ sendCompactBlockGetData pr hash = do
 newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
 newCandidateBlock hash = do
     bp2pEnv <- getBitcoinP2P
-    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) EmptyBranch 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 
 newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
@@ -826,7 +829,7 @@ newCandidateBlockChainTip = do
     bp2pEnv <- getBitcoinP2P
     bbn <- fetchBestBlock
     let hash = headerHash $ nodeHeader bbn
-    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) EmptyBranch 16 16
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
 
 defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"
