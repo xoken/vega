@@ -148,9 +148,9 @@ data RPCReqParams
 
 instance FromJSON RPCReqParams where
     parseJSON (Object o) =
-        (GetMiningCandidateRequest <$> o .:? "provide_coinbase_tx" .!= False) <|>
         (SubmitMiningSolutionRequest <$> o .: "id" <*> o .: "nonce" <*> o .:? "coinbase" <*> o .:? "time" <*>
-         o .:? "version")
+         o .:? "version") <|>
+        (GetMiningCandidateRequest <$> o .:? "provide_coinbase_tx" .!= False)
 
 data RPCResponseBody
     = GetMiningCandidateResp
@@ -646,6 +646,7 @@ prevEpoch Epoch2 = Epoch1
 data SubmitMiningSolutionException
     = UuidFormatException
     | BlockCandidateIdNotFound
+    | InvalidPOW
     deriving (Eq)
 
 instance Exception SubmitMiningSolutionException
@@ -654,3 +655,5 @@ instance Show SubmitMiningSolutionException where
     show UuidFormatException = "UUID formatted incorrectly (use RFC-4122 version 4 UUIDs)"
     show BlockCandidateIdNotFound =
         "Required ID was not found, the ID supplied does not correspond to any candidate block"
+    show InvalidPOW =
+        "Proof of Work invalid, supply valid nonce"

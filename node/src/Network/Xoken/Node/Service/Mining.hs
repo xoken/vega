@@ -30,6 +30,7 @@ import qualified Network.Simple.TCP.TLS as TLS
 import Network.Xoken.Address.Base58
 import Network.Xoken.Block.Common
 import Network.Xoken.Block.Headers (computeSubsidy)
+import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
@@ -38,7 +39,6 @@ import Network.Xoken.Node.Exception
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.GraphDB
 import Network.Xoken.Node.DB (fetchBestSyncedBlock)
-import Network.Xoken.Node.P2P.PeerManager (mineBlockFromCandidate)
 import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.MerkleBuilder
@@ -50,6 +50,24 @@ import Text.Read
 import Text.Show
 import Xoken
 import qualified Xoken.NodeConfig as NC
+
+compactBlockFromMiningCandidateData :: MiningCandidateData -> CompactBlock
+compactBlockFromMiningCandidateData MiningCandidateData {..} = 
+    let cbase = fromMaybe mcdCoinbase mcdMinerCoinbase
+        txhashes = (txHash cbase : mcdTxHashes)
+        bh = BlockHeader
+                (fromMaybe mcdVersion mcdMinerVersion)
+                mcdPrevHash
+                (buildMerkleRoot txhashes)
+                (fromMaybe mcdTime mcdMinerTime)
+                mcdnBits
+                (fromIntegral mcdMinerNonce)
+        sidl = fromIntegral $ length $ mcdTxHashes -- shortIds length
+        skey = getCompactBlockSipKey bh $ fromIntegral mcdMinerNonce
+        pfl = 1
+        pftx = [PrefilledTx 0 $ cbase]
+        (cbsid:sids) = map (\txid -> txHashToShortId' txid skey) $ txhashes -- shortIds
+    in CompactBlock bh (fromIntegral mcdMinerNonce) sidl sids pfl pftx
 
 generateUuid :: IO UUID
 generateUuid =
@@ -90,39 +108,50 @@ getMiningCandidate = do
                 LG.msg $
                 "Error: Failed to fetch candidate block, previous block: " <>
                 (show (bestSyncedBlockHash, bestSyncedBlockHeight))
+            newCandidateBlockChainTip
             throw KeyValueDBLookupException
         Just blk -> do
-            (txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalState blk
+            (txHashes, txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalStateWithValue blk
             pts <- liftIO $ DAG.getPrimaryTopologicalSorted blk
             let sibling =
                     if length pts >= 2
-                        then Just $ txHashToHex $ pts !! 1
+                        then Just $ pts !! 1
                         else Nothing
             uuid <- liftIO generateUuid
             let (merkleBranch', merkleRoot) =
-                    (\(b, r) -> (txHashToHex . TxHash <$> b, TxHash $ fromJust r)) $ getProof bcState
-                coinbaseTx =
-                    DT.unpack $
-                    encodeHex $
-                    DS.encode $
-                    makeCoinbaseTx
-                        (1 + fromIntegral bestSyncedBlockHeight)
-                        coinbaseAddress
-                        (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
+                    (\(b, r) -> (TxHash <$> b, TxHash $ fromJust r)) $ getProof bcState
+                cbase = makeCoinbaseTx
+                            (1 + fromIntegral bestSyncedBlockHeight)
+                            coinbaseAddress
+                            (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
+                coinbaseTx = DT.unpack $ encodeHex $ DS.encode $ cbase
                 merkleBranch =
                     case sibling of
                         Just s -> (s : merkleBranch')
                         Nothing -> merkleBranch'
-            -- persist generated UUID and txCount in memory
-            liftIO $
-                TSH.insert
-                    cbByUuidTSH
-                    uuid
-                    (bestSyncedBlockHash, fromIntegral txCount, merkleRoot, fromJust . hexToTxHash <$> merkleBranch)
+            -- persist generated UUID and txCount in memory                 
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
             let parentBlock = memoryBestHeader hm
                 candidateHeader = BlockHeader 0 (BlockHash "") "" (round timestamp) 0 0
                 nextWorkRequired = getNextWorkRequired hm net parentBlock candidateHeader
+            liftIO $
+                TSH.insert
+                    cbByUuidTSH
+                    uuid $
+                    MiningCandidateData bestSyncedBlockHash
+                                        cbase
+                                        (fromIntegral txCount)
+                                        0x20000000
+                                        (fromIntegral satVal)
+                                        (fromIntegral nextWorkRequired)
+                                        (round timestamp)
+                                        (1 + fromIntegral bestSyncedBlockHeight)
+                                        merkleBranch
+                                        txHashes
+                                        0
+                                        Nothing
+                                        Nothing
+                                        Nothing 
             return $
                 GetMiningCandidateResp
                     (toString uuid)
@@ -134,7 +163,7 @@ getMiningCandidate = do
                     (fromIntegral nextWorkRequired)
                     (round timestamp)
                     (1 + fromIntegral bestSyncedBlockHeight)
-                    (DT.unpack <$> merkleBranch)
+                    (fmap (DT.unpack . txHashToHex) merkleBranch)
 
 submitMiningSolution ::
        (HasXokenNodeEnv env m, MonadIO m) => String -> Int32 -> Maybe String -> Maybe Int32 -> Maybe Int32 -> m Bool
@@ -151,6 +180,27 @@ submitMiningSolution id nonce coinbase time version = do
             Nothing -> do
                 throw UuidFormatException
             Just u' -> return u'
-    mineBlockFromCandidate uuid nonce coinbase time version 
-    return True
-
+    mbCandidateBlockState <- liftIO $ TSH.lookup candidateBlocksByUuid uuid
+    miningData <-
+        case mbCandidateBlockState of
+            Nothing -> throw BlockCandidateIdNotFound
+            Just cb -> return cb
+    let cmpctblk = compactBlockFromMiningCandidateData
+                    $ miningData
+                        { mcdMinerNonce = fromIntegral nonce
+                        , mcdMinerCoinbase = Nothing
+                        , mcdMinerTime = fromIntegral <$> time
+                        , mcdMinerVersion = fromIntegral <$> version
+                        }
+        bh = cbHeader cmpctblk
+        bhsh@(BlockHash bhsh') = headerHash bh
+    if isValidPOW net bh
+        then do
+            debug lg $ LG.msg $ "Mined Candidate Block: " ++ show uuid ++ "; Blockhash: " ++ show bhsh 
+            liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cmpctblk,mcdTxHashes miningData)
+            newCandidateBlock bhsh
+            broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
+            return True
+        else do
+            debug lg $ LG.msg $ "Invalid POW for candidate id " ++ show uuid ++ "; invalid nonce: " ++ show nonce
+            throw InvalidPOW

@@ -49,6 +49,7 @@ import Network.Xoken.Node.Env
 import Network.Xoken.Node.HTTP.Server
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.ChainSync
+import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.TLSServer
@@ -138,6 +139,7 @@ runThreads config nodeConf bp2p lg certPaths = do
         runAppM
             serviceEnv
             (withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
+                    newCandidateBlockChainTip
                     if (_nodeType node == NC.Master)
                         then do
                             withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
@@ -158,7 +160,6 @@ runSyncStatusChecker :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runSyncStatusChecker = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    newCandidateBlockChainTip
     -- wait 300 seconds before first check
     liftIO $ threadDelay (30 * 1000000)
     forever $ do

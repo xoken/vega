@@ -61,10 +61,10 @@ produceGetHeadersMessage = do
     debug lg $ LG.msg ("block-locator: " ++ show bl)
     return (MGetHeaders gh)
 
-sendRequestMessages :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Message -> m ()
-sendRequestMessages msg = do
+sendGetHeaderMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => Message -> m ()
+sendGetHeaderMessage msg = do
     lg <- getLogger
-    debug lg $ LG.msg $ val "Chain - sendRequestMessages - called."
+    debug lg $ LG.msg $ val "Chain - sendGetHeaderMessage - called."
     bp2pEnv <- getBitcoinP2P
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     case msg of
@@ -110,7 +110,7 @@ msgOrder m1 m2 = do
 runEgressChainSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runEgressChainSync = do
     lg <- getLogger
-    res1 <- LE.try $ forever $ produceGetHeadersMessage >>= sendRequestMessages
+    res1 <- LE.try $ forever $ produceGetHeadersMessage >>= sendGetHeaderMessage
     case res1 of
         Right () -> return ()
         Left (e :: SomeException) -> err lg $ LG.msg $ "[ERROR] runEgressChainSync " ++ show e

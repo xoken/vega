@@ -10,7 +10,9 @@
 module Network.Xoken.Node.P2P.Common where
 
 import Control.Concurrent.MVar
+import Control.Concurrent.Async (AsyncCancelled)
 import Control.Exception
+import Control.Concurrent.STM.TVar
 import Control.Monad.Reader
 import Data.Bits
 import qualified Data.ByteString as B
@@ -18,6 +20,7 @@ import Data.ByteString.Builder
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.Int
+import Data.Maybe
 import Data.Serialize
 import Data.Serialize as S
 import Data.Word
@@ -25,9 +28,22 @@ import Network.Socket
 import qualified Network.Socket.ByteString.Lazy as LB (recv, sendAll)
 import Network.Xoken.Block.Common
 import Network.Xoken.Node.Exception
+import Network.Xoken.Node.DB
+import Network.Xoken.Node.Env
+import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Util
 import System.Random
+import qualified System.Logger as LG
+import System.Logger (debug, err, val)
 import Network.Xoken.Script
+import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
+import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
+import Network.Xoken.Block.Headers
+import Network.Xoken.Network.Common
+import Network.Xoken.Network.CompactBlock
+import Network.Xoken.Network.Message
+import Network.Xoken.Transaction.Common
+import Xoken.NodeConfig
 
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
 sendEncMessage writeLock sock msg = withMVar writeLock (\_ -> LB.sendAll sock msg)
@@ -182,3 +198,63 @@ data ErrorMsgExtra
   = Stack (Stack HexElem)
   | AltStack (Stack HexElem)
   deriving (Eq, Show)
+
+broadcastToPeers :: (HasXokenNodeEnv env m, MonadIO m) => Message -> m ()
+broadcastToPeers msg = do
+    liftIO $ putStrLn $ "Broadcasting " ++ show (msgType msg) ++ " to peers"
+    bp2pEnv <- getBitcoinP2P
+    peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
+    mapM_
+        (\bp ->
+             if bpConnected bp
+                 then sendRequestMessages bp msg
+                 else return ())
+        peerMap
+    liftIO $ putStrLn $ "Broadcasted " ++ show (msgType msg) ++ " to peers"
+
+sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
+sendcmpt bp = sendRequestMessages bp $ MSendCompact $ SendCompact 0 1
+
+sendCmptBlock :: (HasXokenNodeEnv env m, MonadIO m) => CompactBlock -> BitcoinPeer -> m ()
+sendCmptBlock cmpt bp = sendRequestMessages bp $ MCompactBlock cmpt
+
+sendBlockTxn :: (HasXokenNodeEnv env m, MonadIO m) => BlockTxns -> BitcoinPeer -> m ()
+sendBlockTxn blktxn bp = sendRequestMessages bp $ MBlockTxns blktxn
+
+sendInv :: (HasXokenNodeEnv env m, MonadIO m) => Inv -> BitcoinPeer -> m ()
+sendInv inv bp = sendRequestMessages bp $ MInv inv
+
+defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"
+
+newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
+newCandidateBlock hash = do
+    bp2pEnv <- getBitcoinP2P
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) EmptyBranch 16 16
+    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
+
+newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
+newCandidateBlockChainTip = do
+    bp2pEnv <- getBitcoinP2P
+    bbn <- fetchBestBlock
+    let hash = headerHash $ nodeHeader bbn
+    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) EmptyBranch 16 16
+    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
+
+sendRequestMessages :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> Message -> m ()
+sendRequestMessages pr msg = do
+    lg <- getLogger
+    bp2pEnv <- getBitcoinP2P
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+    debug lg $ LG.msg $ val "Block - sendRequestMessages - called."
+    case (bpSocket pr) of
+        Just s -> do
+            let em = runPut . putMessage net $ msg
+            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
+            case res of
+                Right () -> return ()
+                Left (e :: SomeException) -> do
+                    case fromException e of
+                        Just (t :: AsyncCancelled) -> throw e
+                        otherwise -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
+            debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
+        Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"

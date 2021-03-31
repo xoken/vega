@@ -66,6 +66,24 @@ data AllegoryEnv =
         { allegorySecretKey :: !SecKey
         }
 
+data MiningCandidateData
+    = MiningCandidateData
+          { mcdPrevHash :: BlockHash
+          , mcdCoinbase :: Tx
+          , mcdNumTx :: Word32
+          , mcdVersion :: Word32
+          , mcdCoinbaseValue :: Word64
+          , mcdnBits :: Word32
+          , mcdTime :: Timestamp -- Word32
+          , mcdHeight :: BlockHeight -- Word32
+          , mcdMerkleProof :: [TxHash]
+          , mcdTxHashes :: [TxHash]
+          , mcdMinerNonce :: Word32
+          , mcdMinerVersion :: Maybe Word32
+          , mcdMinerCoinbase :: Maybe Tx
+          , mcdMinerTime :: Maybe Timestamp
+          }
+
 data BitcoinP2P =
     BitcoinP2P
         { nodeConfig :: !NodeConfig
@@ -95,7 +113,7 @@ data BitcoinP2P =
                                                                      , Seq Word64
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
-        , candidatesByUuid :: !(TSH.TSHashTable UUID (BlockHash, Int32, TxHash, [TxHash]))
+        , candidatesByUuid :: !(TSH.TSHashTable UUID MiningCandidateData)
         , predecessors :: !(TVar [BlockHash])
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
