@@ -112,24 +112,24 @@ getMiningCandidate = do
             throw KeyValueDBLookupException
         Just blk -> do
             (txHashes, txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalStateWithValue blk
-            pts <- liftIO $ DAG.getPrimaryTopologicalSorted blk
-            let sibling =
-                    if length pts >= 2
-                        then Just $ pts !! 1
-                        else Nothing
-            uuid <- liftIO generateUuid
-            let (merkleBranch', merkleRoot) =
-                    (\(b, r) -> (TxHash <$> b, TxHash $ fromJust r)) $ getProof bcState
-                cbase = makeCoinbaseTx
+            pts' <- liftIO $ DAG.getPrimaryTopologicalSorted blk
+            let cbase = makeCoinbaseTx
                             (1 + fromIntegral bestSyncedBlockHeight)
                             coinbaseAddress
                             (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
                 coinbaseTx = DT.unpack $ encodeHex $ DS.encode $ cbase
+                pts = txHash cbase : pts
+                sibling =
+                    if length pts >= 2
+                        then Just $ pts !! 1
+                        else Nothing
+                (merkleBranch', merkleRoot) =
+                    (\(b, r) -> (TxHash <$> b, TxHash $ fromJust r)) $ getProof bcState       
                 merkleBranch =
                     case sibling of
                         Just s -> (s : merkleBranch')
                         Nothing -> merkleBranch'
-            -- persist generated UUID and txCount in memory                 
+            uuid <- liftIO generateUuid
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
             let parentBlock = memoryBestHeader hm
                 candidateHeader = BlockHeader 0 (BlockHash "") "" (round timestamp) 0 0
@@ -196,7 +196,7 @@ submitMiningSolution id nonce coinbase time version = do
         bhsh@(BlockHash bhsh') = headerHash bh
     if isValidPOW net bh
         then do
-            debug lg $ LG.msg $ "Mined Candidate Block: " ++ show uuid ++ "; Blockhash: " ++ show bhsh 
+            debug lg $ LG.msg $ "Mined Candidate Block: " ++ show uuid ++ "; Blockhash: " ++ show bhsh ++ "; header: " ++ show bh
             liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cmpctblk,mcdTxHashes miningData)
             newCandidateBlock bhsh
             broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
