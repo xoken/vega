@@ -139,7 +139,8 @@ runThreads config nodeConf bp2p lg certPaths = do
         runAppM
             serviceEnv
             (withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
-                    newCandidateBlockChainTip
+                    isSynced <- checkBlocksFullySynced
+                    when isSynced newCandidateBlockChainTip
                     if (_nodeType node == NC.Master)
                         then do
                             withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
@@ -191,6 +192,11 @@ runNode config nodeConf bp2p certPaths = do
 
 defBitcoinP2P :: NodeConfig -> IO BitcoinP2P
 defBitcoinP2P nodeCnf = do
+    coinbaseAddress <-
+        case stringToAddr (bitcoinNetwork nodeCnf) (DT.pack $ coinbaseTxAddress nodeCnf) of
+            Nothing -> 
+                P.error "Invalid supplied coinbase address\nPossible fix: Add valid address in coinbaseTxAddress field in node-config.yaml"
+            Just a -> return a
     g <- newTVarIO M.empty
     bp <- newTVarIO M.empty
     mv <- newMVar True
@@ -244,6 +250,7 @@ defBitcoinP2P nodeCnf = do
             pftx
             cbu
             pr
+            coinbaseAddress
 
 initVega :: IO ()
 initVega = do

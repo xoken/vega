@@ -31,6 +31,7 @@ import Network.Xoken.Node.Exception
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Env
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Node.P2P.MerkleBuilder (updateMerkleBranch)
 import Network.Xoken.Util
 import System.Random
 import qualified System.Logger as LG
@@ -43,6 +44,7 @@ import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
 import Network.Xoken.Transaction.Common
+import Network.Xoken.Transaction
 import Xoken.NodeConfig
 
 sendEncMessage :: MVar () -> Socket -> BSL.ByteString -> IO ()
@@ -226,20 +228,25 @@ sendInv inv bp = sendRequestMessages bp $ MInv inv
 
 defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"
 
-newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
-newCandidateBlock hash = do
+newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> BlockHeight -> m ()
+newCandidateBlock hash height = do
     bp2pEnv <- getBitcoinP2P
+    let cbase = makeCoinbaseTx
+                    (1 + fromIntegral height)
+                    (coinbaseAddress bp2pEnv)
+                    (computeSubsidy (bitcoinNetwork $ nodeConfig bp2pEnv) (fromIntegral $ height))
     tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) EmptyBranch 16 16
-    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
+    liftIO $ DAG.coalesce tsdag (txHash cbase) [] 9999 (+) updateMerkleBranch
+    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash (tsdag,cbase)
 
 newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 newCandidateBlockChainTip = do
     bp2pEnv <- getBitcoinP2P
     bbn <- fetchBestBlock
     let hash = headerHash $ nodeHeader bbn
-    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) EmptyBranch 16 16
-    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
-
+        height = nodeHeight bbn
+    newCandidateBlock hash height
+    
 sendRequestMessages :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> Message -> m ()
 sendRequestMessages pr msg = do
     lg <- getLogger

@@ -38,6 +38,7 @@ import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Address
 import Network.Xoken.Transaction
 import System.Logger
 import Xoken.NodeConfig
@@ -106,7 +107,7 @@ data BitcoinP2P =
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
-        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64 IncrementalBranch))
+        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64 IncrementalBranch, Tx))
         , compactBlocks :: !(TSH.TSHashTable BlockHash (CompactBlock, [TxHash]))
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
         , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( SipKey
@@ -115,6 +116,7 @@ data BitcoinP2P =
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
         , candidatesByUuid :: !(TSH.TSHashTable UUID MiningCandidateData)
         , predecessors :: !(TVar [BlockHash])
+        , coinbaseAddress :: !(Address)
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
 

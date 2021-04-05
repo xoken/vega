@@ -64,6 +64,7 @@ import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
 import Network.Xoken.Transaction.Common
+import Network.Xoken.Transaction
 import Streamly as S
 import qualified Streamly.Prelude as S
 import System.Logger as LG
@@ -612,7 +613,7 @@ processCompactBlock cmpct peer = do
     case cb of
         Nothing -> do
             return ()
-        Just dag -> do
+        Just (dag,_) -> do
             debug lg $ LG.msg $ ("New Candidate Block Found over: " ++ show bhash)
             mpTxLst <- liftIO $ DAG.getTopologicalSortedForest dag
             let mpShortTxIDList = map (\(txid, rt) -> do (txHashToShortId' txid skey, (txid, rt))) mpTxLst
@@ -687,7 +688,7 @@ processBlockTransactions blockTxns = do
     cb <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
     case cb of
         Nothing -> err lg $ LG.msg $ ("Candidate block not found!: " ++ show bhash)
-        Just dag -> do
+        Just (dag,_) -> do
             res <- liftIO $ TSH.lookup (prefilledShortIDsProcessing bp2pEnv) bhash
             case res of
                 Just (skey, sids, cbpftxns, lkmap')
@@ -738,13 +739,19 @@ processBlockTransactions blockTxns = do
                                  frag)
                         (cbpftxns)
                 Nothing -> return ()
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    let height = nodeHeight $ fromJust $ getBlockHeaderMemory bhash hm -- TODO.DAG
     olddag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash'
     case olddag of
-        Just dag -> do
-            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 EmptyBranch 16 16 (+) (updateMerkleBranch)
-            liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash newdag
+        Just (dag,cbtx) -> do
+            let cbase = makeCoinbaseTx
+                    (1 + fromIntegral height)
+                    (coinbaseAddress bp2pEnv)
+                    (computeSubsidy (bitcoinNetwork $ nodeConfig bp2pEnv) (fromIntegral $ height))
+            newdag <- liftIO $ DAG.rollOver dag (txHash cbtx : txhashes) [txHash cbase] defTxHash 0 EmptyBranch 16 16 (+) (updateMerkleBranch)
+            liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash (newdag,cbase)
         Nothing -> do
-            newCandidateBlock bhash
+            newCandidateBlock bhash (1 + height)
 
 processDeltaTx :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> Tx -> m ()
 processDeltaTx bhash tx = do

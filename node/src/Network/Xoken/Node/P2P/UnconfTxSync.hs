@@ -334,7 +334,7 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
     debug lg $ LG.msg $ "Appending Tx " ++ show txHash ++ "to candidate block: " ++ show candBlockHash
     case q of
         Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show candBlockHash)
-        Just dag -> do
+        Just (dag,_) -> do
             liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+) updateMerkleBranch
             dagT <- liftIO $ (DAG.getTopologicalSortedForest dag)
             dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)

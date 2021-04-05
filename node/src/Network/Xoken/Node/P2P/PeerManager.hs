@@ -490,7 +490,7 @@ messageHandler peer (mm, ingss) = do
                                      unsynced <- blocksUnsynced
                                      if unsynced <= (3 :: Int32)
                                          then do
-                                             newCandidateBlock $ BlockHash bhash
+                                             --newCandidateBlock $ BlockHash bhash
                                              processCompactBlockGetData peer $ invHash x
                                          else liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
@@ -512,7 +512,7 @@ messageHandler peer (mm, ingss) = do
                                  InvCompactBlock -> do
                                      let bhash = invHash x
                                      debug lg $ LG.msg ("INV - Compact Block: " ++ (show bhash))
-                                     newCandidateBlock $ BlockHash bhash
+                                     --newCandidateBlock $ BlockHash bhash
                                      processCompactBlockGetData peer $ invHash x
                                  otherwise -> return ())
                         (invList inv)
@@ -541,7 +541,7 @@ messageHandler peer (mm, ingss) = do
                     case res of
                         Right (depTxHashes) -> do
                             candBlks <- liftIO $ TSH.toList (candidateBlocks bp2pEnv)
-                            let candBlkHashes = fmap fst candBlks
+                            let candBlkHashes = fmap (fst) candBlks
                             addTxCandidateBlocks (txHash tx) candBlkHashes depTxHashes
                         Left TxIDNotFoundException -> do
                             return ()

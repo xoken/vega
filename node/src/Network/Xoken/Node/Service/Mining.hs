@@ -110,15 +110,10 @@ getMiningCandidate = do
                 (show (bestSyncedBlockHash, bestSyncedBlockHeight))
             newCandidateBlockChainTip
             throw KeyValueDBLookupException
-        Just blk -> do
+        Just (blk,cbtx) -> do
             (txHashes, txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalStateWithValue blk
-            pts' <- liftIO $ DAG.getPrimaryTopologicalSorted blk
-            let cbase = makeCoinbaseTx
-                            (1 + fromIntegral bestSyncedBlockHeight)
-                            coinbaseAddress
-                            (computeSubsidy (NC.bitcoinNetwork nodeCfg) (fromIntegral $ bestSyncedBlockHeight))
-                coinbaseTx = DT.unpack $ encodeHex $ DS.encode $ cbase
-                pts = txHash cbase : pts
+            pts <- liftIO $ DAG.getPrimaryTopologicalSorted blk
+            let coinbaseTx = DT.unpack $ encodeHex $ DS.encode $ cbtx
                 sibling =
                     if length pts >= 2
                         then Just $ pts !! 1
@@ -139,7 +134,7 @@ getMiningCandidate = do
                     cbByUuidTSH
                     uuid $
                     MiningCandidateData bestSyncedBlockHash
-                                        cbase
+                                        cbtx
                                         (fromIntegral txCount)
                                         0x20000000
                                         (fromIntegral satVal)
@@ -198,7 +193,7 @@ submitMiningSolution id nonce coinbase time version = do
         then do
             debug lg $ LG.msg $ "Mined Candidate Block: " ++ show uuid ++ "; Blockhash: " ++ show bhsh ++ "; header: " ++ show bh
             liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cmpctblk,mcdTxHashes miningData)
-            newCandidateBlock bhsh
+            newCandidateBlock bhsh (1 + mcdHeight miningData)
             broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
             return True
         else do

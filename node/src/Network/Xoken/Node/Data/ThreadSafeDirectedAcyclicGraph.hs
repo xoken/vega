@@ -154,6 +154,7 @@ rollOver ::
        (Eq v, Hashable v, Ord v, Show v, Show a, Num a, Show m)
     => TSDirectedAcyclicGraph v a m
     -> [v]
+    -> [v]
     -> v
     -> a
     -> m
@@ -162,9 +163,10 @@ rollOver ::
     -> (a -> a -> a)
     -> (m -> [v] -> m)
     -> IO (TSDirectedAcyclicGraph v a m)
-rollOver olddag filterList def initval mkt vertexParts topSortParts cumulate upstate = do
+rollOver olddag filterList coalesceList def initval mkt vertexParts topSortParts cumulate upstate = do
     newdag <- new def initval mkt vertexParts topSortParts
-    mapM_ (\x -> do TSH.delete (origEdges olddag) x) filterList
+    mapM_ (TSH.delete (origEdges olddag)) filterList
+    mapM_ (\x -> coalesce newdag x [] 9999 cumulate upstate) coalesceList
     TSH.mapM_ (\(vt, (ed, va)) -> do coalesce newdag vt ed va cumulate upstate) (origEdges olddag)
     return newdag
 
