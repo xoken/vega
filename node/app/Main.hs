@@ -182,10 +182,10 @@ runSyncStatusChecker = do
                 case candidateBlock of
                     Nothing -> do
                         liftIO $ print $ "Sync status: Added new candidate block over " ++ show (bhash,ht)
-                        newCandidateBlockChainTip
+                        newCandidateBlock bhash ht
                     _ -> return ()
         --        else return Nothing
-        liftIO $ print $ "Sync status: " -- ++ show mn
+        liftIO $ print $ "Sync status: " ++ show isSynced
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced
         liftIO $ threadDelay (60 * 1000000)
 

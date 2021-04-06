@@ -117,7 +117,7 @@ getMiningCandidate = do
             let mrklRoot = foldl1 hash2 (getTxHash <$> (txHash cbtx : merkleBranch))
             debug lg $
                 LG.msg $
-                "UUID: " <> show uuid <> "; Merkle Root" <> show (mrklRoot,merkleRoot)
+                "UUID: " <> show uuid <> "; Merkle Root: " <> show (mrklRoot,merkleRoot) <> "; Merkle Branch: " <> show (merkleBranch) <> "; coinbase: " <> show (txHash cbtx)
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
             let parentBlock = memoryBestHeader hm
                 candidateHeader = BlockHeader 0 (BlockHash "") "" (round timestamp) 0 0
