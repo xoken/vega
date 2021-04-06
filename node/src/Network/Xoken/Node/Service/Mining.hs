@@ -29,6 +29,7 @@ import qualified Database.Bolt as BT
 import qualified Network.Simple.TCP.TLS as TLS
 import Network.Xoken.Address.Base58
 import Network.Xoken.Block.Common
+import Network.Xoken.Block.Merkle
 import Network.Xoken.Block.Headers (computeSubsidy)
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Node.DB
@@ -87,19 +88,6 @@ getMiningCandidate = do
     hm <- (liftIO . readTVarIO) $ blockTree bp2pEnv
     debug lg $ LG.msg $ show "getMiningCandidate: got header memory"
     let candidateBlocksTsh = candidateBlocks bp2pEnv
-    coinbaseAddress <-
-        case stringToAddr (NC.bitcoinNetwork nodeCfg) (DT.pack $ NC.coinbaseTxAddress nodeCfg) of
-            Nothing -> do
-                err lg $
-                    LG.msg $
-                    "Error: Failed to decode supplied Coinbase address " <>
-                    (show $ DT.pack $ NC.coinbaseTxAddress nodeCfg)
-                debug lg $
-                    LG.msg $
-                    "getMiningCandidate: Failed to decode supplied Coinbase address " <>
-                    (show $ DT.pack $ NC.coinbaseTxAddress nodeCfg)
-                throw KeyValueDBLookupException
-            Just a -> return a
     let cbByUuidTSH = candidatesByUuid bp2pEnv
     candidateBlock <- liftIO $ TSH.lookup candidateBlocksTsh bestSyncedBlockHash
     case candidateBlock of
@@ -108,8 +96,9 @@ getMiningCandidate = do
                 LG.msg $
                 "Error: Failed to fetch candidate block, previous block: " <>
                 (show (bestSyncedBlockHash, bestSyncedBlockHeight))
-            newCandidateBlockChainTip
-            throw KeyValueDBLookupException
+            newCandidateBlock bestSyncedBlockHash $ fromIntegral bestSyncedBlockHeight
+            getMiningCandidate
+            --throw KeyValueDBLookupException
         Just (blk,cbtx) -> do
             (txHashes, txCount, satVal, bcState, mbCoinbaseTxn) <- liftIO $ DAG.getCurrentPrimaryTopologicalStateWithValue blk
             pts <- liftIO $ DAG.getPrimaryTopologicalSorted blk
@@ -125,6 +114,10 @@ getMiningCandidate = do
                         Just s -> (s : merkleBranch')
                         Nothing -> merkleBranch'
             uuid <- liftIO generateUuid
+            let mrklRoot = foldl1 hash2 (getTxHash <$> (txHash cbtx : merkleBranch))
+            debug lg $
+                LG.msg $
+                "UUID: " <> show uuid <> "; Merkle Root" <> show (mrklRoot,merkleRoot)
             timestamp <- liftIO $ (getPOSIXTime :: IO NominalDiffTime)
             let parentBlock = memoryBestHeader hm
                 candidateHeader = BlockHeader 0 (BlockHash "") "" (round timestamp) 0 0
@@ -142,7 +135,7 @@ getMiningCandidate = do
                                         (round timestamp)
                                         (1 + fromIntegral bestSyncedBlockHeight)
                                         merkleBranch
-                                        txHashes
+                                        (tail txHashes)
                                         0
                                         Nothing
                                         Nothing

@@ -173,9 +173,17 @@ runSyncStatusChecker = do
             if isSynced
                 then "Yes"
                 else "No"
-        --mn <-
-        --    if isSynced
-        --        then mineBlockFromCandidateChainTip
+        when isSynced $ do
+                let candidateBlocksTsh = candidateBlocks bp2pEnv
+                bestBlock <- fetchBestBlock
+                let bhash = headerHash $ nodeHeader bestBlock
+                    ht = nodeHeight bestBlock
+                candidateBlock <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
+                case candidateBlock of
+                    Nothing -> do
+                        liftIO $ print $ "Sync status: Added new candidate block over " ++ show (bhash,ht)
+                        newCandidateBlockChainTip
+                    _ -> return ()
         --        else return Nothing
         liftIO $ print $ "Sync status: " -- ++ show mn
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced

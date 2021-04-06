@@ -236,7 +236,7 @@ newCandidateBlock hash height = do
                     (coinbaseAddress bp2pEnv)
                     (computeSubsidy (bitcoinNetwork $ nodeConfig bp2pEnv) (fromIntegral $ height))
     tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) EmptyBranch 16 16
-    liftIO $ DAG.coalesce tsdag (txHash cbase) [] 9999 (+) updateMerkleBranch
+    liftIO $ DAG.coalesce tsdag (txHash cbase) [] 0 (+) updateMerkleBranch
     liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash (tsdag,cbase)
 
 newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()

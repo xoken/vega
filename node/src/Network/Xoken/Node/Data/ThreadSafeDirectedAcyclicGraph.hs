@@ -166,7 +166,7 @@ rollOver ::
 rollOver olddag filterList coalesceList def initval mkt vertexParts topSortParts cumulate upstate = do
     newdag <- new def initval mkt vertexParts topSortParts
     mapM_ (TSH.delete (origEdges olddag)) filterList
-    mapM_ (\x -> coalesce newdag x [] 9999 cumulate upstate) coalesceList
+    mapM_ (\x -> coalesce newdag x [] 0 cumulate upstate) coalesceList
     TSH.mapM_ (\(vt, (ed, va)) -> do coalesce newdag vt ed va cumulate upstate) (origEdges olddag)
     return newdag
 
