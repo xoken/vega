@@ -11,6 +11,7 @@
 module Network.Xoken.Node.Data where
 
 import Codec.Compression.GZip as GZ
+import Control.Exception
 import Codec.Serialise
 import Control.Applicative
 import Data.Aeson as A
@@ -134,7 +135,7 @@ instance ToJSON ErrorResponse where
 
 data RPCReqParams
     = GetMiningCandidateRequest
-          { gmcrProvideCoinbaseTx :: Maybe Bool
+          { gmcrProvideCoinbaseTx :: Bool
           }
     | SubmitMiningSolutionRequest
           { smsrId :: String
@@ -147,23 +148,26 @@ data RPCReqParams
 
 instance FromJSON RPCReqParams where
     parseJSON (Object o) =
-        (GetMiningCandidateRequest <$> o .:? "provide_coinbase_tx") <|>
         (SubmitMiningSolutionRequest <$> o .: "id" <*> o .: "nonce" <*> o .:? "coinbase" <*> o .:? "time" <*>
-         o .:? "version")
+         o .:? "version") <|>
+        (GetMiningCandidateRequest <$> o .:? "provide_coinbase_tx" .!= False)
 
-data RPCResponseBody =
-    GetMiningCandidateResp
-        { rgmcId :: String
-        , rgmcPrevHash :: String
-        , rgmcCoinbase :: Maybe String
-        , rgmcNumTx :: Int32
-        , rgmcVersion :: Int32
-        , rgmcCoinbaseValue :: Int64
-        , rgmcnBits :: Int32
-        , rgmcTime :: Int32
-        , rgmcHeight :: Int32
-        , rgmcMerkleProof :: [String]
-        }
+data RPCResponseBody
+    = GetMiningCandidateResp
+          { rgmcId :: String
+          , rgmcPrevHash :: String
+          , rgmcCoinbase :: Maybe String
+          , rgmcNumTx :: Int32
+          , rgmcVersion :: Int32
+          , rgmcCoinbaseValue :: Int64
+          , rgmcnBits :: Int32
+          , rgmcTime :: Int32
+          , rgmcHeight :: Int32
+          , rgmcMerkleProof :: [String]
+          }
+    | SubmitMiningSolutionResp
+          { smsrStatus :: Bool
+          }
     deriving (Generic, Show, Hashable, Eq, Serialise)
 
 instance ToJSON RPCResponseBody where
@@ -180,6 +184,7 @@ instance ToJSON RPCResponseBody where
             , "height" .= ht
             , "merkleProof" .= mp
             ]
+    toJSON (SubmitMiningSolutionResp s) = object ["status" .= s]
 
 data ChainInfo =
     ChainInfo
@@ -637,3 +642,18 @@ prevEpoch :: Epoch -> Epoch
 prevEpoch Epoch0 = Epoch2
 prevEpoch Epoch1 = Epoch0
 prevEpoch Epoch2 = Epoch1
+
+data SubmitMiningSolutionException
+    = UuidFormatException
+    | BlockCandidateIdNotFound
+    | InvalidPOW
+    deriving (Eq)
+
+instance Exception SubmitMiningSolutionException
+
+instance Show SubmitMiningSolutionException where
+    show UuidFormatException = "UUID formatted incorrectly (use RFC-4122 version 4 UUIDs)"
+    show BlockCandidateIdNotFound =
+        "Required ID was not found, the ID supplied does not correspond to any candidate block"
+    show InvalidPOW =
+        "Proof of Work invalid, supply valid nonce"

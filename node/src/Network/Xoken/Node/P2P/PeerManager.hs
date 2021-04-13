@@ -11,7 +11,8 @@
 module Network.Xoken.Node.P2P.PeerManager
     ( createSocket
     , setupSeedPeerConnection
-    , mineBlockFromCandidate
+    --, mineBlockFromCandidate
+    --, mineBlockFromCandidateChainTip
     ) where
 
 import Control.Concurrent (threadDelay)
@@ -36,11 +37,16 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import Data.Serialize as DS
 import Data.Time.Clock.POSIX
+import qualified Data.UUID as UUID
+import qualified Data.UUID.V1 as UUID
+import Data.UUID (UUID)
 import Data.Word
 import Network.Socket
 import Network.Xoken.Address
 import Network.Xoken.Block
 import Network.Xoken.Constants
+import Network.Xoken.Crypto.Hash
+import Network.Xoken.Node.Data (SubmitMiningSolutionException (..))
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
@@ -56,6 +62,7 @@ import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.P2P.UnconfTxSync
 import Network.Xoken.Node.P2P.Version
 import Network.Xoken.Node.Worker.Dispatcher
+import Network.Xoken.Block.Headers
 import Network.Xoken.Transaction
 import Streamly as S
 import qualified Streamly.Prelude as S
@@ -304,7 +311,7 @@ readNextMessage net sock ingss = do
                                                 (ar, (binTxTotalCount blin))
                                 qq <- liftIO $ atomically $ newTQueue
                                         -- wait for TMT threads alloc
-                                liftIO $ MS.wait (maxTMTBuilderThreadLock p2pEnv)
+                                -- liftIO $ MS.wait (maxTMTBuilderThreadLock p2pEnv)
                                 liftIO $ TSH.insert (merkleQueueMap p2pEnv) (biBlockHash $ bf) qq
                                 return qq
                             else do
@@ -404,11 +411,13 @@ doVersionHandshake net sock sa = do
     let ip = bitcoinNodeListenIP $ nodeConfig p2pEnv
         port = toInteger $ bitcoinNodeListenPort $ nodeConfig p2pEnv
     myaddr <- liftIO $ head <$> getAddrInfo (Just defaultHints {addrSocketType = Stream}) (Just ip) (Just $ show port)
+    uuid <- liftIO $ applyTillJust UUID.nextUUID 
     let nonce = fst (random g :: (Word64, StdGen))
         ad = NetworkAddress 0 $ addrAddress myaddr
         bb = 1 :: Word32 -- ### TODO: getBestBlock ###
         rmt = NetworkAddress 0 sa
-        ver = buildVersion net nonce bb ad rmt now
+        assoc = Just $ LC.toStrict $ UUID.toByteString uuid
+        ver = buildVersion net nonce bb ad rmt now assoc
         em = runPut . putMessage net $ (MVersion ver)
     mv <- liftIO $ (newMVar ())
     liftIO $ sendEncMessage mv sock (BSL.fromStrict em)
@@ -482,8 +491,13 @@ messageHandler peer (mm, ingss) = do
                                      unsynced <- blocksUnsynced
                                      if unsynced <= (3 :: Int32)
                                          then do
-                                             newCandidateBlock $ BlockHash bhash
-                                             processCompactBlockGetData peer $ invHash x
+                                            hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+                                            let height = fmap nodeHeight $ getBlockHeaderMemory (BlockHash bhash) hm
+                                            case height of
+                                                Just ht -> do
+                                                    newCandidateBlock (BlockHash bhash) ht
+                                                    processCompactBlockGetData peer $ invHash x
+                                                Nothing -> liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                          else liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
                                      indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
@@ -504,8 +518,13 @@ messageHandler peer (mm, ingss) = do
                                  InvCompactBlock -> do
                                      let bhash = invHash x
                                      debug lg $ LG.msg ("INV - Compact Block: " ++ (show bhash))
-                                     newCandidateBlock $ BlockHash bhash
-                                     processCompactBlockGetData peer $ invHash x
+                                     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+                                     let height = fmap nodeHeight $ getBlockHeaderMemory (BlockHash bhash) hm
+                                     case height of
+                                         Just ht -> do
+                                            newCandidateBlock (BlockHash bhash) ht
+                                            processCompactBlockGetData peer $ invHash x
+                                         Nothing -> return ()
                                  otherwise -> return ())
                         (invList inv)
                     return $ msgType msg
@@ -533,7 +552,7 @@ messageHandler peer (mm, ingss) = do
                     case res of
                         Right (depTxHashes) -> do
                             candBlks <- liftIO $ TSH.toList (candidateBlocks bp2pEnv)
-                            let candBlkHashes = fmap fst candBlks
+                            let candBlkHashes = fmap (fst) candBlks
                             addTxCandidateBlocks (txHash tx) candBlkHashes depTxHashes
                         Left TxIDNotFoundException -> do
                             return ()
@@ -819,33 +838,9 @@ logMessage peer mg = do
 
 --
 --
-broadcastToPeers :: (HasXokenNodeEnv env m, MonadIO m) => Message -> m ()
-broadcastToPeers msg = do
-    liftIO $ putStrLn $ "Broadcasting " ++ show (msgType msg) ++ " to peers"
-    bp2pEnv <- getBitcoinP2P
-    peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
-    mapM_
-        (\bp ->
-             if bpConnected bp
-                 then sendRequestMessages bp msg
-                 else return ())
-        peerMap
-    liftIO $ putStrLn $ "Broadcasted " ++ show (msgType msg) ++ " to peers"
-
-sendcmpt :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> m ()
-sendcmpt bp = sendRequestMessages bp $ MSendCompact $ SendCompact 0 1
-
-sendCmptBlock :: (HasXokenNodeEnv env m, MonadIO m) => CompactBlock -> BitcoinPeer -> m ()
-sendCmptBlock cmpt bp = sendRequestMessages bp $ MCompactBlock cmpt
-
-sendBlockTxn :: (HasXokenNodeEnv env m, MonadIO m) => BlockTxns -> BitcoinPeer -> m ()
-sendBlockTxn blktxn bp = sendRequestMessages bp $ MBlockTxns blktxn
-
-sendInv :: (HasXokenNodeEnv env m, MonadIO m) => Inv -> BitcoinPeer -> m ()
-sendInv inv bp = sendRequestMessages bp $ MInv inv
-
-mineBlockFromCandidate :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe CompactBlock)
-mineBlockFromCandidate = do
+{-
+mineBlockFromCandidateChainTip :: (HasXokenNodeEnv env m, MonadIO m) => m (Maybe CompactBlock)
+mineBlockFromCandidateChainTip = do
     bp2pEnv <- getBitcoinP2P
     let net = bitcoinNetwork $ nodeConfig bp2pEnv
     bbn <- fetchBestBlock
@@ -916,6 +911,82 @@ mineBlockFromCandidate = do
                     zRPCDispatchProvisionalBlockHash bhsh (mkProvisionalBlockHash bhash)
                     return $ Just $ cb
 
+mineBlockFromCandidate :: (HasXokenNodeEnv env m, MonadIO m) => UUID -> Int32 -> Maybe String -> Maybe Int32 -> Maybe Int32 -> m (Maybe CompactBlock)
+mineBlockFromCandidate candidateId nonce coinbase time version = do
+    bp2pEnv <- getBitcoinP2P
+    lg <- getLogger
+    dbe <- getDB
+    let net = bitcoinNetwork $ nodeConfig bp2pEnv
+        conn = rocksDB dbe
+        candidateBlocksByUuid = candidatesByUuid bp2pEnv
+    mbCandidateBlockState <- liftIO $ TSH.lookup candidateBlocksByUuid candidateId
+    (blockHash, txCount, merkleRoot, merkleBranch) <-
+        case mbCandidateBlockState of
+            Nothing -> do
+                throw BlockCandidateIdNotFound
+            Just cb -> return cb
+    bbn <- fetchBestBlock
+    let (bhash,ht) = (headerHash $ nodeHeader bbn, nodeHeight bbn)
+    dag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
+    case dag of
+        Nothing -> return Nothing
+        Just dag' -> do
+            top <- liftIO $ DAG.getPrimaryTopologicalSorted dag'
+            ct <- liftIO getPOSIXTime
+            if L.null top
+                then do
+                    liftIO $ print $ "Couldn't mine cmptblk (dag empty over): " ++ show bhash
+                    return Nothing
+                else do
+                    let cbase =
+                            fromMaybe
+                                (makeCoinbaseTx
+                                    (fromIntegral $ ht + 1)
+                                    (fromJust $ stringToAddr net "msedZ3WsLDsd97f2cPo26J5xU5ZjBgTExz")
+                                    1250000000)
+                                Nothing -- coinbase
+                        txhashes = (txHash cbase : top)
+                    let bh =
+                            BlockHeader
+                                (maybe 0x20000000 fromIntegral version)
+                                bhash
+                                (buildMerkleRoot txhashes)
+                                (maybe (fromIntegral $ floor ct) fromIntegral time)
+                                0x207fffff
+                                (fromIntegral nonce) -- BlockHeader
+                    if isValidPOW net bh
+                        then do
+                            --(bhsh@(BlockHash bhsh'), nn) = generateHeaderHash net bh
+                            let (bhsh@(BlockHash bhsh')) = headerHash bh
+                                sidl = fromIntegral $ L.length $ top -- shortIds length
+                                skey = getCompactBlockSipKey bh $ fromIntegral nonce
+                                pfl = 1
+                                pftx = [PrefilledTx 0 $ cbase]
+                                (cbsid:sids) = map (\txid -> txHashToShortId' txid skey) $ txhashes -- shortIds
+                                cb = CompactBlock bh (fromIntegral nonce) sidl sids pfl pftx
+                            liftIO $ TSH.insert (compactBlocks bp2pEnv) bhsh (cb, top)
+                            liftIO $
+                                print $
+                                "Mined cmptblk " ++
+                                show bhsh ++
+                                " over " ++
+                                show bhash ++
+                                " with work " ++
+                                (show $ headerWork bh) ++
+                                " and coinbase tx: " ++
+                                (show $ runPutLazy $ putLazyByteString $ DS.encodeLazy cbase)
+                                ++
+                                " hash: " ++ (show $ head $ txhashes) ++ " sid: " ++ (show $ cbsid)
+                            --peerMap <- liftIO $ readTVarIO (bitcoinPeers bp2pEnv)
+                            --mapM_ (\bp -> if bpConnected bp then processCompactBlock cb bp else return ()) peerMap
+                            newCandidateBlock bhsh
+                            broadcastToPeers $ MInv $ Inv [InvVector InvBlock bhsh']
+                            --mapM_ (\x -> updateZtxiUtxo x bhsh $ fromIntegral $ ht + 1) top
+                            return $ Just $ cb
+                        else do
+                            debug lg $ LG.msg $ "Invalid POW for candidate id " ++ show candidateId ++ "; invalid nonce: " ++ show nonce
+                            throw InvalidPOW
+-}
 generateHeaderHash :: Network -> BlockHeader -> (BlockHash, Word32)
 generateHeaderHash net hdr =
     if isValidPOW net hdr

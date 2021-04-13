@@ -49,6 +49,7 @@ import Network.Xoken.Node.Env
 import Network.Xoken.Node.HTTP.Server
 import Network.Xoken.Node.P2P.BlockSync
 import Network.Xoken.Node.P2P.ChainSync
+import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.PeerManager
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.TLSServer
@@ -138,6 +139,8 @@ runThreads config nodeConf bp2p lg certPaths = do
         runAppM
             serviceEnv
             (withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
+                    isSynced <- checkBlocksFullySynced
+                    when isSynced newCandidateBlockChainTip
                     if (_nodeType node == NC.Master)
                         then do
                             withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
@@ -158,9 +161,8 @@ runSyncStatusChecker :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
 runSyncStatusChecker = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
-    newCandidateBlockChainTip
     -- wait 300 seconds before first check
-    liftIO $ threadDelay (30 * 1000000)
+    liftIO $ threadDelay (300 * 1000000)
     forever $ do
         isSynced <- checkBlocksFullySynced
         LG.debug lg $
@@ -171,11 +173,19 @@ runSyncStatusChecker = do
             if isSynced
                 then "Yes"
                 else "No"
-        mn <-
-            if isSynced
-                then mineBlockFromCandidate
-                else return Nothing
-        liftIO $ print $ "Sync status: " ++ show mn
+        when isSynced $ do
+                let candidateBlocksTsh = candidateBlocks bp2pEnv
+                bestBlock <- fetchBestBlock
+                let bhash = headerHash $ nodeHeader bestBlock
+                    ht = nodeHeight bestBlock
+                candidateBlock <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
+                case candidateBlock of
+                    Nothing -> do
+                        liftIO $ print $ "Sync status: Added new candidate block over " ++ show (bhash,ht)
+                        newCandidateBlock bhash ht
+                    _ -> return ()
+        --        else return Nothing
+        liftIO $ print $ "Sync status: " ++ show isSynced
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced
         liftIO $ threadDelay (60 * 1000000)
 
@@ -190,6 +200,11 @@ runNode config nodeConf bp2p certPaths = do
 
 defBitcoinP2P :: NodeConfig -> IO BitcoinP2P
 defBitcoinP2P nodeCnf = do
+    coinbaseAddress <-
+        case stringToAddr (bitcoinNetwork nodeCnf) (DT.pack $ coinbaseTxAddress nodeCnf) of
+            Nothing -> 
+                P.error "Invalid supplied coinbase address\nPossible fix: Add valid address in coinbaseTxAddress field in node-config.yaml"
+            Just a -> return a
     g <- newTVarIO M.empty
     bp <- newTVarIO M.empty
     mv <- newMVar True
@@ -243,6 +258,7 @@ defBitcoinP2P nodeCnf = do
             pftx
             cbu
             pr
+            coinbaseAddress
 
 initVega :: IO ()
 initVega = do

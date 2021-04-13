@@ -17,10 +17,7 @@ module Network.Xoken.Node.P2P.BlockSync
     , peerBlockSync
     , runPeerSync
     , runBlockCacheQueue
-    , sendRequestMessages
     , processCompactBlockGetData
-    , newCandidateBlock
-    , newCandidateBlockChainTip
     ) where
 
 import Control.Concurrent (threadDelay)
@@ -57,6 +54,7 @@ import Network.Xoken.Crypto.Hash
 import Network.Xoken.Network.Common
 import Network.Xoken.Network.CompactBlock
 import Network.Xoken.Network.Message
+import Network.Xoken.Script
 import Network.Xoken.Node.DB
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph as DAG
 import qualified Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
@@ -67,11 +65,13 @@ import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
 import Network.Xoken.Transaction.Common
+import Network.Xoken.Transaction
 import Streamly as S
 import qualified Streamly.Prelude as S
 import System.Logger as LG
 import System.Random (randomRIO)
 import Xoken.NodeConfig as NC
+import Data.EnumBitSet (fromEnums, (.|.))
 
 produceGetDataMessage :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m (Message)
 produceGetDataMessage peer = do
@@ -82,25 +82,6 @@ produceGetDataMessage peer = do
     let gd = GetData [InvVector InvBlock $ getBlockHash $ biBlockHash bl]
     debug lg $ LG.msg $ "GetData req: " ++ show gd
     return (MGetData gd)
-
-sendRequestMessages :: (HasXokenNodeEnv env m, MonadIO m) => BitcoinPeer -> Message -> m ()
-sendRequestMessages pr msg = do
-    lg <- getLogger
-    bp2pEnv <- getBitcoinP2P
-    let net = bitcoinNetwork $ nodeConfig bp2pEnv
-    debug lg $ LG.msg $ val "Block - sendRequestMessages - called."
-    case (bpSocket pr) of
-        Just s -> do
-            let em = runPut . putMessage net $ msg
-            res <- liftIO $ try $ sendEncMessage (bpWriteMsgLock pr) s (BSL.fromStrict em)
-            case res of
-                Right () -> return ()
-                Left (e :: SomeException) -> do
-                    case fromException e of
-                        Just (t :: AsyncCancelled) -> throw e
-                        otherwise -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
-            debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
-        Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
 
 peerBlockSync :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BitcoinPeer -> m ()
 peerBlockSync peer =
@@ -472,7 +453,23 @@ processConfTransaction tx bhash blkht txind = do
                      else do
                          zz <- LE.try $ zRPCDispatchGetOutpoint (prevOutput b) $ Just bhash
                          case zz of
-                             Right (val, _, _) -> return (val, (shortHash, opindx))
+                             Right (val, _, _,scr) -> do
+                                 let context = Ctx
+                                                { script_flags = fromEnums [GENESIS, UTXO_AFTER_GENESIS, VERIFY_MINIMALIF]
+                                                                    .|. mandatoryScriptFlags .|. standardScriptFlags
+                                                , consensus = True
+                                                , sig_checker_data = Just $ SigCheckerData net tx (fromIntegral indx) val
+                                                }
+                                     scrd = decode scr
+                                     scrdi = decode (scriptInput b)
+                                 case (scrd, scrdi) of
+                                     (Left e,_) -> debug lg $ LG.msg $ "[SCRIPT conf] " ++ e
+                                     (_,Left e) -> debug lg $ LG.msg $ "[SCRIPT conf] " ++ e
+                                     (Right sc, Right sci) -> debug lg $ LG.msg $ "[SCRIPT conf] "
+                                                                                ++ show (error_msg (verifyScriptWith context empty_env sci sc))
+                                                                                ++ "; for tx: "
+                                                                                ++ show (txHash tx)
+                                 return (val, (shortHash, opindx))
                              Left (e :: SomeException) -> do
                                  err lg $
                                      LG.msg $
@@ -499,6 +496,7 @@ processConfTransaction tx bhash blkht txind = do
                              []
                              (fromIntegral $ outValue opt)
                              opCount
+                             (scriptOutput opt)
                  res <- LE.try $ putOutput (OutPoint (txHash tx) oindex) zut
                  case res of
                      Right _ -> return (zut)
@@ -638,7 +636,7 @@ processCompactBlock cmpct peer = do
     case cb of
         Nothing -> do
             return ()
-        Just dag -> do
+        Just (dag,_) -> do
             debug lg $ LG.msg $ ("New Candidate Block Found over: " ++ show bhash)
             mpTxLst <- liftIO $ DAG.getTopologicalSortedForest dag
             let mpShortTxIDList = map (\(txid, rt) -> do (txHashToShortId' txid skey, (txid, rt))) mpTxLst
@@ -661,8 +659,8 @@ processCompactBlock cmpct peer = do
                              -- TODO: lock the previous dag and insert into a NEW dag!!
                           -> do
                              case rt of
-                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+) nextBcState
-                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+) nextBcState)
+                                 Just p -> liftIO $ DAG.coalesce dag txid [p] 999 (+) updateMerkleBranch
+                                 Nothing -> liftIO $ DAG.coalesce dag txid [] 999 (+) updateMerkleBranch)
                 mpShortTxIDList
             --    lastIndex <- liftIO $ newIORef 0
             --    mtxIndexes <-
@@ -713,7 +711,7 @@ processBlockTransactions blockTxns = do
     cb <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) (bhash)
     case cb of
         Nothing -> err lg $ LG.msg $ ("Candidate block not found!: " ++ show bhash)
-        Just dag -> do
+        Just (dag,_) -> do
             res <- liftIO $ TSH.lookup (prefilledShortIDsProcessing bp2pEnv) bhash
             case res of
                 Just (skey, sids, cbpftxns, lkmap')
@@ -764,13 +762,19 @@ processBlockTransactions blockTxns = do
                                  frag)
                         (cbpftxns)
                 Nothing -> return ()
+    hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
+    let height = nodeHeight $ fromJust $ getBlockHeaderMemory bhash hm -- TODO.DAG
     olddag <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash'
     case olddag of
-        Just dag -> do
-            newdag <- liftIO $ DAG.rollOver dag txhashes defTxHash 0 emptyBranchComputeState 16 16 (+) (nextBcState)
-            liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash newdag
+        Just (dag,cbtx) -> do
+            let cbase = makeCoinbaseTx
+                    (1 + fromIntegral height)
+                    (coinbaseAddress bp2pEnv)
+                    (computeSubsidy (bitcoinNetwork $ nodeConfig bp2pEnv) (fromIntegral $ height))
+            newdag <- liftIO $ DAG.rollOver dag (txHash cbtx : txhashes) [txHash cbase] defTxHash 0 EmptyBranch 16 16 (+) (updateMerkleBranch)
+            liftIO $ TSH.insert (candidateBlocks bp2pEnv) bhash (newdag,cbase)
         Nothing -> do
-            newCandidateBlock bhash
+            newCandidateBlock bhash (1 + height)
 
 processDeltaTx :: (HasXokenNodeEnv env m, MonadIO m) => BlockHash -> Tx -> m ()
 processDeltaTx bhash tx = do
@@ -821,19 +825,3 @@ sendCompactBlockGetData pr hash = do
                 Left (e :: SomeException) -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"
-
-newCandidateBlock :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => BlockHash -> m ()
-newCandidateBlock hash = do
-    bp2pEnv <- getBitcoinP2P
-    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
-    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
-
-newCandidateBlockChainTip :: (HasXokenNodeEnv env m, HasLogger m, MonadIO m) => m ()
-newCandidateBlockChainTip = do
-    bp2pEnv <- getBitcoinP2P
-    bbn <- fetchBestBlock
-    let hash = headerHash $ nodeHeader bbn
-    tsdag <- liftIO $ DAG.new defTxHash (0 :: Word64) emptyBranchComputeState 16 16
-    liftIO $ TSH.insert (candidateBlocks bp2pEnv) hash tsdag
-
-defTxHash = fromJust $ hexToTxHash "0000000000000000000000000000000000000000000000000000000000000000"

@@ -38,6 +38,7 @@ import Network.Xoken.Node.Data
 import Network.Xoken.Node.Data.ThreadSafeDirectedAcyclicGraph
 import Network.Xoken.Node.Data.ThreadSafeHashTable as TSH
 import Network.Xoken.Node.P2P.Types
+import Network.Xoken.Address
 import Network.Xoken.Transaction
 import System.Logger
 import Xoken.NodeConfig
@@ -66,6 +67,24 @@ data AllegoryEnv =
         { allegorySecretKey :: !SecKey
         }
 
+data MiningCandidateData
+    = MiningCandidateData
+          { mcdPrevHash :: BlockHash
+          , mcdCoinbase :: Tx
+          , mcdNumTx :: Word32
+          , mcdVersion :: Word32
+          , mcdCoinbaseValue :: Word64
+          , mcdnBits :: Word32
+          , mcdTime :: Timestamp -- Word32
+          , mcdHeight :: BlockHeight -- Word32
+          , mcdMerkleProof :: [TxHash]
+          , mcdTxHashes :: [TxHash]
+          , mcdMinerNonce :: Word32
+          , mcdMinerVersion :: Maybe Word32
+          , mcdMinerCoinbase :: Maybe Tx
+          , mcdMinerTime :: Maybe Timestamp
+          }
+
 data BitcoinP2P =
     BitcoinP2P
         { nodeConfig :: !NodeConfig
@@ -88,15 +107,16 @@ data BitcoinP2P =
         , workerConns :: !(TVar [Worker])
         , bestSyncedBlock :: !(TVar (Maybe BlockInfo))
         , pruneUtxoQueue :: !(TSH.TSHashTable BlockHash (TSH.TSHashTable OutPoint ()))
-        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64 BranchComputeState))
+        , candidateBlocks :: !(TSH.TSHashTable BlockHash (TSDirectedAcyclicGraph TxHash Word64 IncrementalBranch, Tx))
         , compactBlocks :: !(TSH.TSHashTable BlockHash (CompactBlock, [TxHash]))
         , ingressCompactBlocks :: !(TSH.TSHashTable BlockHash Bool)
         , prefilledShortIDsProcessing :: !(TSH.TSHashTable BlockHash ( SipKey
                                                                      , Seq Word64
                                                                      , [PrefilledTx]
                                                                      , HM.HashMap Word64 (TxHash, Maybe TxHash)))
-        , candidatesByUuid :: !(TSH.TSHashTable UUID (Int32, TxHash))
+        , candidatesByUuid :: !(TSH.TSHashTable UUID MiningCandidateData)
         , predecessors :: !(TVar [BlockHash])
+        , coinbaseAddress :: !(Address)
         -- , mempoolTxIDs :: !(TSH.TSHashTable TxHash ())
         }
 

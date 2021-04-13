@@ -125,7 +125,6 @@ executable vega
     , resource-pool
     , cql
     , hashtables
-    , base16-bytestring
     , SafeSemaphore
     , yaml
     , secp256k1-haskell
@@ -144,6 +143,7 @@ executable vega
     , siphash
     , uuid
     , smuggler
+    , enumset
     
   default-language: Haskell2010
 

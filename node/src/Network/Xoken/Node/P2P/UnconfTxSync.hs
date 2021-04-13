@@ -23,6 +23,7 @@ import qualified Control.Exception.Lifted as LE (try)
 import Control.Monad.Reader
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List as L
+import Data.EnumBitSet (fromEnums, (.|.))
 import Data.Maybe
 import Data.Serialize
 import Data.Word
@@ -40,6 +41,7 @@ import Network.Xoken.Node.P2P.Common
 import Network.Xoken.Node.P2P.MerkleBuilder
 import Network.Xoken.Node.P2P.Types
 import Network.Xoken.Node.Worker.Dispatcher
+import Network.Xoken.Script
 import Network.Xoken.Transaction.Common
 import System.Logger as LG
 import Xoken.NodeConfig
@@ -136,7 +138,7 @@ isNotConfirmed :: TxHash -> IO Bool
 isNotConfirmed txHash = return False
 
 coalesceUnconfTransaction ::
-       (TSDirectedAcyclicGraph TxHash Word64 BranchComputeState) -> TxHash -> [TxHash] -> Word64 -> IO ()
+       (TSDirectedAcyclicGraph TxHash Word64 IncrementalBranch) -> TxHash -> [TxHash] -> Word64 -> IO ()
 coalesceUnconfTransaction dag txhash hashes sats = do
     print $ "coalesceUnconfTransaction called for tx: " ++ show (txhash)
     unconfHashes <- filterM (isNotConfirmed) hashes
@@ -178,7 +180,22 @@ processUnconfTransaction tx = do
                          -- even if parent tx is missing, lets proceed hoping it will become available soon. 
                          -- this assumption is crucial for async ZTXI logic.    
                          case zz of
-                             Right (val, bsh, _) -> do
+                             Right (val, bsh, _,scr) -> do
+                                 let context = Ctx
+                                                { script_flags = fromEnums [GENESIS, UTXO_AFTER_GENESIS, VERIFY_MINIMALIF]
+                                                                    .|. mandatoryScriptFlags .|. standardScriptFlags
+                                                , consensus = True
+                                                , sig_checker_data = Just $ SigCheckerData net tx (fromIntegral indx) val
+                                                }
+                                     scrd = decode scr
+                                     scrdi = decode (scriptInput b)
+                                 case (scrd, scrdi) of
+                                     (Left e,_) -> debug lg $ LG.msg $ "[SCRIPT] " ++ e
+                                     (_,Left e) -> debug lg $ LG.msg $ "[SCRIPT] " ++ e
+                                     (Right sc, Right sci) -> debug lg $ LG.msg $ "[SCRIPT] "
+                                                                                ++ show (error_msg (verifyScriptWith context empty_env sci sc))
+                                                                                ++ "; for tx: "
+                                                                                ++ show (txHash tx)
                                  debug lg $ LG.msg $ "[dag] processUnconfTransaction: zz: " ++ (show $ zz)
                                  return (val, (shortHash, bsh, opHash, opindx))
                              Left (e :: SomeException) -> do
@@ -208,6 +225,7 @@ processUnconfTransaction tx = do
                              []
                              (fromIntegral $ outValue opt)
                              opCount
+                             (scriptOutput opt)
                  res <- LE.try $ putOutput (OutPoint (txHash tx) oindex) zut
                  case res of
                      Right _ -> return (zut)
@@ -316,8 +334,8 @@ addTxCandidateBlock txHash candBlockHash depTxHashes = do
     debug lg $ LG.msg $ "Appending Tx " ++ show txHash ++ "to candidate block: " ++ show candBlockHash
     case q of
         Nothing -> err lg $ LG.msg $ ("did-not-find : " ++ show candBlockHash)
-        Just dag -> do
-            liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+) nextBcState
+        Just (dag,_) -> do
+            liftIO $ DAG.coalesce dag txHash depTxHashes 9999 (+) updateMerkleBranch
             dagT <- liftIO $ (DAG.getTopologicalSortedForest dag)
             dagP <- liftIO $ (DAG.getPrimaryTopologicalSorted dag)
             liftIO $ print $ "dag (" ++ show candBlockHash ++ "): " ++ show dagT ++ "; " ++ show dagP
