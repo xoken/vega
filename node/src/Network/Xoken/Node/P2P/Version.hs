@@ -20,7 +20,7 @@ buildVersion net nonce height loc rmt time assoc =
         , userAgent = VarString (getXokenUserAgent net)
         , startHeight = height
         , relay = True
-        , assocID = VarString <$> (Just "11")
+        , assocID = VarString <$> (Nothing)
         }
 
 -- | Our protocol version.

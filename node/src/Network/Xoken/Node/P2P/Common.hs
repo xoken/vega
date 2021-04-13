@@ -14,6 +14,7 @@ import Control.Concurrent.Async (AsyncCancelled)
 import Control.Exception
 import Control.Concurrent.STM.TVar
 import Control.Monad.Reader
+import Control.Monad.STM
 import Data.Bits
 import qualified Data.ByteString as B
 import Data.ByteString.Builder
@@ -21,6 +22,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as LC
 import Data.Int
 import Data.Maybe
+import qualified Data.Map.Strict as M
 import Data.Serialize
 import Data.Serialize as S
 import Data.Word
@@ -262,6 +264,10 @@ sendRequestMessages pr msg = do
                 Left (e :: SomeException) -> do
                     case fromException e of
                         Just (t :: AsyncCancelled) -> throw e
-                        otherwise -> debug lg $ LG.msg $ "Error, sending out data: " ++ show e
+                        otherwise -> do
+                            err lg $ LG.msg ("Error BS, sending out data: " ++ show e)
+                            liftIO $ atomically $ modifyTVar' (bitcoinPeers bp2pEnv) (M.delete (bpAddress pr))
+                            liftIO $ Network.Socket.close s
+                            throw e
             debug lg $ LG.msg $ "sending out GetData: " ++ show (bpAddress pr)
         Nothing -> err lg $ LG.msg $ val "Error sending, no connections available"

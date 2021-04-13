@@ -162,7 +162,7 @@ runSyncStatusChecker = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     -- wait 300 seconds before first check
-    liftIO $ threadDelay (30 * 1000000)
+    liftIO $ threadDelay (300 * 1000000)
     forever $ do
         isSynced <- checkBlocksFullySynced
         LG.debug lg $
@@ -182,10 +182,10 @@ runSyncStatusChecker = do
                 case candidateBlock of
                     Nothing -> do
                         liftIO $ print $ "Sync status: Added new candidate block over " ++ show (bhash,ht)
-                        newCandidateBlockChainTip
+                        newCandidateBlock bhash ht
                     _ -> return ()
         --        else return Nothing
-        liftIO $ print $ "Sync status: " -- ++ show mn
+        liftIO $ print $ "Sync status: " ++ show isSynced
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced
         liftIO $ threadDelay (60 * 1000000)
 
