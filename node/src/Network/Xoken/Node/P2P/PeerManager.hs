@@ -482,22 +482,15 @@ messageHandler peer (mm, ingss) = do
                 MInv inv -> do
                     mapM_
                         (\x
-                             --liftIO $ print $ "INVTYPE: " ++ (show $ invType x)
                           -> do
+                             liftIO $ print $ "INVTYPE: " ++ (show $ invType x)
                              case (invType x) of
                                  InvBlock -> do
-                                     let bhash = invHash x
+                                     let bhash = BlockHash $ invHash x
                                      debug lg $ LG.msg ("INV - new Block: " ++ (show bhash))
                                      unsynced <- blocksUnsynced
                                      if unsynced <= (3 :: Int32)
-                                         then do
-                                            hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
-                                            let height = fmap nodeHeight $ getBlockHeaderMemory (BlockHash bhash) hm
-                                            case height of
-                                                Just ht -> do
-                                                    newCandidateBlock (BlockHash bhash) ht
-                                                    processCompactBlockGetData peer $ invHash x
-                                                Nothing -> liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
+                                         then processCompactBlockGetData peer $ invHash x
                                          else liftIO $ putMVar (bestBlockUpdated bp2pEnv) True -- will trigger a GetHeaders to peers
                                  InvTx -> do
                                      indexUnconfirmedTx <- liftIO $ readTVarIO $ indexUnconfirmedTx bp2pEnv
@@ -516,15 +509,9 @@ messageHandler peer (mm, ingss) = do
                                                       (show $ TxHash $ invHash x))
                                              return ()
                                  InvCompactBlock -> do
-                                     let bhash = invHash x
+                                     let bhash = BlockHash $ invHash x
                                      debug lg $ LG.msg ("INV - Compact Block: " ++ (show bhash))
-                                     hm <- liftIO $ readTVarIO (blockTree bp2pEnv)
-                                     let height = fmap nodeHeight $ getBlockHeaderMemory (BlockHash bhash) hm
-                                     case height of
-                                         Just ht -> do
-                                            newCandidateBlock (BlockHash bhash) ht
-                                            processCompactBlockGetData peer $ invHash x
-                                         Nothing -> return ()
+                                     processCompactBlockGetData peer $ invHash x
                                  otherwise -> return ())
                         (invList inv)
                     return $ msgType msg
