@@ -11,11 +11,12 @@
 module Network.Xoken.Node.Data where
 
 import Codec.Compression.GZip as GZ
-import Control.Exception
 import Codec.Serialise
 import Control.Applicative
+import Control.Exception
 import Data.Aeson as A
 import Data.ByteString (ByteString)
+import Data.ByteString.Base64 as B64
 import Data.ByteString.Base64.Lazy as B64L
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as C
@@ -32,7 +33,6 @@ import Data.Word
 import GHC.Generics
 import Prelude as P
 import Xoken as H
-
 
 deriving instance Store Tx
 
@@ -53,6 +53,7 @@ deriving instance Store BlockHeader
 deriving instance Store BlockHash
 
 deriving instance Store Hash256
+
 --
 --
 --
@@ -151,6 +152,48 @@ instance FromJSON RPCReqParams where
         (SubmitMiningSolutionRequest <$> o .: "id" <*> o .: "nonce" <*> o .:? "coinbase" <*> o .:? "time" <*>
          o .:? "version") <|>
         (GetMiningCandidateRequest <$> o .:? "provide_coinbase_tx" .!= False)
+
+data MerchantApiReqParams
+    = SubmitTransactionRequest
+          { stRawTx :: ByteString
+          }
+    | SubmitMultipleTransactionsRequest
+          { stRawTxns :: [ByteString]
+          }
+    deriving (Generic, Show, Hashable, Eq, Serialize, ToJSON)
+
+instance FromJSON MerchantApiReqParams where
+    parseJSON (Object o) =
+        (SubmitTransactionRequest . B64.decodeLenient . T.encodeUtf8 <$> o .: "rawTx") <|>
+        (SubmitMultipleTransactionsRequest . (B64.decodeLenient . T.encodeUtf8 <$>) <$> o .: "rawTx")
+
+data MerchantApiResponseBody =
+    SubmitTransactionResponse
+        { stApiVersion :: String
+        , stTimestamp :: String
+        , stTxId :: String
+        , stReturnResult :: String
+        , stResultDescription :: String
+        , stMinerId :: String
+        , stCurrentHighestBlockHash :: String
+        , stCurrentHighestBlockHeight :: String
+        , stConflictedWith :: String
+        }
+    deriving (Generic, Show, Hashable, Eq, Serialize)
+
+instance ToJSON MerchantApiResponseBody where
+    toJSON (SubmitTransactionResponse ver ts txid res des mid hbhs hbht cw) =
+        object
+            [ "apiVersion" .= ver
+            , "timestamp" .= ts
+            , "txid" .= txid
+            , "returnResult" .= res
+            , "resultDescription" .= des
+            , "minerId" .= mid
+            , "currentHighestBlockHash" .= hbhs
+            , "currentHighestBlockHeight" .= hbht
+            , "conflictedWith" .= cw
+            ]
 
 data RPCResponseBody
     = GetMiningCandidateResp
@@ -566,6 +609,7 @@ getJsonRPCErrorCode err =
         INVALID_PARAMS -> -32602
         INTERNAL_ERROR -> -32603
         PARSE_ERROR -> -32700
+
 {- UNUSED?
 coinbaseTxToMessage :: C.ByteString -> String
 coinbaseTxToMessage s =
@@ -655,5 +699,4 @@ instance Show SubmitMiningSolutionException where
     show UuidFormatException = "UUID formatted incorrectly (use RFC-4122 version 4 UUIDs)"
     show BlockCandidateIdNotFound =
         "Required ID was not found, the ID supplied does not correspond to any candidate block"
-    show InvalidPOW =
-        "Proof of Work invalid, supply valid nonce"
+    show InvalidPOW = "Proof of Work invalid, supply valid nonce"

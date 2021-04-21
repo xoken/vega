@@ -56,7 +56,7 @@ import Network.Xoken.Node.TLSServer
 import Network.Xoken.Node.Worker.Listener
 import Options.Applicative
 import Prelude as P
-import qualified Snap
+import qualified Snap as Snap
 import System.Directory (doesDirectoryExist, doesFileExist)
 import qualified System.Logger as LG
 import System.Posix.Daemon
@@ -132,28 +132,27 @@ runThreads config nodeConf bp2p lg certPaths = do
         --
         -- current node
         let node = vegaNode nodeConf
-            normalizedClstr =
-                sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) (node:vegaCluster nodeConf)
+            normalizedClstr = sortBy (\(Node a _ _ _ _) (Node b _ _ _ _) -> compare a b) (node : vegaCluster nodeConf)
         --
         -- run vegaCluster
         runAppM
             serviceEnv
             (withAsync (startTCPServer (_nodeIPAddr node) (_nodePort node)) $ \y -> do
-                    isSynced <- checkBlocksFullySynced
-                    when isSynced newCandidateBlockChainTip
-                    if (_nodeType node == NC.Master)
-                        then do
-                            withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
-                                withAsync setupSeedPeerConnection $ \_ -> do
-                                    withAsync runEgressChainSync $ \_ -> do
-                                        withAsync runBlockCacheQueue $ \_ -> do
-                                            withAsync (handleNewConnectionRequest epHandler) $ \_ -> do
-                                                withAsync runPeerSync $ \_ -> do
-                                                    withAsync runSyncStatusChecker $ \_ -> do
-                                                        withAsync runEpochSwitcher $ \z -> do
-                                                            _ <- LA.wait z
-                                                            return ()
-                        else LA.wait y)
+                 isSynced <- checkBlocksFullySynced
+                 when isSynced newCandidateBlockChainTip
+                 if (_nodeType node == NC.Master)
+                     then do
+                         withAsync (initializeWorkers node normalizedClstr) $ \_ -> do
+                             withAsync setupSeedPeerConnection $ \_ -> do
+                                 withAsync runEgressChainSync $ \_ -> do
+                                     withAsync runBlockCacheQueue $ \_ -> do
+                                         withAsync (handleNewConnectionRequest epHandler) $ \_ -> do
+                                             withAsync runPeerSync $ \_ -> do
+                                                 withAsync runSyncStatusChecker $ \_ -> do
+                                                     withAsync runEpochSwitcher $ \z -> do
+                                                         _ <- LA.wait z
+                                                         return ()
+                     else LA.wait y)
         liftIO $ putStrLn $ "node recovering from fatal DB connection failure!"
     return ()
 
@@ -174,16 +173,16 @@ runSyncStatusChecker = do
                 then "Yes"
                 else "No"
         when isSynced $ do
-                let candidateBlocksTsh = candidateBlocks bp2pEnv
-                bestBlock <- fetchBestBlock
-                let bhash = headerHash $ nodeHeader bestBlock
-                    ht = nodeHeight bestBlock
-                candidateBlock <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
-                case candidateBlock of
-                    Nothing -> do
-                        liftIO $ print $ "Sync status: Added new candidate block over " ++ show (bhash,ht)
-                        newCandidateBlock bhash ht
-                    _ -> return ()
+            let candidateBlocksTsh = candidateBlocks bp2pEnv
+            bestBlock <- fetchBestBlock
+            let bhash = headerHash $ nodeHeader bestBlock
+                ht = nodeHeight bestBlock
+            candidateBlock <- liftIO $ TSH.lookup (candidateBlocks bp2pEnv) bhash
+            case candidateBlock of
+                Nothing -> do
+                    liftIO $ print $ "Sync status: Added new candidate block over " ++ show (bhash, ht)
+                    newCandidateBlock bhash ht
+                _ -> return ()
         --        else return Nothing
         liftIO $ print $ "Sync status: " ++ show isSynced
         liftIO $ CMS.atomically $ writeTVar (indexUnconfirmedTx bp2pEnv) isSynced
@@ -202,8 +201,9 @@ defBitcoinP2P :: NodeConfig -> IO BitcoinP2P
 defBitcoinP2P nodeCnf = do
     coinbaseAddress <-
         case stringToAddr (bitcoinNetwork nodeCnf) (DT.pack $ coinbaseTxAddress nodeCnf) of
-            Nothing -> 
-                P.error "Invalid supplied coinbase address\nPossible fix: Add valid address in coinbaseTxAddress field in node-config.yaml"
+            Nothing ->
+                P.error
+                    "Invalid supplied coinbase address\nPossible fix: Add valid address in coinbaseTxAddress field in node-config.yaml"
             Just a -> return a
     g <- newTVarIO M.empty
     bp <- newTVarIO M.empty
