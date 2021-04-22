@@ -17,6 +17,7 @@ import Control.Concurrent.STM
 import Control.Exception
 import Control.Exception.Lifted as LE
 import Data.ByteString
+import Data.ByteString.Char8 as BC
 import Data.Int
 import Data.Maybe
 import Data.Serialize
@@ -24,8 +25,7 @@ import qualified Data.Serialize as DS (encode)
 import qualified Data.Text as DT
 import Data.Time.Clock
 import Data.Time.Clock.POSIX
-import Data.UUID
-import qualified Data.UUID as UUID (fromString)
+import Data.Time.Format.ISO8601.Compat (formatShow, iso8601Format)
 import Data.Word
 import Data.Yaml
 import qualified Database.Bolt as BT
@@ -57,30 +57,44 @@ import Text.Show
 import Xoken
 import qualified Xoken.NodeConfig as NC
 
-submitTransaction :: (HasXokenNodeEnv env m, MonadIO m) => ByteString -> m ()
+data SubmitTransactionException
+    = DecodeException
+    | ValidationException
+    deriving (Show, Eq)
+
+instance Exception SubmitTransactionException
+
+submitTransaction :: (HasXokenNodeEnv env m, MonadIO m) => ByteString -> m (String, String, String, String, String, Int)
 submitTransaction rawTx = do
     lg <- getLogger
     bp2pEnv <- getBitcoinP2P
     case runGetState (getConfirmedTx) (rawTx) 0 of
-        Left e -> return ()
+        Left e -> do
+            err lg $
+                LG.msg $
+                BC.pack $ "[ERROR] Failed to decode raw transaction (submitTransaction/merchant API): " ++ (show e)
+            throw DecodeException
         Right res ->
             case fst res of
                 Just tx -> do
                     res <- LE.try $ zRPCDispatchUnconfirmedTxValidate processUnconfTransaction tx
                     case res of
-                        Right (depTxHashes) -> do
+                        Right depTxHashes -> do
+                            tm <- liftIO $ getCurrentTime
+                            bestBlock <- fetchBestBlock
+                            let timeStamp = formatShow iso8601Format tm
+                                txId = DT.unpack $ txHashToHex $ txHash tx
+                                bestBlockHash = DT.unpack $ blockHashToHex $ headerHash $ nodeHeader bestBlock
+                                bestBlockHeight = fromIntegral $ nodeHeight bestBlock
                             candBlks <- liftIO $ TSH.toList (candidateBlocks bp2pEnv)
-                            let candBlkHashes = fmap (fst) candBlks
-                            addTxCandidateBlocks (txHash tx) candBlkHashes depTxHashes
-                        Left TxIDNotFoundException -> do
-                            return ()
-                            --throw TxIDNotFoundException
-                        Left KeyValueDBInsertException -> do
-                            err lg $ LG.msg $ val "[ERROR] KeyValueDBInsertException"
-                            throw KeyValueDBInsertException
-                        Left e -> do
-                            err lg $ LG.msg ("[ERROR] Unhandled exception!" ++ show e)
-                            throw e
-                    return ()
-                Nothing -> return ()
-    return ()
+                            addTxCandidateBlocks (txHash tx) (fst <$> candBlks) depTxHashes
+                            return (timeStamp, txId, "success", "", bestBlockHash, bestBlockHeight)
+                        Left (e :: SomeException) -> do
+                            err lg $
+                                LG.msg
+                                    ("[ERROR] Exception while processing unconfirmed transaction (submitTransaction/merchant API):" ++
+                                     show e)
+                            throw ValidationException
+                Nothing -> do
+                    err lg $ LG.msg $ BC.pack $ "[ERROR] Empty raw transaction (submitTransaction/merchant API)"
+                    throw DecodeException

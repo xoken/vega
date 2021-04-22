@@ -15,7 +15,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Identity
 import Control.Monad.State.Class
-import qualified Data.Aeson as Aeson
+import qualified Data.Aeson as A
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Char8 as S
@@ -45,12 +45,23 @@ import qualified Xoken.NodeConfig as NC
 -- API functions
 submitTransaction' :: MerchantApiReqParams -> Handler App App ()
 submitTransaction' (SubmitTransactionRequest rawTx) = do
-    res <- submitTransaction rawTx
-    return ()
+    res <- LE.try $ submitTransaction rawTx
+    case res of
+        Left DecodeException -> do
+            modifyResponse $ setResponseStatus 400 "Bad Request"
+            writeBS "Incorrectly encoded raw transaction"
+        Left ValidationException -> do
+            modifyResponse $ setResponseStatus 500 "Internal Server Error"
+            writeBS "INTERNAL_SERVER_ERROR"
+        Right (timeStamp, txId, result, resultDesc, bestBlockHash, bestBlockHeight) -> do
+            writeBS $
+                BSL.toStrict $
+                A.encode $
+                SubmitTransactionResponse "v1" timeStamp txId result resultDesc "0" bestBlockHash bestBlockHeight "null"
 submitTransaction' _ = throwBadRequest
 
 -- Helper functions
-withReq :: Aeson.FromJSON a => (a -> Handler App App ()) -> Handler App App ()
+withReq :: A.FromJSON a => (a -> Handler App App ()) -> Handler App App ()
 withReq handler = do
     rq <- getRequest
     let ct = getHeader "content-type" rq <|> (getHeader "Content-Type" rq) <|> (getHeader "Content-type" rq)
@@ -64,7 +75,7 @@ withReq handler = do
                     modifyResponse $ setResponseStatus 400 "Bad Request"
                     writeBS $ BC.pack $ "Error: failed to read request body (" <> (show e) <> ")"
                 Right req ->
-                    case Aeson.eitherDecode req of
+                    case A.eitherDecode req of
                         Right r -> handler r
                         Left err -> do
                             modifyResponse $ setResponseStatus 400 "Bad Request"

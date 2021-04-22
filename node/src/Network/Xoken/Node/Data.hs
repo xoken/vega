@@ -176,7 +176,7 @@ data MerchantApiResponseBody =
         , stResultDescription :: String
         , stMinerId :: String
         , stCurrentHighestBlockHash :: String
-        , stCurrentHighestBlockHeight :: String
+        , stCurrentHighestBlockHeight :: Int
         , stConflictedWith :: String
         }
     deriving (Generic, Show, Hashable, Eq, Serialize)
